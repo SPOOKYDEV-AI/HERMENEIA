@@ -361,6 +361,7 @@ export class PostgresMessagingRepository {
            ON d.user_id = cm.user_id
           AND d.status = 'ACTIVE'
           AND d.device_id <> $3
+          AND length(d.public_material_ref) > 0
         WHERE cm.tenant_id = $1
           AND cm.conversation_id = $2
           AND cm.status = 'ACTIVE'
@@ -374,12 +375,16 @@ export class PostgresMessagingRepository {
         userId: row.user_id,
         devices: [],
       };
-      if (row.device_id && row.credential_version !== null) {
+      if (
+        row.device_id &&
+        row.credential_version !== null &&
+        row.public_material_ref
+      ) {
         target.devices.push({
           userId: row.user_id,
           deviceId: row.device_id,
           credentialVersion: Number(row.credential_version),
-          publicMaterialRef: row.public_material_ref ?? "",
+          publicMaterialRef: row.public_material_ref,
         });
       }
       targets.set(row.user_id, target);
