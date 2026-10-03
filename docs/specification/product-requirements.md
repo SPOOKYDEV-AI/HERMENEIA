@@ -54,6 +54,8 @@ An administrator may operate the system and inspect technical metrics, but admin
 - scoped professional/domain terminology with tenant/project glossary precedence;
 - locale- and region-aware target formulation;
 - dynamic conversation style profiling from the first exchanges with confidence and ongoing updates;
+- provenance-aware memory and reversible context derivation;
+- user correction/edit/delete propagation through derived context;
 - user feedback;
 - T0/T1/T2 evaluation;
 - technical metrics and failure visibility.
@@ -234,6 +236,14 @@ The MVP is not considered complete until the following are demonstrated:
 28. Low-confidence regional inference falls back to neutral natural wording.
 29. Style adaptation changes formulation without changing semantic meaning.
 30. Regional variants can be represented below country level where useful.
+31. Every durable derived claim used for context has provenance and authority metadata.
+32. Repeated summaries cannot promote an inference into an explicit fact.
+33. A user correction invalidates the affected inference for future context.
+34. Message edits invalidate dependent derived state.
+35. Message deletion cannot allow stale workers/caches to recreate deleted context.
+36. Previous translations are never treated as primary semantic evidence.
+37. Stale async workers cannot overwrite a newer Context State.
+38. Derived Context State can be rebuilt from authorised durable sources.
 
 ## 17. Responsiveness and incremental understanding
 
