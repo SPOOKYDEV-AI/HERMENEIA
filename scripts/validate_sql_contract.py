@@ -15,6 +15,7 @@ MIGRATION = ROOT / "db/migrations/0001_core_messaging.sql"
 SESSION_MIGRATION = ROOT / "db/migrations/0002_session_access_credential.sql"
 RUNTIME_MIGRATION = ROOT / "db/migrations/0003_runtime_alignment.sql"
 COMMAND_MIGRATION = ROOT / "db/migrations/0004_command_fingerprint.sql"
+COMMAND_MIGRATION = ROOT / "db/migrations/0004_command_fingerprint.sql"
 
 REQUIRED_TABLES = {
     "users",
