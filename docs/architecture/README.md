@@ -135,7 +135,7 @@ A resource ID is not proof of authorization.
 
 ## Context Engine
 
-The Context Engine is specified in [Context Engine V1](context-engine-v1.md), with pragmatic/emoji handling defined in [Pragmatics, Emotion Signals and Emoji — V1](pragmatics-affect-v1.md) and informal-language resolution defined in [Colloquial Language, Acronyms and SMS Resolver — V1](colloquial-language-v1.md), professional terminology defined in [Domain Terminology and Jargon Resolver — V1](domain-terminology-v1.md), and locale/style adaptation defined in [Locale and Conversation Style Engine — V1](locale-style-v1.md), derived-memory correctness defined in [Context Integrity, Provenance and Memory Safety — V1](context-integrity-v1.md), no-retention/corrective learning defined in [Ephemeral Message and Corrective Memory Model — V1](ephemeral-message-memory-v1.md), crash recovery defined in [Sanitised Recovery Checkpoint — V1](recovery-checkpoint-v1.md), long-message latency optimisation defined in [Progressive Long-Message Translation — V1](progressive-long-message-v1.md), and typing/edit fluidity rules defined in [Draft Stability and Reversible Speculation — V1](draft-stability-v1.md), and mobile/network behaviour defined in [Mobile Network and Performance Architecture — V1](mobile-network-performance-v1.md).
+The Context Engine is specified in [Context Engine V1](context-engine-v1.md), with pragmatic/emoji handling defined in [Pragmatics, Emotion Signals and Emoji — V1](pragmatics-affect-v1.md) and informal-language resolution defined in [Colloquial Language, Acronyms and SMS Resolver — V1](colloquial-language-v1.md), professional terminology defined in [Domain Terminology and Jargon Resolver — V1](domain-terminology-v1.md), and locale/style adaptation defined in [Locale and Conversation Style Engine — V1](locale-style-v1.md), derived-memory correctness defined in [Context Integrity, Provenance and Memory Safety — V1](context-integrity-v1.md), no-retention/corrective learning defined in [Ephemeral Message and Corrective Memory Model — V1](ephemeral-message-memory-v1.md), crash recovery defined in [Sanitised Recovery Checkpoint — V1](recovery-checkpoint-v1.md), experimental long-message latency optimisation defined in [Progressive Long-Message Translation — Experimental](progressive-long-message-v1.md), and typing/edit fluidity rules defined in [Draft Stability and Reversible Speculation — V1](draft-stability-v1.md), and mobile/network behaviour defined in [Mobile Network and Performance Architecture — V1](mobile-network-performance-v1.md).
 
 Its latency model is intentionally incremental: expensive enrichment prepares the next translation asynchronously, while the fast path uses versioned prepared state plus any recent messages that have not yet been processed.
 
@@ -160,6 +160,7 @@ Relevant foundation ADRs:
 - [ADR-0013 — Draft speculation uses reversible stability, not predicted user intent](adr/0013-reversible-draft-stability.md)
 - [ADR-0014 — Mobile-network-first adaptive transport and client orchestration](adr/0014-mobile-network-first-adaptive-transport.md)
 - [ADR-0015 — Messaging parity is a product prerequisite; contextual translation is the differentiator](adr/0015-messaging-parity-contextual-translation.md)
+- [ADR-0016 — Durable acceptance, source ownership and causal publication](adr/0016-durable-acceptance-source-ownership-causal-publication.md)
 
 ## Privacy architecture
 
@@ -196,3 +197,15 @@ One source message may later produce multiple recipient-specific translations, e
 Messaging interaction quality is treated as a prerequisite. HERMENEIA's differentiated architecture remains the Context/Memory/Translation system rather than unrelated social-network feature breadth.
 
 See [Product North Star — Global Messaging First](../specification/product-north-star.md).
+
+
+## Canonical execution contracts
+
+The current execution-level contracts are:
+
+- [Delivery Contract — V1](delivery-contract-v1.md);
+- [Data Lifecycle — V1](data-lifecycle-v1.md);
+- [Device Trust and Delivery Envelope Security — V1](../security/device-trust-v1.md);
+- [Implementation Scope — V1](../specification/implementation-scope-v1.md).
+
+These documents reconcile older design language. In particular, durable acceptance is independent of translation, the Core does not own durable plaintext history by default, recovery is explicitly partial when sources have expired, and causal publication/erasure epochs guard stale workers and checkpoints.
