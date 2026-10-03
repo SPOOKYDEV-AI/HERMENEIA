@@ -217,6 +217,11 @@ CREATE TABLE delivery_envelopes (
     REFERENCES devices(device_id, user_id),
   CHECK (expires_at > created_at),
   CHECK (
+    (status = 'ACKED' AND acked_at IS NOT NULL)
+    OR
+    (status <> 'ACKED' AND acked_at IS NULL)
+  ),
+  CHECK (
     (rendition_type = 'ORIGINAL' AND translation_id IS NULL)
     OR
     (rendition_type = 'TRANSLATION' AND translation_id IS NOT NULL)
@@ -264,7 +269,7 @@ CREATE INDEX device_inbox_events_event_time_idx
 
 CREATE TABLE outbox_jobs (
   job_id uuid PRIMARY KEY,
-  tenant_id uuid,
+  tenant_id uuid NOT NULL,
   job_type text NOT NULL,
   business_key text NOT NULL,
   payload_ref jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -276,7 +281,8 @@ CREATE TABLE outbox_jobs (
   attempt_count integer NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
   created_at timestamptz NOT NULL DEFAULT now(),
   completed_at timestamptz,
-  UNIQUE (job_type, business_key)
+  UNIQUE (tenant_id, job_type, business_key),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id)
 );
 
 CREATE INDEX outbox_jobs_available_idx
