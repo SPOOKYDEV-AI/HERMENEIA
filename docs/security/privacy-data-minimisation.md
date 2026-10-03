@@ -282,7 +282,23 @@ Therefore:
 - sensitive inferred claims should not be promoted to durable memory by default;
 - conversation text cannot grant itself policy/glossary authority.
 
-## 19. Engineering acceptance criteria
+## 19. Unsent draft privacy
+
+Unsent drafts are more sensitive than sent messages because the user has not yet chosen to communicate them.
+
+Progressive long-message translation therefore requires:
+
+- local sentence/paragraph boundary detection;
+- no per-keystroke server streaming;
+- policy/tenant permission before draft fragments leave the client;
+- ephemeral fragment/result storage only;
+- purge on send/discard/logout/timeout/conversation switch;
+- no durable Conversation State, CorrectionMemory, analytics text or training reuse from unsent drafts;
+- no recipient visibility before final Send/reconciliation.
+
+Enterprise tenants may disable speculative draft processing entirely.
+
+## 20. Engineering acceptance criteria
 
 Privacy minimisation is not considered implemented until tests/metrics can show that:
 

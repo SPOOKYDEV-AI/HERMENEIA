@@ -57,6 +57,7 @@ An administrator may operate the system and inspect technical metrics, but admin
 - provenance-aware memory and reversible context derivation;
 - correction-triggered context updates with no random durable self-learning;
 - sanitised recovery checkpoints for automatic context recovery without raw-history replay;
+- progressive translation of stable fragments for long messages, with final reconciliation before delivery;
 - user feedback;
 - T0/T1/T2 evaluation;
 - technical metrics and failure visibility.
@@ -256,6 +257,13 @@ The MVP is not considered complete until the following are demonstrated:
 44. A sanitised RecoveryCheckpoint can restore useful validated context without storing a transcript.
 45. Recovery checkpoints remain bounded and exclude weak hypotheses by default.
 46. Corrupt/incompatible checkpoints fall back to partial or clean recovery without blocking messaging.
+47. Stable long-message fragments can be pretranslated under allowed privacy/tenant policy.
+48. No speculative draft fragment is ever delivered before Send.
+49. Draft edits invalidate speculative output by revision/hash.
+50. Final message-level reconciliation occurs before recipient delivery.
+51. Speculative translation failure never blocks normal Send.
+52. Abandoned draft content/results are purged and never create durable memory.
+53. Progressive translation measurably reduces send-to-ready latency for long messages.
 
 ## 17. Responsiveness and incremental understanding
 

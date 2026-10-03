@@ -491,8 +491,8 @@ V1 does not require:
 - custom translation model training;
 - distributed context microservices;
 - a dedicated vector database;
-- speculative generation before a user sends a message;
-- keystroke capture for pre-translation.
+- uncontrolled keystroke streaming to the server;
+- delivery of speculative draft translations before Send.
 
 The engine should first prove that incremental, temporal context selection improves translation under controlled measurement.
 
@@ -519,3 +519,10 @@ In particular:
 Context Engine V1 follows [Ephemeral Message and Corrective Memory Model — V1](ephemeral-message-memory-v1.md) and [Sanitised Recovery Checkpoint — V1](recovery-checkpoint-v1.md).
 
 The Core keeps raw content only within a bounded transient window required for immediate context, retries and repair detection. Durable learning is event-driven. After failure/restart, validated structured state is restored from a sanitised recovery checkpoint; missing nuance is relearned from new messages rather than fabricated.
+
+
+## 28. Progressive long-message translation
+
+Long-message optimisation follows [Progressive Long-Message Translation — V1](progressive-long-message-v1.md).
+
+Draft segmentation happens client-side. Only stable sentence/paragraph fragments may be translated speculatively under allowed policy. Draft content never updates durable Conversation State before Send, and speculative output is never deliverable until final reconciliation.
