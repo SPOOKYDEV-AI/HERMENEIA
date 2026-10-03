@@ -65,6 +65,11 @@ The corpus should cover at least:
 - project/tenant glossary precedence;
 - terminology consistency across multiple messages;
 - preserve-vs-translate terminology policy;
+- country and sub-country locale variants;
+- formal/informal formulation differences;
+- first-message style bootstrap;
+- mid-conversation style shifts;
+- explicit locale preference overriding inference;
 - code-switching and mixed-language messages;
 - typos/phonetic spellings where meaning remains recoverable.
 
