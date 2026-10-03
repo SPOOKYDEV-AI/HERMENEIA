@@ -692,3 +692,42 @@ test("short source text is accepted when the digest is cryptographic", async () 
 
   assert.equal(accepted.status, "ACCEPTED");
 });
+
+test("transient source key collision never overwrites admitted source", () => {
+  const store = new BoundedTransientSourceStore({
+    clock: {
+      now() {
+        return "2026-10-03T22:20:00.000Z";
+      },
+    },
+    maxEntries: 10,
+    maxTotalChars: 1000,
+  });
+
+  store.put({
+    messageId: "message-collision",
+    sourceRevision: 1,
+    sourceHash: "first-hash",
+    source: { text: "first source" },
+    storedAt: "2026-10-03T22:20:00.000Z",
+    expiresAt: "2026-10-03T22:25:00.000Z",
+  });
+
+  assert.throws(
+    () =>
+      store.put({
+        messageId: "message-collision",
+        sourceRevision: 1,
+        sourceHash: "second-hash",
+        source: { text: "second source" },
+        storedAt: "2026-10-03T22:20:01.000Z",
+        expiresAt: "2026-10-03T22:25:00.000Z",
+      }),
+    /key already exists/,
+  );
+
+  assert.equal(
+    store.get("message-collision", 1).source.text,
+    "first source",
+  );
+});
