@@ -82,7 +82,11 @@ The corpus should cover at least:
 - recovery from a valid sanitised checkpoint;
 - corrupt/incompatible checkpoint fallback;
 - vague translation complaint vs explicit correction;
-- transient-buffer expiry during an active conversation.
+- transient-buffer expiry during an active conversation;
+- long multi-paragraph messages with progressive translation;
+- edits that invalidate previously speculated paragraphs;
+- abandoned drafts;
+- final reconciliation quality versus full post-Send translation.
 
 ## Metrics
 
@@ -114,7 +118,11 @@ Record:
 - context token count;
 - retrieval candidate count;
 - selected item count;
-- fallback/error rate.
+- fallback/error rate;
+- send-to-translation-ready latency;
+- speculative fragment reuse rate;
+- speculative invalidation rate;
+- abandoned speculative work/cost.
 
 ## Experimental discipline
 
@@ -163,3 +171,24 @@ Required scenarios include:
 Does T2 improve contextual translation quality enough to justify its extra latency, complexity and token cost relative to T0 and T1?
 
 A negative result is still useful evidence.
+
+
+## Progressive long-message evaluation
+
+For long messages, compare at least:
+
+- **L0:** translate entire final message only after Send;
+- **L1:** progressively translate stable fragments, then reconcile at Send.
+
+Evaluate:
+
+- final semantic fidelity;
+- terminology consistency;
+- cross-paragraph reference consistency;
+- tone/style consistency;
+- send-to-ready latency;
+- total provider cost;
+- wasted speculative work;
+- recipient-visible error rate.
+
+Progressive translation is successful only if it reduces perceived latency without degrading final quality or privacy guarantees.
