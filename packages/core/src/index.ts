@@ -211,6 +211,26 @@ export class InMemoryMessagingCore {
       return previous.accepted;
     }
 
+    const externalMembers = [...conversation.members].filter(
+      (userId) => userId !== actor.userId,
+    );
+    const unavailableRecipient =
+      externalMembers.length < 1 ||
+      externalMembers.some(
+        (userId) =>
+          ![...this.devices.values()].some(
+            (device) =>
+              device.userId === userId &&
+              device.status === "ACTIVE",
+          ),
+      );
+    if (unavailableRecipient) {
+      throw new DomainError(
+        "RECIPIENT_UNAVAILABLE",
+        "At least one active recipient has no deliverable device",
+      );
+    }
+
     const now = this.deps.clock.now();
     const messageId = this.deps.ids.next("msg");
     const messageSeq = conversation.nextMessageSeq;
