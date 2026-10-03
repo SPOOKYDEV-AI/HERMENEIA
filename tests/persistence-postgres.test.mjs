@@ -421,6 +421,7 @@ test("recipient delivery plan preserves sender secondary devices and exposes rec
   const sql = connection.queries[1];
   assert.match(sql.text, /LEFT JOIN devices/);
   assert.match(sql.text, /d\.device_id <> \$3/);
+  assert.match(sql.text, /length\(d\.public_material_ref\) > 0/);
   assert.deepEqual(sql.params, [
     "tenant-1",
     "conversation-1",
