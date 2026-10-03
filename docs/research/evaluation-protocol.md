@@ -216,3 +216,37 @@ Required edit traces include:
 - press Send while stale speculative requests are still in flight.
 
 The final translation must match the final draft, never an earlier revision.
+
+
+## Mobile/network performance evaluation
+
+Translation quality measurements must be complemented by degraded-network tests.
+
+Minimum profiles:
+
+    Wi-Fi baseline
+    RTT 50 / 150 / 500 / 1000 ms
+    bandwidth 64 / 256 / 1000 Kbit/s
+    jitter
+    packet loss 1 / 5 / 10 %
+    timeout
+    TCP reset
+    5s / 30s disconnect
+    Wi-Fi -> cellular transition
+    cellular -> Wi-Fi transition
+    connected network with unreachable HERMENEIA endpoint
+    provider 429 / 5xx / timeout
+    app background / kill / relaunch
+
+For each profile record:
+
+    send_to_ready_ms
+    bytes_up/down
+    retries
+    reconnects
+    duplicate/lost message count
+    speculative work reuse/waste
+    outbox recovery time
+    recovery mode
+
+Fault-injection tools such as Toxiproxy and container netem/Pumba may be used in reproducible integration tests.
