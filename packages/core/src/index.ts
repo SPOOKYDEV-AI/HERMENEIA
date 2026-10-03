@@ -175,6 +175,7 @@ export class InMemoryMessagingCore {
       command.client_message_id,
       sourceFingerprint,
       command.reply_to_message_id ?? "",
+      command.client_authored_at ?? "",
     ].join("|");
 
     const priorCommand = this.getExistingCommandResult(
@@ -196,6 +197,7 @@ export class InMemoryMessagingCore {
       command.conversation_id,
       sourceFingerprint,
       command.reply_to_message_id ?? "",
+      command.client_authored_at ?? "",
     ].join("|");
 
     const previous = this.dedupe.get(dedupeKey);
