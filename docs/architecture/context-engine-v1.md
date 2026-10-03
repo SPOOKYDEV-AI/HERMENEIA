@@ -526,3 +526,10 @@ The Core keeps raw content only within a bounded transient window required for i
 Long-message optimisation follows [Progressive Long-Message Translation — V1](progressive-long-message-v1.md).
 
 Draft segmentation happens client-side. Only stable sentence/paragraph fragments may be translated speculatively under allowed policy. Draft content never updates durable Conversation State before Send, and speculative output is never deliverable until final reconciliation.
+
+
+## 29. Reversible draft stability
+
+Draft speculation follows [Draft Stability and Reversible Speculation — V1](draft-stability-v1.md).
+
+The Context Engine never assumes that a user has definitively completed an idea before Send. It accepts only exact-valid stable fragment snapshots, discards stale revisions, and treats draft edit history/cursor behaviour as client-local operational signals rather than durable context.
