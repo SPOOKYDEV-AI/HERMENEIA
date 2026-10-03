@@ -382,3 +382,27 @@ test("client_message_id cannot be reused for another conversation or reply seman
 
   assert.equal(core.getMessageCount(), 1);
 });
+
+
+test("client_message_id cannot be reused with a different client authored timestamp", async () => {
+  const core = createCore();
+
+  await core.sendMessage(actor, {
+    ...command("same source"),
+    client_authored_at: "2026-10-03T19:19:00.000Z",
+  });
+
+  await assert.rejects(
+    () =>
+      core.sendMessage(actor, {
+        ...command("same source"),
+        command_id: "cmd-other-client-time",
+        client_authored_at: "2026-10-03T19:19:01.000Z",
+      }),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "IDEMPOTENCY_CONFLICT",
+  );
+
+  assert.equal(core.getMessageCount(), 1);
+});
