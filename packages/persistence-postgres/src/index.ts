@@ -33,6 +33,7 @@ export interface ExistingMessageAcceptance {
   messageSeq: number;
   acceptedAt: string;
   originalSourceHash: string | null;
+  acceptedResult: Record<string, unknown> | null;
 }
 
 export interface CommandReceiptRow {
@@ -242,18 +243,31 @@ export class PostgresMessagingRepository {
       message_seq: number;
       accepted_at: string;
       source_hash: string | null;
+      accepted_result: Record<string, unknown> | null;
     }>(
       `SELECT mm.message_id,
               mm.conversation_id,
               mm.reply_to_message_id,
               mm.message_seq,
               mm.accepted_at::text AS accepted_at,
-              mr.source_hash
+              mr.source_hash,
+              original_receipt.result_ref AS accepted_result
          FROM message_metadata mm
          JOIN message_revisions mr
            ON mr.tenant_id = mm.tenant_id
           AND mr.message_id = mm.message_id
           AND mr.revision = 1
+         LEFT JOIN LATERAL (
+           SELECT cr.result_ref
+             FROM command_receipts cr
+            WHERE cr.tenant_id = mm.tenant_id
+              AND cr.actor_user_id = mm.author_user_id
+              AND cr.command_type = 'message.send'
+              AND cr.status = 'SUCCEEDED'
+              AND cr.result_ref->>'message_id' = mm.message_id::text
+            ORDER BY cr.created_at
+            LIMIT 1
+         ) original_receipt ON TRUE
         WHERE mm.tenant_id = $1
           AND mm.author_user_id = $2
           AND mm.client_message_id = $3`,
@@ -268,6 +282,7 @@ export class PostgresMessagingRepository {
           messageSeq: Number(row.message_seq),
           acceptedAt: row.accepted_at,
           originalSourceHash: row.source_hash,
+          acceptedResult: row.accepted_result,
         }
       : undefined;
   }
