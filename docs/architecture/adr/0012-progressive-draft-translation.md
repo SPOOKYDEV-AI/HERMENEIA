@@ -1,6 +1,6 @@
 # ADR-0012 — Progressive draft translation for long messages
 
-**Status:** Accepted  
+**Status:** Accepted as experimental design — not a Core V1 gate  
 **Date:** 2026-10-03
 
 ## Context
@@ -124,3 +124,8 @@ Abandoned speculative work is purged and never used as training data by HERMENEI
 ## Revisit when
 
 Revisit if measurements show that speculative translation costs more than its UX benefit, or if on-device translation becomes capable enough to eliminate server-side draft exposure for common language pairs.
+
+
+## Implementation scope note
+
+This ADR remains a valid research/design direction, but [Implementation Scope — V1](../../specification/implementation-scope-v1.md) classifies progressive pre-Send translation as experimental. It must not delay the reliable messaging, delivery, translation-baseline or minimal T2 milestones.
