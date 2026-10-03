@@ -18,6 +18,7 @@ export interface RecipientDevice {
   userId: UUID;
   deviceId: UUID;
   credentialVersion: number;
+  publicMaterialRef: string;
 }
 
 export interface RecipientDeliveryTarget {
@@ -232,10 +233,12 @@ export class PostgresMessagingRepository {
       user_id: UUID;
       device_id: UUID | null;
       credential_version: number | null;
+      public_material_ref: string | null;
     }>(
       `SELECT cm.user_id,
               d.device_id,
-              d.credential_version
+              d.credential_version,
+              d.public_material_ref
          FROM conversation_members cm
          JOIN tenant_memberships tm
            ON tm.tenant_id = cm.tenant_id
@@ -263,6 +266,7 @@ export class PostgresMessagingRepository {
           userId: row.user_id,
           deviceId: row.device_id,
           credentialVersion: Number(row.credential_version),
+          publicMaterialRef: row.public_material_ref ?? "",
         });
       }
       targets.set(row.user_id, target);
