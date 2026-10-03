@@ -124,6 +124,7 @@ The project is intentionally defining its contracts, architecture and evaluation
 - [Client Local Outbox & Sync Engine — V1 Slice](docs/engineering/client-outbox-sync-v1.md)
 - [Message Mutations & Command Recovery — V1 Slice](docs/engineering/message-mutations-command-recovery-v1.md)
 - [PostgreSQL Core Schema — V1](docs/engineering/postgres-core-schema-v1.md)
+- [PostgreSQL Persistence Ports — V1](docs/engineering/postgres-persistence-ports-v1.md)
 - [Privacy and data minimisation](docs/security/privacy-data-minimisation.md)
 - [Ephemeral messages and corrective memory](docs/architecture/ephemeral-message-memory-v1.md)
 - [Sanitised recovery checkpoints](docs/architecture/recovery-checkpoint-v1.md)
