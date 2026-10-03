@@ -12,7 +12,10 @@ Current checks:
 - Python research/test sources compile;
 - pilot corpus invariants validate;
 - evaluation harness unit tests pass;
-- T0/T1/T2_ORACLE validation baselines execute without causal leakage.
+- T0/T1/T2_ORACLE validation baselines execute without causal leakage;
+- TypeScript core contracts typecheck;
+- executable core builds;
+- messaging invariant tests pass with the AI dispatcher down.
 
 This does **not** mean GitHub-hosted CI is permanently forbidden.
 
