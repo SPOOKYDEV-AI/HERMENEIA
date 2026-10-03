@@ -7,18 +7,28 @@
 
 Understand professional jargon in context and preserve the correct domain-specific meaning across languages.
 
-## 2. Resolution hierarchy
+## 2. Resolution policy
 
-Default lookup order:
+Do not collapse scope, authority and confidence into one ranking.
 
-    conversation lexical memory
-    project/team glossary
-    tenant glossary
-    active-domain glossary
-    generic colloquial lexicon
-    model inference
+Resolve in this order:
 
-Earlier scopes have priority when confidence is sufficient.
+1. **authorisation/policy admissibility** — is this source allowed to influence this operation?
+2. **source authority** — approved glossary/correction vs inferred working state;
+3. **scope relevance** — conversation, project/team, tenant, domain, generic;
+4. **temporal validity** — is the assertion still valid?
+5. **confidence** — only among otherwise admissible inferred candidates.
+
+A high-confidence conversation inference must never override an approved project/tenant glossary outside an explicitly authorised correction scope.
+
+Typical admissible lookup sources:
+
+    explicit conversation correction
+    approved project/team glossary
+    approved tenant glossary
+    approved domain glossary
+    generic lexicon
+    ephemeral model inference
 
 ## 3. Glossary entry
 
@@ -118,11 +128,11 @@ Possible conflict:
     team glossary: CR = change request
     tenant glossary: CR = compte rendu
 
-The narrower scope wins by default:
+The narrower scope wins **only among sources with compatible authority and policy**.
 
-    team/project > tenant
+For approved entries, a project/team glossary can override a tenant default in that project. An ephemeral conversation inference cannot acquire the same authority merely because it is narrower or highly confident.
 
-but conflicts should be detectable and reportable.
+Conflicts must be detectable, versioned and reportable.
 
 ## 10. Fast path
 
