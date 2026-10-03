@@ -27,7 +27,9 @@
         "PROVIDER_UNAVAILABLE",
         "DELIVERY_EXPIRED",
         "INVALID_COMMAND",
-        "PAYLOAD_TOO_LARGE"
+        "PAYLOAD_TOO_LARGE",
+        "NOT_FOUND",
+        "INTERNAL_ERROR"
       ]
     },
     "message": {
