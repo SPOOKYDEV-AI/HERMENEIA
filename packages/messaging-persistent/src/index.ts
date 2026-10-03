@@ -34,6 +34,8 @@ export interface PersistentEnvelopeProtector {
     messageId: UUID;
     sourceRevision: number;
     recipientDeviceId: UUID;
+    recipientCredentialVersion: number;
+    recipientPublicMaterialRef: string;
     source: SourceContent;
   }): string;
 }
@@ -474,6 +476,8 @@ export class PersistentSendService {
               messageId: proposedMessageId,
               sourceRevision: 1,
               recipientDeviceId: device.deviceId,
+              recipientCredentialVersion: device.credentialVersion,
+              recipientPublicMaterialRef: device.publicMaterialRef,
               source: command.source,
             });
             if (!protectedPayload) {
