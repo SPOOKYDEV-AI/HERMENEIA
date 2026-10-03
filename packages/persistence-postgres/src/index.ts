@@ -49,6 +49,41 @@ export interface InboxEventRow {
   createdAt: string;
 }
 
+export type SyncCursorDecision =
+  | { kind: "CONTINUE"; afterOffset: number }
+  | { kind: "RESET_EPOCH"; currentEpoch: number }
+  | { kind: "RESET_PURGED"; minimumRecoverableOffset: number };
+
+export function evaluateSyncCursor(
+  state: {
+    inboxEpoch: number;
+    lastAckedOffset: number;
+  },
+  requested: {
+    inboxEpoch: number;
+    afterOffset: number;
+  },
+): SyncCursorDecision {
+  if (requested.inboxEpoch !== state.inboxEpoch) {
+    return {
+      kind: "RESET_EPOCH",
+      currentEpoch: state.inboxEpoch,
+    };
+  }
+
+  if (requested.afterOffset < state.lastAckedOffset) {
+    return {
+      kind: "RESET_PURGED",
+      minimumRecoverableOffset: state.lastAckedOffset,
+    };
+  }
+
+  return {
+    kind: "CONTINUE",
+    afterOffset: requested.afterOffset,
+  };
+}
+
 function first<Row extends Record<string, unknown>>(
   result: SqlQueryResult<Row>,
 ): Row | undefined {
