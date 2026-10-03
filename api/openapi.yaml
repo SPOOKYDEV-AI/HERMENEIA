@@ -746,6 +746,7 @@ components:
             - REVISION_CONFLICT
             - NOT_AUTHORIZED
             - DEVICE_REVOKED
+            - RECIPIENT_UNAVAILABLE
             - SOURCE_REQUIRED
             - SOURCE_EXPIRED
             - SOURCE_REVISION_MISMATCH
