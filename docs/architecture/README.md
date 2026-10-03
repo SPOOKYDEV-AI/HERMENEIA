@@ -135,7 +135,7 @@ A resource ID is not proof of authorization.
 
 ## Context Engine
 
-The Context Engine is specified in [Context Engine V1](context-engine-v1.md), with pragmatic/emoji handling defined in [Pragmatics, Emotion Signals and Emoji — V1](pragmatics-affect-v1.md) and informal-language resolution defined in [Colloquial Language, Acronyms and SMS Resolver — V1](colloquial-language-v1.md), and professional terminology defined in [Domain Terminology and Jargon Resolver — V1](domain-terminology-v1.md).
+The Context Engine is specified in [Context Engine V1](context-engine-v1.md), with pragmatic/emoji handling defined in [Pragmatics, Emotion Signals and Emoji — V1](pragmatics-affect-v1.md) and informal-language resolution defined in [Colloquial Language, Acronyms and SMS Resolver — V1](colloquial-language-v1.md), professional terminology defined in [Domain Terminology and Jargon Resolver — V1](domain-terminology-v1.md), and locale/style adaptation defined in [Locale and Conversation Style Engine — V1](locale-style-v1.md).
 
 Its latency model is intentionally incremental: expensive enrichment prepares the next translation asynchronously, while the fast path uses versioned prepared state plus any recent messages that have not yet been processed.
 
@@ -152,6 +152,7 @@ Relevant foundation ADRs:
 - [ADR-0005 — Pragmatic intent and affect are contextual signals, not ground truth](adr/0005-pragmatic-intent-affect-signals.md)
 - [ADR-0006 — Colloquial language is resolved contextually before translation](adr/0006-colloquial-language-contextual-resolution.md)
 - [ADR-0007 — Domain terminology is resolved with scoped, provenance-aware glossaries](adr/0007-domain-terminology-scoped-glossaries.md)
+- [ADR-0008 — Translation style and locale are dynamic contextual profiles](adr/0008-dynamic-locale-and-style-profiles.md)
 
 ## Privacy architecture
 
