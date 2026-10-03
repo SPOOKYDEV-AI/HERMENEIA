@@ -1,6 +1,6 @@
 # ADR-0013 — Draft speculation uses reversible stability, not predicted user intent
 
-**Status:** Accepted  
+**Status:** Accepted as experimental design — not a Core V1 gate  
 **Date:** 2026-10-03
 
 ## Context
@@ -159,3 +159,8 @@ Rejected because users frequently return to earlier paragraphs.
 ## Revisit when
 
 Revisit stability heuristics after measuring edit patterns, speculative reuse rate, wasted compute and send-to-ready latency on real opt-in usage.
+
+
+## Implementation scope note
+
+This ADR remains a valid research/design direction, but [Implementation Scope — V1](../../specification/implementation-scope-v1.md) classifies progressive pre-Send translation as experimental. It must not delay the reliable messaging, delivery, translation-baseline or minimal T2 milestones.
