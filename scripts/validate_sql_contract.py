@@ -15,7 +15,6 @@ MIGRATION = ROOT / "db/migrations/0001_core_messaging.sql"
 SESSION_MIGRATION = ROOT / "db/migrations/0002_session_access_credential.sql"
 RUNTIME_MIGRATION = ROOT / "db/migrations/0003_runtime_alignment.sql"
 COMMAND_MIGRATION = ROOT / "db/migrations/0004_command_fingerprint.sql"
-COMMAND_MIGRATION = ROOT / "db/migrations/0004_command_fingerprint.sql"
 
 REQUIRED_TABLES = {
     "users",
@@ -138,14 +137,35 @@ def main() -> int:
     if not runtime_sql.rstrip().endswith("COMMIT;"):
         fail("runtime alignment migration must end with COMMIT")
 
-    if "ADD COLUMN command_fingerprint text" not in command_sql:
-        fail("command migration must add command_fingerprint")
-    if "command_receipts_actor_status_idx" not in command_sql:
-        fail("command migration must index actor/status recovery")
+    command_required = [
+        "ADD COLUMN command_fingerprint text",
+        "command_receipts_actor_status_idx",
+        "command_receipts_message_result_idx",
+        "result_ref->>'message_id'",
+        "WHERE command_type = 'message.send'",
+        "AND status = 'SUCCEEDED'",
+    ]
+    for snippet in command_required:
+        if snippet not in command_sql:
+            fail(f"command migration missing invariant: {snippet}")
+
     if not command_sql.lstrip().startswith("BEGIN;"):
         fail("command migration must begin with BEGIN")
     if not command_sql.rstrip().endswith("COMMIT;"):
         fail("command migration must end with COMMIT")
+
+    command_lower = command_sql.lower()
+    for forbidden in (
+        "source_text",
+        "message_text",
+        "translated_text",
+        "prompt_text",
+        "plaintext",
+        "bearer_token",
+        "access_token",
+    ):
+        if forbidden in command_lower:
+            fail(f"command migration contains forbidden token: {forbidden}")
 
     print(
         "SQL_CONTRACT_PASS "
