@@ -1,0 +1,64 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets/
+.secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Node / frontend
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# Runtime / local data
+data/
+runtime/
+logs/
+tmp/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# Generated ML / data artifacts
+models/
+checkpoints/
+artifacts/
+datasets/private/
+datasets/raw/
+*.parquet
+
+# Test artifacts
+playwright-report/
+test-results/

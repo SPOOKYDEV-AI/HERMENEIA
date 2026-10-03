@@ -104,19 +104,20 @@ The project is intentionally defining its contracts, architecture and evaluation
 
 ## Documentation
 
-The repository documentation will cover:
-
-- product requirements;
-- architecture decisions;
-- context-engine design;
-- evaluation methodology;
-- security and privacy;
-- contribution rules;
-- dataset policy.
+- [Product requirements](docs/specification/product-requirements.md)
+- [Architecture](docs/architecture/README.md)
+- [Architecture Decision Records](docs/architecture/adr/README.md)
+- [Context evaluation protocol](docs/research/evaluation-protocol.md)
+- [Dataset policy](datasets/README.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
 
 ## Open source
 
 HERMENEIA is developed in the open to make the architecture, experiments and research reproducible and reviewable.
+
+The project is licensed under the [Apache License 2.0](LICENSE).
 
 Do **not** commit secrets, API keys, private conversation exports or non-anonymised personal datasets.
 
