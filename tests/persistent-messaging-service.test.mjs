@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 
 import { DomainError } from "../.build/packages/domain/src/index.js";
 import {
@@ -8,141 +9,12 @@ import {
 import {
   InMemoryTransientSourceStore,
 } from "../.build/packages/transient-source/src/index.js";
+import {
+  createHmacSourceFingerprinter,
+} from "../apps/api/source-fingerprint.mjs";
 
 function clone(value) {
   return structuredClone(value);
-}
-
-class TransactionalFakeStore {
-  constructor() {
-    this.state = {
-      nextMessageSeq: 1,
-      nextOpSeq: 1,
-      messages: [],
-      revisions: [],
-      envelopes: [],
-      events: [],
-      jobs: [],
-      receipts: new Map(),
-      existingByClientId: new Map(),
-      inboxOffsets: new Map(),
-    };
-    this.targets = [
-      {
-        userId: "user-a",
-        devices: [
-          {
-            userId: "user-a",
-            deviceId: "device-a2",
-            credentialVersion: 1,
-            publicMaterialRef: "pub:a2",
-          },
-        ],
-      },
-      {
-        userId: "user-b",
-        devices: [
-          {
-            userId: "user-b",
-            deviceId: "device-b",
-            credentialVersion: 1,
-            publicMaterialRef: "pub:b",
-          },
-        ],
-      },
-    ];
-    this.authorized = true;
-    this.replyExists = true;
-    this.calls = [];
-  }
-
-  async withTransaction(work) {
-    const snapshot = cloneState(this.state);
-    try {
-      return await work({ id: "tx" });
-    } catch (error) {
-      this.state = snapshot;
-      throw error;
-    }
-  }
-
-  async findCommandReceipt(_tx, actor, commandId) {
-    this.calls.push(["findCommandReceipt", commandId]);
-    return clone(this.state.receipts.get(`${actor.tenantId}:${commandId}`));
-  }
-
-  async findAcceptedMessageByClientId(_tx, actor, clientMessageId) {
-    this.calls.push(["findAcceptedMessageByClientId", clientMessageId]);
-    return clone(
-      this.state.existingByClientId.get(
-        `${actor.tenantId}:${actor.userId}:${clientMessageId}`,
-      ),
-    );
-  }
-
-  async allocateMessageAndOperationSequence(_tx, actor, conversationId) {
-    this.calls.push(["allocate", conversationId, actor.deviceId]);
-    if (!this.authorized) return undefined;
-    const result = {
-      messageSeq: this.state.nextMessageSeq,
-      opSeq: this.state.nextOpSeq,
-      membershipEpoch: 4,
-      erasureEpoch: 2,
-      policyVersion: 7,
-    };
-    this.state.nextMessageSeq += 1;
-    this.state.nextOpSeq += 1;
-    return result;
-  }
-
-  async listRecipientDeliveryTargets() {
-    this.calls.push(["targets"]);
-    return clone(this.targets);
-  }
-
-  async replyTargetExists() {
-    this.calls.push(["replyTargetExists"]);
-    return this.replyExists;
-  }
-
-  async insertMessageMetadata(_tx, input) {
-    this.state.messages.push(clone(input));
-  }
-
-  async insertMessageRevision(_tx, input) {
-    this.state.revisions.push(clone(input));
-  }
-
-  async insertDeliveryEnvelope(_tx, input) {
-    this.state.envelopes.push(clone(input));
-  }
-
-  async allocateDeviceInboxOffset(_tx, deviceId) {
-    const next = this.state.inboxOffsets.get(deviceId) ?? 1;
-    this.state.inboxOffsets.set(deviceId, next + 1);
-    return { inboxEpoch: 1, offset: next };
-  }
-
-  async insertInboxEvent(_tx, input) {
-    this.state.events.push(clone(input));
-  }
-
-  async insertOutboxJob(_tx, input) {
-    this.state.jobs.push(clone(input));
-  }
-
-  async insertCommandReceipt(_tx, input) {
-    const receipt = {
-      commandType: input.commandType,
-      commandFingerprint: input.commandFingerprint,
-      status: "SUCCEEDED",
-      result: clone(input.result),
-    };
-    this.state.receipts.set(
-      `${input.tenantId}:${input.commandId}`,
-      receipt,
-    );
-  }
 }
 
 function cloneState(state) {
@@ -167,7 +39,229 @@ function cloneState(state) {
       ]),
     ),
     inboxOffsets: new Map(state.inboxOffsets),
+    locks: clone(state.locks),
   };
+}
+
+class TransactionalFakeStore {
+  constructor({
+    authorized = true,
+    targets,
+    failAt = null,
+    failCommit = false,
+  } = {}) {
+    this.authorized = authorized;
+    this.failAt = failAt;
+    this.failCommit = failCommit;
+    this.targets = targets ?? [
+      {
+        userId: "user-a",
+        devices: [
+          {
+            userId: "user-a",
+            deviceId: "device-a2",
+            credentialVersion: 2,
+            publicMaterialRef: "pub:a2",
+          },
+        ],
+      },
+      {
+        userId: "user-b",
+        devices: [
+          {
+            userId: "user-b",
+            deviceId: "device-b1",
+            credentialVersion: 3,
+            publicMaterialRef: "pub:b1",
+          },
+          {
+            userId: "user-b",
+            deviceId: "device-b2",
+            credentialVersion: 4,
+            publicMaterialRef: "pub:b2",
+          },
+        ],
+      },
+    ];
+    this.replyTargets = new Set(["reply-ok"]);
+    this.state = {
+      nextMessageSeq: 1,
+      nextOpSeq: 1,
+      messages: [],
+      revisions: [],
+      envelopes: [],
+      events: [],
+      jobs: [],
+      receipts: new Map(),
+      existingByClientId: new Map(),
+      inboxOffsets: new Map(),
+      locks: [],
+    };
+  }
+
+  maybeFail(name) {
+    if (this.failAt === name) {
+      throw new Error(`forced store failure at ${name}`);
+    }
+  }
+
+  async withTransaction(work) {
+    const snapshot = cloneState(this.state);
+    try {
+      const result = await work({ id: "tx" });
+      if (this.failCommit) {
+        this.state = snapshot;
+        throw new Error("forced commit failure");
+      }
+      return result;
+    } catch (error) {
+      this.state = snapshot;
+      throw error;
+    }
+  }
+
+  async claimCommand(_tx, input) {
+    this.maybeFail("claimCommand");
+    const key = `${input.actor.tenantId}:${input.commandId}`;
+    const existing = this.state.receipts.get(key);
+    if (existing) {
+      return { claimed: false, existing: clone(existing) };
+    }
+
+    this.state.receipts.set(key, {
+      actorUserId: input.actor.userId,
+      actorDeviceId: input.actor.deviceId,
+      commandType: input.commandType,
+      commandFingerprint: input.commandFingerprint,
+      status: "IN_PROGRESS",
+      result: {},
+    });
+    return { claimed: true };
+  }
+
+  async lockClientMessageKey(_tx, actor, clientMessageId) {
+    this.maybeFail("lockClientMessageKey");
+    this.state.locks.push(
+      `${actor.tenantId}:${actor.userId}:${clientMessageId}`,
+    );
+  }
+
+  async findAcceptedMessageByClientId(_tx, actor, clientMessageId) {
+    this.maybeFail("findAcceptedMessageByClientId");
+    return clone(
+      this.state.existingByClientId.get(
+        `${actor.tenantId}:${actor.userId}:${clientMessageId}`,
+      ),
+    );
+  }
+
+  async allocateMessageAndOperationSequence() {
+    this.maybeFail("allocateMessageAndOperationSequence");
+    if (!this.authorized) return undefined;
+
+    const result = {
+      messageSeq: this.state.nextMessageSeq,
+      opSeq: this.state.nextOpSeq,
+      membershipEpoch: 7,
+      erasureEpoch: 2,
+      policyVersion: 11,
+    };
+    this.state.nextMessageSeq += 1;
+    this.state.nextOpSeq += 1;
+    return result;
+  }
+
+  async listRecipientDeliveryTargets() {
+    this.maybeFail("listRecipientDeliveryTargets");
+    return clone(this.targets);
+  }
+
+  async replyTargetExists(_tx, _tenantId, _conversationId, messageId) {
+    this.maybeFail("replyTargetExists");
+    return this.replyTargets.has(messageId);
+  }
+
+  async insertMessageMetadata(_tx, input) {
+    this.maybeFail("insertMessageMetadata");
+    this.state.messages.push(clone(input));
+  }
+
+  async insertMessageRevision(_tx, input) {
+    this.maybeFail("insertMessageRevision");
+    this.state.revisions.push(clone(input));
+
+    if (input.revision === 1) {
+      const metadata = this.state.messages.find(
+        (row) => row.messageId === input.messageId,
+      );
+      assert.ok(metadata);
+      this.state.existingByClientId.set(
+        `${metadata.tenantId}:${metadata.authorUserId}:${metadata.clientMessageId}`,
+        {
+          messageId: metadata.messageId,
+          conversationId: metadata.conversationId,
+          replyToMessageId: metadata.replyToMessageId ?? null,
+          messageSeq: metadata.messageSeq,
+          acceptedAt: metadata.acceptedAt,
+          clientAuthoredAt: metadata.clientAuthoredAt ?? null,
+          originalSourceHash: input.sourceHash ?? null,
+          acceptedResult: null,
+        },
+      );
+    }
+  }
+
+  async insertDeliveryEnvelope(_tx, input) {
+    this.maybeFail("insertDeliveryEnvelope");
+    this.state.envelopes.push(clone(input));
+  }
+
+  async allocateDeviceInboxOffset(_tx, deviceId) {
+    this.maybeFail("allocateDeviceInboxOffset");
+    const next = this.state.inboxOffsets.get(deviceId) ?? 1;
+    this.state.inboxOffsets.set(deviceId, next + 1);
+    return { inboxEpoch: 1, offset: next };
+  }
+
+  async insertInboxEvent(_tx, input) {
+    this.maybeFail("insertInboxEvent");
+    this.state.events.push(clone(input));
+  }
+
+  async insertOutboxJob(_tx, input) {
+    this.maybeFail("insertOutboxJob");
+    this.state.jobs.push(clone(input));
+  }
+
+  async markCommandSucceeded(_tx, input) {
+    this.maybeFail("markCommandSucceeded");
+    const key = `${input.tenantId}:${input.commandId}`;
+    const receipt = this.state.receipts.get(key);
+    if (!receipt) throw new Error("missing claimed receipt");
+    if (
+      receipt.actorUserId !== input.actorUserId ||
+      receipt.actorDeviceId !== input.actorDeviceId ||
+      receipt.commandType !== input.commandType ||
+      receipt.commandFingerprint !== input.commandFingerprint ||
+      receipt.status !== "IN_PROGRESS"
+    ) {
+      throw new Error("command claim mismatch");
+    }
+
+    receipt.status = "SUCCEEDED";
+    receipt.result = clone(input.result);
+
+    if (
+      input.commandType === "message.send" &&
+      typeof input.result.message_id === "string"
+    ) {
+      for (const existing of this.state.existingByClientId.values()) {
+        if (existing.messageId === input.result.message_id) {
+          existing.acceptedResult = clone(input.result);
+        }
+      }
+    }
+  }
 }
 
 function ids() {
@@ -180,142 +274,292 @@ function ids() {
   };
 }
 
-const actor = {
-  tenantId: "tenant-1",
-  userId: "user-a",
-  deviceId: "device-a",
-};
-
-function sendCommand({
-  text = "bonjour",
-  commandId = "cmd-1",
-  clientMessageId = "client-1",
-  replyTo = null,
-} = {}) {
+function testFingerprinter() {
+  function fingerprint(source) {
+    const canonical = JSON.stringify({
+      text: source.text,
+      language_hint: source.language_hint ?? null,
+    });
+    return `test-sha256:${createHash("sha256")
+      .update(canonical)
+      .digest("hex")}`;
+  }
   return {
-    protocol_version: 1,
-    command_id: commandId,
-    client_message_id: clientMessageId,
-    conversation_id: "conversation-1",
-    source: {
-      text,
-      language_hint: "fr-FR",
+    fingerprint,
+    matches(source, stored) {
+      return fingerprint(source) === stored;
     },
-    reply_to_message_id: replyTo,
   };
+}
+
+function createTransient(clock, options = {}) {
+  return new InMemoryTransientSourceStore({
+    clock,
+    maxEntries: options.maxEntries ?? 100,
+    maxApproxBytes: options.maxApproxBytes ?? 1024 * 1024,
+  });
 }
 
 function createService(store, overrides = {}) {
-  const transient =
+  let now = overrides.now ?? "2026-10-03T23:00:00.000Z";
+  const clock = {
+    now() {
+      return now;
+    },
+  };
+  const transientSources =
     overrides.transientSources ??
-    new InMemoryTransientSourceStore({
-      clock: {
-        now() {
-          return "2026-10-03T23:00:00.000Z";
-        },
+    createTransient(clock);
+  const protectorCalls = [];
+
+  const service = new PersistentMessagingService({
+    store,
+    ids: overrides.ids ?? ids(),
+    clock,
+    fingerprinter:
+      overrides.fingerprinter ?? testFingerprinter(),
+    envelopeProtector: overrides.envelopeProtector ?? {
+      protect(input) {
+        protectorCalls.push(clone(input));
+        return Buffer.from(
+          `TEST_ONLY:${input.recipientDeviceId}:${input.recipientCredentialVersion}`,
+          "utf8",
+        ).toString("base64");
       },
-      maxEntries: 100,
-      maxApproxBytes: 1024 * 1024,
-    });
+    },
+    transientSources,
+    envelopeTtlSeconds: 3600,
+    transientSourceTtlSeconds: 300,
+  });
 
   return {
-    transient,
-    service: new PersistentMessagingService({
-      store,
-      ids: ids(),
-      clock: {
-        now() {
-          return "2026-10-03T23:00:00.000Z";
-        },
-      },
-      fingerprinter: {
-        fingerprint(source) {
-          // TEST fake representing an opaque keyed fingerprint.
-          return `FP:${source.language_hint ?? ""}:${source.text}`;
-        },
-      },
-      envelopeProtector: overrides.envelopeProtector ?? {
-        protect({ recipientDeviceId, source }) {
-          return Buffer.from(
-            `TEST_ONLY:${recipientDeviceId}:${source.text}`,
-            "utf8",
-          ).toString("base64");
-        },
-      },
-      transientSources: transient,
-      envelopeTtlSeconds: 3600,
-      transientSourceTtlSeconds: 300,
-    }),
+    service,
+    transientSources,
+    protectorCalls,
+    setNow(value) {
+      now = value;
+    },
   };
 }
 
-test("persistent Send commits one logical message, sender secondary device, recipient delivery and plaintext-free outbox", async () => {
+const actor = {
+  tenantId: "tenant-1",
+  userId: "user-a",
+  deviceId: "device-a1",
+};
+
+function sendCommand(overrides = {}) {
+  return {
+    protocol_version: 1,
+    command_id: "cmd-1",
+    client_message_id: "client-1",
+    conversation_id: "conversation-1",
+    source: {
+      text: "Bonjour persistent world",
+      language_hint: "fr-FR",
+    },
+    ...overrides,
+  };
+}
+
+test("persistent Send commits metadata, device envelopes, inbox events and plaintext-free outbox", async () => {
   const store = new TransactionalFakeStore();
-  const { service, transient } = createService(store);
+  const { service, transientSources, protectorCalls } =
+    createService(store);
 
   const accepted = await service.sendMessage(actor, sendCommand());
 
   assert.equal(accepted.status, "ACCEPTED");
-  assert.equal(accepted.message_seq, 1);
+  assert.equal(accepted.translation_status, "PENDING");
   assert.equal(store.state.messages.length, 1);
   assert.equal(store.state.revisions.length, 1);
-  assert.equal(store.state.envelopes.length, 2);
-  assert.deepEqual(
-    store.state.envelopes.map((item) => item.recipientDeviceId).sort(),
-    ["device-a2", "device-b"],
-  );
-  assert.equal(store.state.events.length, 2);
+  assert.equal(store.state.envelopes.length, 3);
+  assert.equal(store.state.events.length, 3);
   assert.equal(store.state.jobs.length, 1);
-  assert.equal(store.state.jobs[0].payloadRef.source_buffered, true);
 
-  const serializedJob = JSON.stringify(store.state.jobs[0]);
-  assert.equal(serializedJob.includes("bonjour"), false);
+  assert.deepEqual(
+    store.state.envelopes
+      .map((row) => row.recipientDeviceId)
+      .sort(),
+    ["device-a2", "device-b1", "device-b2"],
+  );
 
-  const buffered = transient.get({
-    tenantId: "tenant-1",
+  assert.deepEqual(
+    protectorCalls
+      .map((call) => [
+        call.recipientDeviceId,
+        call.recipientCredentialVersion,
+        call.recipientPublicMaterialRef,
+      ])
+      .sort(),
+    [
+      ["device-a2", 2, "pub:a2"],
+      ["device-b1", 3, "pub:b1"],
+      ["device-b2", 4, "pub:b2"],
+    ],
+  );
+
+  const buffered = transientSources.get({
+    tenantId: actor.tenantId,
     messageId: accepted.message_id,
     sourceRevision: 1,
   });
-  assert.equal(buffered.source.text, "bonjour");
-});
-
-test("transient source cache failure never blocks durable messaging acceptance", async () => {
-  const store = new TransactionalFakeStore();
-  const transientSources = {
-    put() {
-      throw new Error("transient cache down");
-    },
-    get() {
-      return undefined;
-    },
-    remove() {},
-  };
-  const { service } = createService(store, { transientSources });
-
-  const accepted = await service.sendMessage(
-    actor,
-    sendCommand({ text: "still deliver me" }),
+  assert.ok(buffered);
+  assert.equal(buffered.source.text, sendCommand().source.text);
+  assert.equal(
+    buffered.sourceHash,
+    store.state.revisions[0].sourceHash,
   );
 
-  assert.equal(accepted.status, "ACCEPTED");
-  assert.equal(store.state.messages.length, 1);
-  assert.equal(store.state.envelopes.length, 2);
-  assert.equal(store.state.jobs[0].payloadRef.source_buffered, false);
+  const durable = JSON.stringify({
+    messages: store.state.messages,
+    revisions: store.state.revisions,
+    jobs: store.state.jobs,
+    receipts: [...store.state.receipts.values()],
+  });
+  assert.equal(durable.includes(sendCommand().source.text), false);
 });
 
-test("recipient without an active deliverable device rolls back the whole transaction", async () => {
+test("lost response retry with same command_id returns exact original result", async () => {
   const store = new TransactionalFakeStore();
-  store.targets = [
-    {
-      userId: "user-a",
-      devices: [],
-    },
-    {
-      userId: "user-b",
-      devices: [],
-    },
-  ];
   const { service } = createService(store);
+
+  const first = await service.sendMessage(actor, sendCommand());
+  const retry = await service.sendMessage(actor, sendCommand());
+
+  assert.deepEqual(retry, first);
+  assert.equal(store.state.messages.length, 1);
+  assert.equal(store.state.jobs.length, 1);
+});
+
+test("new command_id with same client_message_id returns exact original acceptance", async () => {
+  const store = new TransactionalFakeStore();
+  const { service } = createService(store);
+
+  const first = await service.sendMessage(actor, sendCommand());
+  const retry = await service.sendMessage(
+    actor,
+    sendCommand({ command_id: "cmd-2" }),
+  );
+
+  assert.deepEqual(retry, first);
+  assert.equal(store.state.messages.length, 1);
+  assert.equal(store.state.receipts.size, 2);
+});
+
+test("command_id reuse with different payload is rejected", async () => {
+  const store = new TransactionalFakeStore();
+  const { service } = createService(store);
+  await service.sendMessage(actor, sendCommand());
+
+  await assert.rejects(
+    () =>
+      service.sendMessage(
+        actor,
+        sendCommand({
+          source: {
+            text: "different",
+            language_hint: "fr-FR",
+          },
+        }),
+      ),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "IDEMPOTENCY_CONFLICT",
+  );
+  assert.equal(store.state.messages.length, 1);
+});
+
+test("client_message_id is bound to conversation reply timestamp and source", async () => {
+  const store = new TransactionalFakeStore();
+  const { service } = createService(store);
+  await service.sendMessage(
+    actor,
+    sendCommand({
+      client_authored_at: "2026-10-03T22:59:00.000Z",
+    }),
+  );
+
+  for (const next of [
+    sendCommand({
+      command_id: "cmd-conversation",
+      conversation_id: "other-conversation",
+      client_authored_at: "2026-10-03T22:59:00.000Z",
+    }),
+    sendCommand({
+      command_id: "cmd-reply",
+      reply_to_message_id: "reply-ok",
+      client_authored_at: "2026-10-03T22:59:00.000Z",
+    }),
+    sendCommand({
+      command_id: "cmd-time",
+      client_authored_at: "2026-10-03T22:58:59.000Z",
+    }),
+    sendCommand({
+      command_id: "cmd-source",
+      client_authored_at: "2026-10-03T22:59:00.000Z",
+      source: {
+        text: "different source",
+        language_hint: "fr-FR",
+      },
+    }),
+  ]) {
+    await assert.rejects(
+      () => service.sendMessage(actor, next),
+      (error) =>
+        error instanceof DomainError &&
+        error.code === "IDEMPOTENCY_CONFLICT",
+    );
+  }
+});
+
+test("equivalent client authored timestamps compare by instant, not formatting", async () => {
+  const store = new TransactionalFakeStore();
+  const fingerprinter = testFingerprinter();
+  const source = sendCommand().source;
+
+  store.state.existingByClientId.set(
+    "tenant-1:user-a:client-1",
+    {
+      messageId: "existing-message",
+      conversationId: "conversation-1",
+      replyToMessageId: null,
+      messageSeq: 9,
+      acceptedAt: "2026-10-03T23:00:00.000Z",
+      clientAuthoredAt: "2026-10-03 22:59:00+00",
+      originalSourceHash: fingerprinter.fingerprint(source),
+      acceptedResult: {
+        protocol_version: 1,
+        status: "ACCEPTED",
+        message_id: "existing-message",
+        message_seq: 9,
+        source_revision: 1,
+        accepted_at: "2026-10-03T23:00:00.000Z",
+        translation_status: "PENDING",
+      },
+    },
+  );
+
+  const { service } = createService(store, { fingerprinter });
+  const accepted = await service.sendMessage(
+    actor,
+    sendCommand({
+      command_id: "cmd-format",
+      client_authored_at: "2026-10-03T22:59:00.000Z",
+    }),
+  );
+
+  assert.equal(accepted.message_id, "existing-message");
+});
+
+test("recipient without a deliverable device rolls back the whole Send", async () => {
+  const store = new TransactionalFakeStore({
+    targets: [
+      { userId: "user-a", devices: [] },
+      { userId: "user-b", devices: [] },
+    ],
+  });
+  const { service, transientSources } = createService(store);
 
   await assert.rejects(
     () => service.sendMessage(actor, sendCommand()),
@@ -327,13 +571,82 @@ test("recipient without an active deliverable device rolls back the whole transa
   assert.equal(store.state.nextMessageSeq, 1);
   assert.equal(store.state.nextOpSeq, 1);
   assert.equal(store.state.messages.length, 0);
-  assert.equal(store.state.envelopes.length, 0);
-  assert.equal(store.state.jobs.length, 0);
+  assert.equal(transientSources.size, 0);
 });
 
-test("envelope protection failure rolls back DB effects and removes transient plaintext", async () => {
+test("unauthorised actor fails before reply and target inspection", async () => {
+  const store = new TransactionalFakeStore({ authorized: false });
+  const { service } = createService(store);
+
+  await assert.rejects(
+    () =>
+      service.sendMessage(
+        actor,
+        sendCommand({ reply_to_message_id: "missing" }),
+      ),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "NOT_AUTHORIZED",
+  );
+
+  assert.equal(store.state.receipts.size, 0);
+  assert.equal(store.state.messages.length, 0);
+});
+
+test("invalid reply rolls back reserved sequence and command claim", async () => {
   const store = new TransactionalFakeStore();
-  const { service, transient } = createService(store, {
+  const { service } = createService(store);
+
+  await assert.rejects(
+    () =>
+      service.sendMessage(
+        actor,
+        sendCommand({ reply_to_message_id: "missing" }),
+      ),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "INVALID_COMMAND",
+  );
+
+  assert.equal(store.state.nextMessageSeq, 1);
+  assert.equal(store.state.nextOpSeq, 1);
+  assert.equal(store.state.receipts.size, 0);
+});
+
+test("transient source pressure returns SOURCE_REQUIRED without blocking original delivery", async () => {
+  const store = new TransactionalFakeStore();
+  const clock = {
+    now() {
+      return "2026-10-03T23:00:00.000Z";
+    },
+  };
+  const transientSources = createTransient(clock, {
+    maxEntries: 1,
+    maxApproxBytes: 1,
+  });
+  const { service } = createService(store, { transientSources });
+
+  const first = await service.sendMessage(actor, sendCommand());
+  const retry = await service.sendMessage(
+    actor,
+    sendCommand({ command_id: "cmd-pressure-retry" }),
+  );
+
+  assert.equal(first.translation_status, "SOURCE_REQUIRED");
+  assert.deepEqual(retry, first);
+  assert.equal(store.state.messages.length, 1);
+  assert.equal(store.state.envelopes.length, 3);
+  assert.equal(
+    JSON.stringify(store.state.jobs[0]).includes(
+      sendCommand().source.text,
+    ),
+    false,
+  );
+});
+
+test("envelope protection failure rolls back DB effects and transient source", async () => {
+  const store = new TransactionalFakeStore();
+  const { service, transientSources } = createService(store, {
     envelopeProtector: {
       protect() {
         throw new Error("protector failure");
@@ -346,119 +659,105 @@ test("envelope protection failure rolls back DB effects and removes transient pl
     /protector failure/,
   );
 
-  assert.equal(store.state.nextMessageSeq, 1);
   assert.equal(store.state.messages.length, 0);
-  assert.equal(store.state.envelopes.length, 0);
-  assert.equal(transient.size, 0);
+  assert.equal(store.state.receipts.size, 0);
+  assert.equal(transientSources.size, 0);
 });
 
-test("same command retry returns stored ACCEPTED result without duplicating writes", async () => {
-  const store = new TransactionalFakeStore();
-  const { service } = createService(store);
+test("database commit failure removes newly buffered source", async () => {
+  const store = new TransactionalFakeStore({ failCommit: true });
+  const { service, transientSources } = createService(store);
 
-  const first = await service.sendMessage(actor, sendCommand());
-  const retry = await service.sendMessage(actor, sendCommand());
+  await assert.rejects(
+    () => service.sendMessage(actor, sendCommand()),
+    /forced commit failure/,
+  );
+
+  assert.equal(store.state.messages.length, 0);
+  assert.equal(store.state.receipts.size, 0);
+  assert.equal(transientSources.size, 0);
+});
+
+test("same command remains idempotent across HMAC key rotation when old key is retained", async () => {
+  const store = new TransactionalFakeStore();
+  const oldKey = "old-key-0123456789abcdef0123456789abcdef";
+  const newKey = "new-key-0123456789abcdef0123456789abcdef";
+
+  const oldFingerprinter = createHmacSourceFingerprinter({
+    key: oldKey,
+    keyVersion: "k1",
+  });
+  const firstService = createService(store, {
+    fingerprinter: oldFingerprinter,
+  }).service;
+  const first = await firstService.sendMessage(actor, sendCommand());
+
+  const rotatedFingerprinter = createHmacSourceFingerprinter({
+    key: newKey,
+    keyVersion: "k2",
+    verificationKeys: [
+      { key: oldKey, keyVersion: "k1" },
+    ],
+  });
+  const rotatedService = createService(store, {
+    fingerprinter: rotatedFingerprinter,
+  }).service;
+
+  const retry = await rotatedService.sendMessage(actor, sendCommand());
+  assert.deepEqual(retry, first);
+  assert.equal(store.state.messages.length, 1);
+});
+
+test("client_message_id retry with a new command also survives HMAC key rotation", async () => {
+  const store = new TransactionalFakeStore();
+  const oldKey = "old-key-0123456789abcdef0123456789abcdef";
+  const newKey = "new-key-0123456789abcdef0123456789abcdef";
+
+  const oldService = createService(store, {
+    fingerprinter: createHmacSourceFingerprinter({
+      key: oldKey,
+      keyVersion: "k1",
+    }),
+  }).service;
+  const first = await oldService.sendMessage(actor, sendCommand());
+
+  const rotatedService = createService(store, {
+    fingerprinter: createHmacSourceFingerprinter({
+      key: newKey,
+      keyVersion: "k2",
+      verificationKeys: [
+        { key: oldKey, keyVersion: "k1" },
+      ],
+    }),
+  }).service;
+
+  const retry = await rotatedService.sendMessage(
+    actor,
+    sendCommand({ command_id: "cmd-after-rotation" }),
+  );
 
   assert.deepEqual(retry, first);
   assert.equal(store.state.messages.length, 1);
-  assert.equal(store.state.envelopes.length, 2);
-  assert.equal(store.state.jobs.length, 1);
+  assert.equal(store.state.receipts.size, 2);
 });
 
-test("same command_id with different source is rejected", async () => {
-  const store = new TransactionalFakeStore();
-  const { service } = createService(store);
-
-  await service.sendMessage(actor, sendCommand({ text: "v1" }));
-
-  await assert.rejects(
-    () =>
-      service.sendMessage(
-        actor,
-        sendCommand({
-          text: "different",
-          commandId: "cmd-1",
-          clientMessageId: "client-2",
-        }),
-      ),
-    (error) =>
-      error instanceof DomainError &&
-      error.code === "IDEMPOTENCY_CONFLICT",
-  );
-
-  assert.equal(store.state.messages.length, 1);
-});
-
-test("client_message_id dedupe compares the original revision fingerprint even after later edits", async () => {
-  const store = new TransactionalFakeStore();
-  store.state.existingByClientId.set(
-    "tenant-1:user-a:client-original",
-    {
-      messageId: "existing-message",
-      messageSeq: 5,
-      currentRevision: 3,
-      acceptedAt: "2026-10-03T22:00:00.000Z",
-      originalSourceHash: "FP:fr-FR:original",
+test("transient store refuses duplicate keys without overwriting admitted source", () => {
+  const clock = {
+    now() {
+      return "2026-10-03T23:00:00.000Z";
     },
-  );
-  const { service } = createService(store);
-
-  const accepted = await service.sendMessage(
-    actor,
-    sendCommand({
-      text: "original",
-      commandId: "new-command-after-timeout",
-      clientMessageId: "client-original",
-    }),
-  );
-
-  assert.equal(accepted.message_id, "existing-message");
-  assert.equal(accepted.message_seq, 5);
-  assert.equal(accepted.source_revision, 1);
-  assert.equal(store.state.messages.length, 0);
-  assert.equal(store.state.receipts.size, 1);
-});
-
-test("invalid reply target aborts before any durable message write", async () => {
-  const store = new TransactionalFakeStore();
-  store.replyExists = false;
-  const { service } = createService(store);
-
-  await assert.rejects(
-    () =>
-      service.sendMessage(
-        actor,
-        sendCommand({ replyTo: "missing-message" }),
-      ),
-    (error) =>
-      error instanceof DomainError &&
-      error.code === "INVALID_COMMAND",
-  );
-
-  assert.equal(store.state.nextMessageSeq, 1);
-  assert.equal(store.state.messages.length, 0);
-});
-
-test("bounded transient source store expires data and refuses capacity overflow without eviction", () => {
-  let now = "2026-10-03T23:00:00.000Z";
-  const store = new InMemoryTransientSourceStore({
-    clock: {
-      now() {
-        return now;
-      },
-    },
-    maxEntries: 1,
-    maxApproxBytes: 1024,
-  });
+  };
+  const store = createTransient(clock);
 
   assert.equal(
     store.put({
       tenantId: "tenant-1",
       messageId: "message-1",
       sourceRevision: 1,
+      sourceHash: "hash-1",
       source: { text: "first" },
-      createdAt: now,
-      expiresAt: "2026-10-03T23:01:00.000Z",
+      createdAt: "2026-10-03T23:00:00.000Z",
+      expiresAt: "2026-10-03T23:05:00.000Z",
     }),
     true,
   );
@@ -466,24 +765,22 @@ test("bounded transient source store expires data and refuses capacity overflow 
   assert.equal(
     store.put({
       tenantId: "tenant-1",
-      messageId: "message-2",
+      messageId: "message-1",
       sourceRevision: 1,
+      sourceHash: "hash-2",
       source: { text: "second" },
-      createdAt: now,
-      expiresAt: "2026-10-03T23:01:00.000Z",
+      createdAt: "2026-10-03T23:00:01.000Z",
+      expiresAt: "2026-10-03T23:05:00.000Z",
     }),
     false,
   );
-  assert.equal(store.size, 1);
 
-  now = "2026-10-03T23:01:00.000Z";
-  assert.equal(store.size, 0);
   assert.equal(
     store.get({
       tenantId: "tenant-1",
       messageId: "message-1",
       sourceRevision: 1,
-    }),
-    undefined,
+    }).source.text,
+    "first",
   );
 });
