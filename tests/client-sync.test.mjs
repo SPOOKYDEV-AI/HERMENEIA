@@ -295,3 +295,47 @@ test("offline recipient does not call sync transport", async () => {
   await engine.syncOnce();
   assert.equal(syncCalls, 0);
 });
+
+
+test("control events advance the local cursor without creating a message envelope", async () => {
+  let seenCursor;
+  const store = new InMemoryClientStore();
+  const engine = new ClientMessagingEngine({
+    store,
+    transport: {
+      async send() {
+        throw new Error("not used");
+      },
+      async sync(cursor) {
+        seenCursor = cursor;
+        return {
+          protocol_version: 1,
+          events: [
+            {
+              protocol_version: 1,
+              event_id: "evt-control-1",
+              cursor: "1:7",
+              type: "preferences.changed",
+              server_time: "2026-10-03T21:01:00.000Z",
+              tenant_id: "tenant-1",
+              conversation_id: null,
+              payload: {},
+            },
+          ],
+          next_cursor: "1:7",
+        };
+      },
+      async acknowledge() {},
+    },
+    ids: deterministicIds(),
+    clock: clientClock(),
+  });
+
+  engine.setNetworkState("ONLINE");
+  await engine.syncOnce();
+
+  assert.equal(seenCursor, undefined);
+  assert.equal(store.getSyncCursor(), "1:7");
+  assert.equal(store.listIncoming().length, 0);
+  assert.equal(store.listPendingAcks().length, 0);
+});
