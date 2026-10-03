@@ -257,7 +257,11 @@ export class PersistentSendService {
 
     const now = this.deps.clock.now();
     const sourceHash = this.deps.sourceDigester.digest(command.source);
-    if (!sourceHash || sourceHash.includes(command.source.text)) {
+    if (
+      !sourceHash ||
+      sourceHash === command.source.text ||
+      sourceHash.length < 16
+    ) {
       throw new Error("Source digester must return a non-plaintext digest");
     }
 
@@ -339,15 +343,23 @@ export class PersistentSendService {
             );
           }
 
-          const accepted: AcceptedMessage = {
-            protocol_version: 1,
-            status: "ACCEPTED",
-            message_id: prior.messageId,
-            message_seq: prior.messageSeq,
-            source_revision: 1,
-            accepted_at: prior.acceptedAt,
-            translation_status: "PENDING",
-          };
+          const storedAccepted = prior.acceptedResult
+            ? acceptedFromStoredResult(prior.acceptedResult)
+            : undefined;
+          if (prior.acceptedResult && !storedAccepted) {
+            throw new Error("Stored original Send acceptance is invalid");
+          }
+
+          const accepted: AcceptedMessage =
+            storedAccepted ?? {
+              protocol_version: 1,
+              status: "ACCEPTED",
+              message_id: prior.messageId,
+              message_seq: prior.messageSeq,
+              source_revision: 1,
+              accepted_at: prior.acceptedAt,
+              translation_status: "PENDING",
+            };
 
           await this.deps.repository.markCommandSucceeded(tx, {
             tenantId: actor.tenantId,
@@ -559,10 +571,10 @@ export class PersistentSendService {
           now,
         });
 
-        committedNewMessage = true;
         return accepted;
       });
 
+      committedNewMessage = true;
       return result;
     } catch (error) {
       if (bufferedNewSource && !committedNewMessage) {
@@ -603,22 +615,19 @@ export class BoundedTransientSourceStore implements TransientSourceStore {
 
     const key = this.key(record.messageId, record.sourceRevision);
     const existing = this.records.get(key);
-    if (existing) {
-      this.totalChars -= existing.source.text.length;
-      this.records.delete(key);
+    const existingChars = existing?.source.text.length ?? 0;
+    const projectedEntries = existing ? this.records.size : this.records.size + 1;
+    const projectedChars = this.totalChars - existingChars + chars;
+
+    if (
+      projectedEntries > this.maxEntries ||
+      projectedChars > this.maxTotalChars
+    ) {
+      throw new Error("Transient source capacity is exhausted");
     }
 
-    while (
-      this.records.size >= this.maxEntries ||
-      this.totalChars + chars > this.maxTotalChars
-    ) {
-      const oldestKey = this.records.keys().next().value as string | undefined;
-      if (!oldestKey) break;
-      const oldest = this.records.get(oldestKey);
-      if (oldest) {
-        this.totalChars -= oldest.source.text.length;
-      }
-      this.records.delete(oldestKey);
+    if (existing) {
+      this.totalChars -= existingChars;
     }
 
     this.records.set(key, {
