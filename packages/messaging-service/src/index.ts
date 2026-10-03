@@ -35,27 +35,47 @@ export interface PersistentRecipientTarget {
 
 export interface PersistentExistingAcceptance {
   messageId: UUID;
+  conversationId: UUID;
+  replyToMessageId: UUID | null;
   messageSeq: number;
-  currentRevision: number;
   acceptedAt: string;
+  clientAuthoredAt: string | null;
   originalSourceHash: string | null;
+  acceptedResult: Record<string, unknown> | null;
 }
 
 export interface PersistentCommandReceipt {
+  actorUserId: UUID;
+  actorDeviceId: UUID;
   commandType: string;
   commandFingerprint: string | null;
   status: "IN_PROGRESS" | "SUCCEEDED" | "FAILED";
   result: Record<string, unknown>;
 }
 
+export type PersistentCommandClaimResult =
+  | { claimed: true }
+  | { claimed: false; existing: PersistentCommandReceipt };
+
 export interface PersistentMessagingStore<Tx> {
   withTransaction<T>(work: (tx: Tx) => Promise<T>): Promise<T>;
 
-  findCommandReceipt(
+  claimCommand(
+    tx: Tx,
+    input: {
+      actor: ActorContext;
+      commandId: UUID;
+      commandType: string;
+      commandFingerprint: string;
+      now: string;
+    },
+  ): Promise<PersistentCommandClaimResult>;
+
+  lockClientMessageKey(
     tx: Tx,
     actor: ActorContext,
-    commandId: UUID,
-  ): Promise<PersistentCommandReceipt | undefined>;
+    clientMessageId: UUID,
+  ): Promise<void>;
 
   findAcceptedMessageByClientId(
     tx: Tx,
@@ -166,7 +186,7 @@ export interface PersistentMessagingStore<Tx> {
     },
   ): Promise<void>;
 
-  insertCommandReceipt(
+  markCommandSucceeded(
     tx: Tx,
     input: {
       tenantId: UUID;
@@ -191,11 +211,16 @@ export interface PersistentMessagingClock {
 
 export interface PersistentSourceFingerprinter {
   /**
-   * Must return an opaque stable fingerprint suitable for idempotency.
-   * Production implementations must not use an unkeyed digest of short
-   * plaintext messages.
+   * Returns the primary opaque fingerprint for a new durable record.
+   * Production implementations must use a keyed construction.
    */
   fingerprint(source: SourceContent): string;
+
+  /**
+   * Verifies source against a previously stored fingerprint. This must support
+   * the explicitly retained verification-key window during key rotation.
+   */
+  matches(source: SourceContent, storedFingerprint: string): boolean;
 }
 
 export interface PersistentEnvelopeProtector {
@@ -227,6 +252,16 @@ export interface PersistentMessagingServiceDependencies<Tx> {
   transientSourceTtlSeconds?: number;
 }
 
+interface SendCommandFingerprintV1 {
+  v: 1;
+  type: "message.send";
+  conversation_id: UUID;
+  client_message_id: UUID;
+  source_fingerprint: string;
+  reply_to_message_id: UUID | null;
+  client_authored_at: string | null;
+}
+
 export class PersistentMessagingService<Tx> {
   private readonly envelopeTtlSeconds: number;
   private readonly transientSourceTtlSeconds: number;
@@ -251,32 +286,62 @@ export class PersistentMessagingService<Tx> {
       );
     }
 
+    const now = this.deps.clock.now();
     const sourceFingerprint =
       this.deps.fingerprinter.fingerprint(command.source);
-    const commandFingerprint = [
-      "message.send",
-      command.conversation_id,
-      command.client_message_id,
-      sourceFingerprint,
-      command.reply_to_message_id ?? "",
-      command.client_authored_at ?? "",
-    ].join("|");
 
+    if (
+      !sourceFingerprint ||
+      sourceFingerprint === command.source.text
+    ) {
+      throw new Error(
+        "Source fingerprinter must return an opaque fingerprint",
+      );
+    }
+
+    const commandFingerprint = serializeSendCommandFingerprint({
+      v: 1,
+      type: "message.send",
+      conversation_id: command.conversation_id,
+      client_message_id: command.client_message_id,
+      source_fingerprint: sourceFingerprint,
+      reply_to_message_id: command.reply_to_message_id ?? null,
+      client_authored_at: command.client_authored_at ?? null,
+    });
+
+    const proposedMessageId = this.deps.ids.next("msg");
     let preparedTransientKey: TransientSourceKey | undefined;
+    let committedNewMessage = false;
 
     try {
-      return await this.deps.store.withTransaction(async (tx) => {
-        const existingCommand =
-          await this.deps.store.findCommandReceipt(
-            tx,
-            actor,
-            command.command_id,
-          );
+      const result = await this.deps.store.withTransaction(async (tx) => {
+        const claim = await this.deps.store.claimCommand(tx, {
+          actor,
+          commandId: command.command_id,
+          commandType: "message.send",
+          commandFingerprint,
+          now,
+        });
 
-        if (existingCommand) {
+        if (!claim.claimed) {
+          const existing = claim.existing;
           if (
-            existingCommand.commandType !== "message.send" ||
-            existingCommand.commandFingerprint !== commandFingerprint
+            existing.actorUserId !== actor.userId ||
+            existing.actorDeviceId !== actor.deviceId
+          ) {
+            throw new DomainError(
+              "NOT_AUTHORIZED",
+              "Command identifier is not available to actor",
+            );
+          }
+
+          if (
+            existing.commandType !== "message.send" ||
+            !commandFingerprintMatches(
+              existing.commandFingerprint,
+              command,
+              this.deps.fingerprinter,
+            )
           ) {
             throw new DomainError(
               "IDEMPOTENCY_CONFLICT",
@@ -284,22 +349,20 @@ export class PersistentMessagingService<Tx> {
             );
           }
 
-          if (existingCommand.status !== "SUCCEEDED") {
+          if (existing.status !== "SUCCEEDED") {
             throw new Error(
-              "Invariant violation: non-terminal command receipt",
+              "Persistent command receipt is not terminal",
             );
           }
 
-          const accepted = acceptedFromResult(existingCommand.result);
-          await this.bestEffortBufferSource(
-            actor.tenantId,
-            accepted.message_id,
-            1,
-            accepted.accepted_at,
-            command.source,
-          );
-          return accepted;
+          return acceptedFromResult(existing.result);
         }
+
+        await this.deps.store.lockClientMessageKey(
+          tx,
+          actor,
+          command.client_message_id,
+        );
 
         const existingMessage =
           await this.deps.store.findAcceptedMessageByClientId(
@@ -310,26 +373,43 @@ export class PersistentMessagingService<Tx> {
 
         if (existingMessage) {
           if (
+            existingMessage.conversationId !== command.conversation_id ||
+            !sameNullable(
+              existingMessage.replyToMessageId,
+              command.reply_to_message_id,
+            ) ||
+            !sameTimestamp(
+              existingMessage.clientAuthoredAt,
+              command.client_authored_at,
+            ) ||
             !existingMessage.originalSourceHash ||
-            existingMessage.originalSourceHash !== sourceFingerprint
+            !this.deps.fingerprinter.matches(
+              command.source,
+              existingMessage.originalSourceHash,
+            )
           ) {
             throw new DomainError(
               "IDEMPOTENCY_CONFLICT",
-              "client_message_id was already used with different source content",
+              "client_message_id was already used for a different logical message",
             );
           }
 
-          const accepted: AcceptedMessage = {
-            protocol_version: 1,
-            status: "ACCEPTED",
-            message_id: existingMessage.messageId,
-            message_seq: existingMessage.messageSeq,
-            source_revision: 1,
-            accepted_at: existingMessage.acceptedAt,
-            translation_status: "PENDING",
-          };
+          const storedAccepted = existingMessage.acceptedResult
+            ? acceptedFromResult(existingMessage.acceptedResult)
+            : undefined;
 
-          await this.deps.store.insertCommandReceipt(tx, {
+          const accepted: AcceptedMessage =
+            storedAccepted ?? {
+              protocol_version: 1,
+              status: "ACCEPTED",
+              message_id: existingMessage.messageId,
+              message_seq: existingMessage.messageSeq,
+              source_revision: 1,
+              accepted_at: existingMessage.acceptedAt,
+              translation_status: "PENDING",
+            };
+
+          await this.deps.store.markCommandSucceeded(tx, {
             tenantId: actor.tenantId,
             commandId: command.command_id,
             actorUserId: actor.userId,
@@ -337,16 +417,9 @@ export class PersistentMessagingService<Tx> {
             commandType: "message.send",
             commandFingerprint,
             result: accepted as unknown as Record<string, unknown>,
-            now: this.deps.clock.now(),
+            now,
           });
 
-          await this.bestEffortBufferSource(
-            actor.tenantId,
-            existingMessage.messageId,
-            1,
-            existingMessage.acceptedAt,
-            command.source,
-          );
           return accepted;
         }
 
@@ -403,33 +476,33 @@ export class PersistentMessagingService<Tx> {
           );
         }
 
-        const now = this.deps.clock.now();
-        const messageId = this.deps.ids.next("msg");
         const sourceRevision = 1;
-        const expiresAt = addSeconds(
-          now,
-          this.envelopeTtlSeconds,
-        );
+        let translationStatus:
+          AcceptedMessage["translation_status"] =
+          "SOURCE_REQUIRED";
 
         const transientBuffered =
           await this.bestEffortBufferSource(
             actor.tenantId,
-            messageId,
+            proposedMessageId,
             sourceRevision,
+            sourceFingerprint,
             now,
             command.source,
           );
+
         if (transientBuffered) {
           preparedTransientKey = {
             tenantId: actor.tenantId,
-            messageId,
+            messageId: proposedMessageId,
             sourceRevision,
           };
+          translationStatus = "PENDING";
         }
 
         await this.deps.store.insertMessageMetadata(tx, {
           tenantId: actor.tenantId,
-          messageId,
+          messageId: proposedMessageId,
           conversationId: command.conversation_id,
           authorUserId: actor.userId,
           authorDeviceId: actor.deviceId,
@@ -443,7 +516,7 @@ export class PersistentMessagingService<Tx> {
         await this.deps.store.insertMessageRevision(tx, {
           tenantId: actor.tenantId,
           conversationId: command.conversation_id,
-          messageId,
+          messageId: proposedMessageId,
           revision: sourceRevision,
           opSeq: allocation.opSeq,
           mutationType: "CREATED",
@@ -453,6 +526,11 @@ export class PersistentMessagingService<Tx> {
           createdAt: now,
         });
 
+        const expiresAt = addSeconds(
+          now,
+          this.envelopeTtlSeconds,
+        );
+
         for (const target of targets) {
           for (const device of target.devices) {
             const envelopeId = this.deps.ids.next("env");
@@ -460,7 +538,7 @@ export class PersistentMessagingService<Tx> {
               await this.deps.envelopeProtector.protect({
                 tenantId: actor.tenantId,
                 conversationId: command.conversation_id,
-                messageId,
+                messageId: proposedMessageId,
                 sourceRevision,
                 recipientUserId: target.userId,
                 recipientDeviceId: device.deviceId,
@@ -471,11 +549,17 @@ export class PersistentMessagingService<Tx> {
                 source: command.source,
               });
 
+            if (!protectedPayload) {
+              throw new Error(
+                "Envelope protector returned an empty payload",
+              );
+            }
+
             await this.deps.store.insertDeliveryEnvelope(tx, {
               tenantId: actor.tenantId,
               envelopeId,
               conversationId: command.conversation_id,
-              messageId,
+              messageId: proposedMessageId,
               sourceRevision,
               recipientUserId: target.userId,
               recipientDeviceId: device.deviceId,
@@ -499,7 +583,7 @@ export class PersistentMessagingService<Tx> {
               eventType: "message.available",
               tenantId: actor.tenantId,
               conversationId: command.conversation_id,
-              messageId,
+              messageId: proposedMessageId,
               envelopeId,
               sourceRevision,
               createdAt: now,
@@ -507,20 +591,20 @@ export class PersistentMessagingService<Tx> {
           }
         }
 
-        const translationJobId = this.deps.ids.next("job");
         await this.deps.store.insertOutboxJob(tx, {
-          jobId: translationJobId,
+          jobId: this.deps.ids.next("job"),
           tenantId: actor.tenantId,
-          jobType: "translation.requested",
-          businessKey:
-            `translation:${messageId}:${sourceRevision}`,
+          jobType: "translation.request",
+          businessKey: `${proposedMessageId}:${sourceRevision}`,
           payloadRef: {
-            message_id: messageId,
+            message_id: proposedMessageId,
             source_revision: sourceRevision,
+            source_hash: sourceFingerprint,
+            source_buffer_key:
+              `${actor.tenantId}:${proposedMessageId}:${sourceRevision}`,
             membership_epoch: allocation.membershipEpoch,
             erasure_epoch: allocation.erasureEpoch,
             policy_version: allocation.policyVersion,
-            source_buffered: transientBuffered,
           },
           priority: 10,
           availableAt: now,
@@ -529,14 +613,14 @@ export class PersistentMessagingService<Tx> {
         const accepted: AcceptedMessage = {
           protocol_version: 1,
           status: "ACCEPTED",
-          message_id: messageId,
+          message_id: proposedMessageId,
           message_seq: allocation.messageSeq,
           source_revision: sourceRevision,
           accepted_at: now,
-          translation_status: "PENDING",
+          translation_status: translationStatus,
         };
 
-        await this.deps.store.insertCommandReceipt(tx, {
+        await this.deps.store.markCommandSucceeded(tx, {
           tenantId: actor.tenantId,
           commandId: command.command_id,
           actorUserId: actor.userId,
@@ -549,8 +633,11 @@ export class PersistentMessagingService<Tx> {
 
         return accepted;
       });
+
+      committedNewMessage = true;
+      return result;
     } catch (error) {
-      if (preparedTransientKey) {
+      if (preparedTransientKey && !committedNewMessage) {
         try {
           await this.deps.transientSources?.remove(
             preparedTransientKey,
@@ -567,6 +654,7 @@ export class PersistentMessagingService<Tx> {
     tenantId: UUID,
     messageId: UUID,
     sourceRevision: number,
+    sourceHash: string,
     acceptedAt: string,
     source: SourceContent,
   ): Promise<boolean> {
@@ -585,6 +673,7 @@ export class PersistentMessagingService<Tx> {
           tenantId,
           messageId,
           sourceRevision,
+          sourceHash,
           source: structuredClone(source),
           createdAt: acceptedAt,
           expiresAt,
@@ -594,6 +683,69 @@ export class PersistentMessagingService<Tx> {
       return false;
     }
   }
+}
+
+function serializeSendCommandFingerprint(
+  fingerprint: SendCommandFingerprintV1,
+): string {
+  return JSON.stringify(fingerprint);
+}
+
+function parseSendCommandFingerprint(
+  value: string | null,
+): SendCommandFingerprintV1 | undefined {
+  if (!value) return undefined;
+
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    if (
+      parsed.v !== 1 ||
+      parsed.type !== "message.send" ||
+      typeof parsed.conversation_id !== "string" ||
+      typeof parsed.client_message_id !== "string" ||
+      typeof parsed.source_fingerprint !== "string" ||
+      !(
+        parsed.reply_to_message_id === null ||
+        typeof parsed.reply_to_message_id === "string"
+      ) ||
+      !(
+        parsed.client_authored_at === null ||
+        typeof parsed.client_authored_at === "string"
+      )
+    ) {
+      return undefined;
+    }
+
+    return parsed as unknown as SendCommandFingerprintV1;
+  } catch {
+    return undefined;
+  }
+}
+
+function commandFingerprintMatches(
+  stored: string | null,
+  command: SendMessageCommand,
+  fingerprinter: PersistentSourceFingerprinter,
+): boolean {
+  const parsed = parseSendCommandFingerprint(stored);
+  if (!parsed) return false;
+
+  return (
+    parsed.conversation_id === command.conversation_id &&
+    parsed.client_message_id === command.client_message_id &&
+    sameNullable(
+      parsed.reply_to_message_id,
+      command.reply_to_message_id,
+    ) &&
+    sameTimestamp(
+      parsed.client_authored_at,
+      command.client_authored_at,
+    ) &&
+    fingerprinter.matches(
+      command.source,
+      parsed.source_fingerprint,
+    )
+  );
 }
 
 function acceptedFromResult(
@@ -640,6 +792,29 @@ function acceptedFromResult(
     translation_status:
       translationStatus as AcceptedMessage["translation_status"],
   };
+}
+
+function sameNullable(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  return (left ?? null) === (right ?? null);
+}
+
+function sameTimestamp(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+
+  const leftMillis = Date.parse(left);
+  const rightMillis = Date.parse(right);
+  return (
+    Number.isFinite(leftMillis) &&
+    Number.isFinite(rightMillis) &&
+    leftMillis === rightMillis
+  );
 }
 
 function addSeconds(timestamp: string, seconds: number): string {
