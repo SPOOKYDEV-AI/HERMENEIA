@@ -52,6 +52,8 @@ An administrator may operate the system and inspect technical metrics, but admin
 - preservation of tone/register with uncertainty handling;
 - contextual understanding of slang, acronyms, SMS abbreviations and mixed-language messages;
 - scoped professional/domain terminology with tenant/project glossary precedence;
+- locale- and region-aware target formulation;
+- dynamic conversation style profiling from the first exchanges with confidence and ongoing updates;
 - user feedback;
 - T0/T1/T2 evaluation;
 - technical metrics and failure visibility.
@@ -227,6 +229,11 @@ The MVP is not considered complete until the following are demonstrated:
 23. Project/team terminology can override tenant/domain defaults deterministically.
 24. Terminology provenance and glossary version can be traced for a translation.
 25. Common glossary hits do not require a model call.
+26. First messages can bootstrap a style profile without permanently fixing it.
+27. Explicit recipient locale/style preferences override inferred defaults.
+28. Low-confidence regional inference falls back to neutral natural wording.
+29. Style adaptation changes formulation without changing semantic meaning.
+30. Regional variants can be represented below country level where useful.
 
 ## 17. Responsiveness and incremental understanding
 
