@@ -97,6 +97,7 @@ A logical ConversationContextState contains:
     conversation_style_profile
     summary_ref
     memory_index_version
+    claim_graph_version
     updated_at
 
 This state is derived and rebuildable.
@@ -321,6 +322,7 @@ Logical tasks may include:
 - extract_memory_candidates(message_id);
 - promote_or_invalidate_memory(...);
 - update_retrieval_index(...);
+- update_context_claims_and_provenance(...);
 - refresh_pragmatic_state(conversation_id, sequence);
 - refresh_lexical_state(conversation_id, sequence);
 - refresh_domain_terminology_state(conversation_id, sequence);
@@ -451,6 +453,9 @@ At minimum:
     style_profile_update_ms
     locale_resolution_ms
     neutral_locale_fallback_rate
+    stale_derived_write_rejections
+    context_claims_invalidated
+    low_confidence_claim_usage_rate
     async_context_lag_sequences
     translation_provider_ms
     translation_end_to_end_ms
@@ -486,3 +491,17 @@ V1 does not require:
 - keystroke capture for pre-translation.
 
 The engine should first prove that incremental, temporal context selection improves translation under controlled measurement.
+
+
+## 26. Context integrity
+
+Context Engine V1 must follow the rules in [Context Integrity, Provenance and Memory Safety — V1](context-integrity-v1.md).
+
+In particular:
+
+- translations are never primary semantic evidence;
+- every durable derived claim has provenance;
+- derived repetition cannot increase authority by itself;
+- stale worker output cannot move Context State backwards;
+- edits, deletions and corrections invalidate dependent derived state;
+- memory promotion is bounded, versioned and reversible.
