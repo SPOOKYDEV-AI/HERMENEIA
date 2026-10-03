@@ -120,6 +120,7 @@ The project is intentionally defining its contracts, architecture and evaluation
 - [Local / sandbox CI](docs/engineering/local-ci.md)
 - [Executable Core Skeleton](docs/engineering/executable-core-skeleton.md)
 - [HTTP / Sync Adapter — V1 Slice](docs/engineering/http-sync-adapter-v1.md)
+- [Client Local Outbox & Sync Engine — V1 Slice](docs/engineering/client-outbox-sync-v1.md)
 - [PostgreSQL Core Schema — V1](docs/engineering/postgres-core-schema-v1.md)
 - [Privacy and data minimisation](docs/security/privacy-data-minimisation.md)
 - [Ephemeral messages and corrective memory](docs/architecture/ephemeral-message-memory-v1.md)
