@@ -40,6 +40,13 @@ def main() -> int:
     run(sys.executable, "research/eval/harness.py", "prepare", "--strategy", "T0", "--split", "validation")
     run(sys.executable, "research/eval/harness.py", "prepare", "--strategy", "T1", "--window", "3", "--split", "validation")
     run(sys.executable, "research/eval/harness.py", "prepare", "--strategy", "T2_ORACLE", "--split", "validation")
+
+    package_json = ROOT / "package.json"
+    if package_json.exists():
+        run("npm", "run", "typecheck")
+        run("npm", "run", "build")
+        run("npm", "test")
+
     print("LOCAL_CI=PASS")
     return 0
 
