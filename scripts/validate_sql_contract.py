@@ -12,6 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "db/migrations/0001_core_messaging.sql"
+SESSION_MIGRATION = ROOT / "db/migrations/0002_session_access_credential.sql"
 
 REQUIRED_TABLES = {
     "users",
@@ -61,6 +62,7 @@ def fail(message: str) -> None:
 
 def main() -> int:
     sql = MIGRATION.read_text(encoding="utf-8")
+    session_sql = SESSION_MIGRATION.read_text(encoding="utf-8")
     upper = sql.upper()
 
     if not upper.lstrip().startswith("BEGIN;"):
@@ -105,6 +107,13 @@ def main() -> int:
             fail(f"could not inspect table body for {table}")
         if not re.search(r"\btenant_id\s+uuid\b", match.group(1), flags=re.I):
             fail(f"{table} is expected to be explicitly tenant-scoped")
+
+    if "access_credential_ref text" not in session_sql:
+        fail("session migration must add access_credential_ref")
+    if "WHERE access_credential_ref IS NOT NULL" not in session_sql:
+        fail("session access credential reference must use a partial unique index")
+    if "access_token" in session_sql.lower() or "bearer_token" in session_sql.lower():
+        fail("session migration must not store bearer/access token plaintext")
 
     print(
         "SQL_CONTRACT_PASS "
