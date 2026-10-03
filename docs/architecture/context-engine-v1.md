@@ -90,6 +90,7 @@ A logical ConversationContextState contains:
     active_topic_embedding
     recent_entity_set
     recent_language_style
+    pragmatic_state
     summary_ref
     memory_index_version
     updated_at
@@ -126,7 +127,10 @@ The immediate layer contains the smallest recent set needed to resolve:
 - short answers;
 - local references;
 - negation;
-- conversational tone.
+- conversational tone;
+- emoji contribution;
+- punctuation/casing intensity;
+- pragmatic intent.
 
 This layer is cheap and may directly include raw recent messages.
 
@@ -312,7 +316,8 @@ Logical tasks may include:
 - refresh_episode_summary(episode_id);
 - extract_memory_candidates(message_id);
 - promote_or_invalidate_memory(...);
-- update_retrieval_index(...).
+- update_retrieval_index(...);
+- refresh_pragmatic_state(conversation_id, sequence).
 
 This logical separation does not imply separate microservices.
 
@@ -427,6 +432,9 @@ At minimum:
     context_cache_hit
     episode_decision
     episode_decision_confidence
+    pragmatic_inference_ms
+    pragmatic_confidence
+    emoji_preservation_rate
     async_context_lag_sequences
     translation_provider_ms
     translation_end_to_end_ms
