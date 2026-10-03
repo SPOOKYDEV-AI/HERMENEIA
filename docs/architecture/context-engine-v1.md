@@ -84,7 +84,9 @@ A logical ConversationContextState contains:
 
     conversation_id
     context_version
-    last_processed_sequence
+    processed_prefix_sequence
+    processing_gaps
+    erasure_epoch
     active_episode_id
     active_episode_version
     active_topic_embedding
@@ -100,7 +102,7 @@ A logical ConversationContextState contains:
     claim_graph_version
     updated_at
 
-This state is derived and rebuildable.
+This state is derived. It is **partially restorable** from authorised structured state and recalculable only when required source revisions are still available. Missing source must produce degraded/source-required state, not fabricated reconstruction.
 
 PostgreSQL remains the durable source of truth for metadata, policies, corrective memory, bounded structured state and recovery checkpoints. Raw message bodies are transient by default.
 
@@ -210,7 +212,7 @@ Candidates can come from:
 2. active episode state;
 3. sanitised recovery checkpoint state;
 4. approved CorrectionMemory;
-5. durable MemoryItems permitted by policy;
+5. authorised durable ContextClaims/CorrectionMemory permitted by policy;
 6. explicit reply/quote targets available in the transient/client-supplied context.
 
 Each candidate carries metadata:
@@ -279,13 +281,15 @@ It should identify:
     context_state_version
     active_episode_id
     selected_candidate_ids
-    selected_message_ids
-    selected_memory_ids
+    selected_source_revision_refs
+    selected_claim_refs
+    processed_prefix_sequence
+    processing_gap_refs
+    erasure_epoch
     token_estimate
     created_at
-    freshness_gap
 
-freshness_gap indicates how many messages were not yet represented in the prepared state when the fast path began.
+`processing_gap_refs` identifies causally prior operations not yet incorporated in the prepared projection. A simple maximum/lag count is insufficient because workers may finish out of order.
 
 The snapshot must be sufficient to explain and reproduce evaluation decisions without unnecessarily duplicating private text.
 
@@ -297,7 +301,8 @@ Example race:
     async enrichment starts
 
     seq 101 arrives immediately
-    ContextState.last_processed_sequence = 99
+    ContextState.processed_prefix_sequence = 99
+    processing_gaps includes seq 100
 
 HERMENEIA must not wait for enrichment of seq 100.
 
@@ -309,7 +314,7 @@ Instead it builds the snapshot from:
     +
     current message seq 101
 
-The slow path later catches up and advances last_processed_sequence.
+The slow path later incorporates the missing causal operation and advances the contiguous processed prefix. A completion for seq 102 cannot advance the prefix through an unresolved seq 100/101 gap.
 
 ## 15. Async enrichment
 
@@ -320,8 +325,8 @@ Logical tasks may include:
 - embed_message(message_id);
 - update_episode_features(conversation_id, sequence);
 - refresh_episode_summary(episode_id);
-- extract_memory_candidates(message_id);
-- promote_or_invalidate_memory(...);
+- extract_ephemeral_context_claims(message_id);
+- expire_or_invalidate_ephemeral_claims(...);
 - update_retrieval_index(...);
 - update_context_claims_and_provenance(...);
 - refresh_pragmatic_state(conversation_id, sequence);
@@ -391,11 +396,12 @@ UX must never represent an incomplete translation as final.
 
 If ContextState is unavailable or corrupt:
 
-1. do not lose the message;
-2. reconstruct a minimal safe context from durable recent messages;
-3. translate using a degraded strategy;
-4. mark the execution/snapshot as degraded;
-5. schedule ContextState rebuild.
+1. do not lose the accepted message;
+2. restore approved corrections/glossaries and the latest compatible sanitised checkpoint;
+3. use authorised transient/client-supplied source revisions when available;
+4. otherwise enter DEGRADED_CONTEXT / SOURCE_REQUIRED rather than inventing missing history;
+5. translate only when the required source is available;
+6. schedule safe projection recovery.
 
 If background enrichment repeatedly fails, translation must continue through a bounded fallback strategy.
 
@@ -408,7 +414,7 @@ Deletion/invalidation may affect:
 - embeddings;
 - summaries;
 - episode state;
-- MemoryItems;
+- durable corrective claims;
 - cached candidates;
 - ContextSnapshots according to retention policy.
 
@@ -472,7 +478,7 @@ The Context Engine V1 is not complete until tests demonstrate:
 3. slow-path lag does not omit unprocessed recent messages;
 4. a cold cache can restore a valid minimal snapshot from sanitised checkpoint/policy/correction state without raw history;
 5. duplicate async jobs do not corrupt state;
-6. out-of-order worker completion cannot move last_processed_sequence backwards;
+6. out-of-order worker completion cannot skip a causal gap, advance the contiguous prefix incorrectly, or leak future-message information into an earlier translation;
 7. crossing midnight does not force an episode reset;
 8. stale memory can be penalised;
 9. explicit old-topic references can retrieve older episodes;
@@ -481,7 +487,7 @@ The Context Engine V1 is not complete until tests demonstrate:
 12. deletion cannot leave a cache that reintroduces removed context;
 13. raw message bodies expire from Core according to transient TTL;
 14. explicit correction can create scoped CorrectionMemory;
-15. restart can enter FAST/PARTIAL/CLEAN recovery without raw-history replay.
+15. restart can enter FAST/PARTIAL/DEGRADED recovery without raw-history replay, and source-dependent work becomes SOURCE_REQUIRED when necessary.
 
 ## 25. Non-goals for V1
 
@@ -533,3 +539,10 @@ Draft segmentation happens client-side. Only stable sentence/paragraph fragments
 Draft speculation follows [Draft Stability and Reversible Speculation — V1](draft-stability-v1.md).
 
 The Context Engine never assumes that a user has definitively completed an idea before Send. It accepts only exact-valid stable fragment snapshots, discards stale revisions, and treats draft edit history/cursor behaviour as client-local operational signals rather than durable context.
+
+
+## 30. Contract precedence
+
+For delivery acceptance, source ownership, causal publication and checkpoint freshness, ADR-0016 plus [Delivery Contract — V1](delivery-contract-v1.md) and [Data Lifecycle — V1](data-lifecycle-v1.md) are canonical.
+
+The Context Engine does not own the durable Send ACK. It consumes an already accepted source revision and produces a derived result that is published only after causal dependency validation.
