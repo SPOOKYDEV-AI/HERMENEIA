@@ -133,6 +133,18 @@ Authorization belongs at the application boundary and must be enforced for every
 
 A resource ID is not proof of authorization.
 
+## Context Engine
+
+The Context Engine is specified in [Context Engine V1](context-engine-v1.md).
+
+Its latency model is intentionally incremental: expensive enrichment prepares the next translation asynchronously, while the fast path uses versioned prepared state plus any recent messages that have not yet been processed.
+
 ## Architecture decisions
 
 Major decisions are recorded in `docs/architecture/adr/`.
+
+Relevant foundation ADRs:
+
+- [ADR-0001 — Modular monolith first](adr/0001-modular-monolith-first.md)
+- [ADR-0002 — Context is temporal and adaptive](adr/0002-context-is-temporal-and-adaptive.md)
+- [ADR-0003 — Incremental context processing and latency-first translation](adr/0003-incremental-context-and-latency.md)
