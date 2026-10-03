@@ -615,19 +615,18 @@ export class BoundedTransientSourceStore implements TransientSourceStore {
 
     const key = this.key(record.messageId, record.sourceRevision);
     const existing = this.records.get(key);
-    const existingChars = existing?.source.text.length ?? 0;
-    const projectedEntries = existing ? this.records.size : this.records.size + 1;
-    const projectedChars = this.totalChars - existingChars + chars;
+    if (existing) {
+      throw new Error("Transient source key already exists");
+    }
+
+    const projectedEntries = this.records.size + 1;
+    const projectedChars = this.totalChars + chars;
 
     if (
       projectedEntries > this.maxEntries ||
       projectedChars > this.maxTotalChars
     ) {
       throw new Error("Transient source capacity is exhausted");
-    }
-
-    if (existing) {
-      this.totalChars -= existingChars;
     }
 
     this.records.set(key, {
