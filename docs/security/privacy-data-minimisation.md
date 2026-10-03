@@ -264,7 +264,20 @@ HERMENEIA should minimise these features by default:
 
 Affect inference exists to preserve communication intent, not to profile users.
 
-## 18. Engineering acceptance criteria
+## 18. Derived-memory integrity
+
+Privacy minimisation is ineffective if invalid or deleted information can survive in derived memory.
+
+Therefore:
+
+- derived claims must retain source provenance;
+- source deletion/withdrawal must invalidate dependent derived state;
+- stale workers must not recreate invalidated data;
+- corrections should propagate without retaining unnecessary superseded content;
+- sensitive inferred claims should not be promoted to durable memory by default;
+- conversation text cannot grant itself policy/glossary authority.
+
+## 19. Engineering acceptance criteria
 
 Privacy minimisation is not considered implemented until tests/metrics can show that:
 

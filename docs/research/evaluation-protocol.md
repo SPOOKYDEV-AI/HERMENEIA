@@ -71,7 +71,13 @@ The corpus should cover at least:
 - mid-conversation style shifts;
 - explicit locale preference overriding inference;
 - code-switching and mixed-language messages;
-- typos/phonetic spellings where meaning remains recoverable.
+- typos/phonetic spellings where meaning remains recoverable;
+- wrong inference followed by explicit correction;
+- summary hallucination / unsupported detail;
+- contradictory facts with different validity periods;
+- edited/deleted source messages;
+- stale async worker completion;
+- attempts to promote chat text into privileged policy or glossary state.
 
 ## Metrics
 
@@ -130,6 +136,19 @@ and:
     "Merci..."
 
 These cases test whether HERMENEIA preserves communicative intent without inventing stronger emotion than the source supports.
+
+## Context-integrity evaluation
+
+In addition to translation quality, HERMENEIA must test whether derived context remains correct over time.
+
+Required scenarios include:
+
+- the same derived inference repeated through summaries must not gain authority;
+- a corrected acronym/entity meaning must stop influencing future translations;
+- a deleted source message must not reappear through cache or memory;
+- stale worker output must be rejected;
+- translation output must never become evidence for source meaning;
+- derived state must be rebuildable from authorised source data.
 
 ## Primary question
 
