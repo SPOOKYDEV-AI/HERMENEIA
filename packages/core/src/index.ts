@@ -75,6 +75,7 @@ export class InMemoryMessagingCore {
   private readonly envelopes = new Map<UUID, DeliveryEnvelope>();
   private readonly inboxEvents = new Map<UUID, DeviceInboxEvent[]>();
   private readonly translationJobs = new Map<UUID, TranslationJob>();
+  private readonly ackedEnvelopeIds = new Set<UUID>();
   private readonly envelopeTtlSeconds: number;
 
   constructor(private readonly deps: MessagingCoreDependencies) {
@@ -302,18 +303,21 @@ export class InMemoryMessagingCore {
   }
 
   acknowledgeEnvelope(deviceId: UUID, envelopeId: UUID): void {
+    if (this.ackedEnvelopeIds.has(envelopeId)) {
+      return;
+    }
+
     const envelope = this.envelopes.get(envelopeId);
     if (!envelope || envelope.recipientDeviceId !== deviceId) {
       throw new DomainError("NOT_AUTHORIZED", "Envelope is not available to device");
     }
-    if (envelope.status === "ACKED") {
-      return;
-    }
     if (envelope.status !== "PENDING") {
       throw new DomainError("DELIVERY_EXPIRED", "Envelope is no longer deliverable");
     }
-    envelope.status = "ACKED";
-    envelope.ackedAt = this.deps.clock.now();
+
+    // Relay payload is removed on ACK. Keep only a minimal idempotency tombstone.
+    this.envelopes.delete(envelopeId);
+    this.ackedEnvelopeIds.add(envelopeId);
   }
 
   getMessageCount(): number {
