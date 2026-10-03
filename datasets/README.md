@@ -58,3 +58,14 @@ Maintain a documented separation between:
 - development examples;
 - validation examples;
 - final evaluation examples.
+
+
+## Pilot corpus
+
+The first synthetic evaluation corpus lives in:
+
+    datasets/pilot/v1/
+
+It is intentionally small and exists to validate the T0/T1/T2 evaluation pipeline before provider-specific translation scoring is introduced.
+
+The `test` split is a holdout and should not be used to tune the first adaptive selector.
