@@ -159,6 +159,7 @@ Purpose: revocable authenticated session distinct from device identity.
 Fields:
 
     session_id UUID PK
+    tenant_id UUID
     user_id UUID
     device_id UUID
     access_credential_ref text unique
@@ -170,9 +171,12 @@ Fields:
 
 Indexes:
 
+    (tenant_id, status)
     (user_id, status)
     (device_id, status)
     expires_at
+
+Persistent ActorContext resolution must use the session's exact tenant_id. It must never choose an arbitrary active tenant membership for a multi-tenant user.
 
 ### 3.6 Conversation
 
