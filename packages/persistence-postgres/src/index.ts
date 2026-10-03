@@ -629,19 +629,20 @@ export class PostgresSessionRepository {
         user_id: UUID;
         device_id: UUID;
       }>(
-        `SELECT tm.tenant_id, s.user_id, s.device_id
+        `SELECT s.tenant_id, s.user_id, s.device_id
            FROM sessions s
            JOIN devices d
              ON d.device_id = s.device_id
             AND d.user_id = s.user_id
             AND d.status = 'ACTIVE'
            JOIN tenant_memberships tm
-             ON tm.user_id = s.user_id
+             ON tm.tenant_id = s.tenant_id
+            AND tm.user_id = s.user_id
             AND tm.status = 'ACTIVE'
           WHERE s.access_credential_ref = $1
+            AND s.tenant_id IS NOT NULL
             AND s.status = 'ACTIVE'
             AND s.expires_at > $2
-          ORDER BY tm.tenant_id
           LIMIT 1`,
         [reference, now],
       );
