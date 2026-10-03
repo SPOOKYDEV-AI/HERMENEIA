@@ -282,6 +282,25 @@ export class InMemoryMessagingCore {
     );
   }
 
+  getEnvelopeForDevice(deviceId: UUID, envelopeId: UUID): DeliveryEnvelope | undefined {
+    const envelope = this.envelopes.get(envelopeId);
+    if (!envelope || envelope.recipientDeviceId !== deviceId) {
+      return undefined;
+    }
+    return { ...envelope };
+  }
+
+  getDeviceSyncPosition(deviceId: UUID): { inboxEpoch: number; nextOffset: number } {
+    const device = this.devices.get(deviceId);
+    if (!device || device.status !== "ACTIVE") {
+      throw new DomainError("DEVICE_REVOKED", "Device is not active");
+    }
+    return {
+      inboxEpoch: device.inboxEpoch,
+      nextOffset: device.nextOffset,
+    };
+  }
+
   acknowledgeEnvelope(deviceId: UUID, envelopeId: UUID): void {
     const envelope = this.envelopes.get(envelopeId);
     if (!envelope || envelope.recipientDeviceId !== deviceId) {
