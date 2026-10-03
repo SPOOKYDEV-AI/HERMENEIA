@@ -1,0 +1,278 @@
+import http from "node:http";
+import { URL } from "node:url";
+
+import { DomainError } from "../../.build/packages/domain/src/index.js";
+
+const JSON_LIMIT_BYTES = 70 * 1024;
+const MAX_ACKS = 100;
+const MAX_SYNC_LIMIT = 200;
+const MAX_WAIT_MS = 30_000;
+
+function json(res, statusCode, body) {
+  const payload = JSON.stringify(body);
+  res.writeHead(statusCode, {
+    "content-type": "application/json; charset=utf-8",
+    "content-length": Buffer.byteLength(payload),
+  });
+  res.end(payload);
+}
+
+function noContent(res, statusCode = 204) {
+  res.writeHead(statusCode);
+  res.end();
+}
+
+function errorBody(code, message, retryable = false, details = undefined) {
+  return {
+    code,
+    message,
+    retryable,
+    ...(details ? { details } : {}),
+  };
+}
+
+function mapError(error) {
+  if (error instanceof HttpError) {
+    return {
+      status: error.status,
+      body: errorBody(error.code, error.message, error.retryable),
+    };
+  }
+
+  if (error instanceof DomainError) {
+    switch (error.code) {
+      case "IDEMPOTENCY_CONFLICT":
+        return { status: 409, body: errorBody(error.code, error.message, false) };
+      case "NOT_AUTHORIZED":
+      case "DEVICE_REVOKED":
+        return { status: 403, body: errorBody(error.code, error.message, false) };
+      case "DELIVERY_EXPIRED":
+        return { status: 410, body: errorBody(error.code, error.message, false) };
+      case "INVALID_COMMAND":
+        return { status: 400, body: errorBody(error.code, error.message, false) };
+      default:
+        return { status: 400, body: errorBody(error.code, error.message, false) };
+    }
+  }
+
+  return {
+    status: 500,
+    body: errorBody("INTERNAL_ERROR", "Unexpected server error", true),
+  };
+}
+
+class HttpError extends Error {
+  constructor(status, code, message, retryable = false) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.retryable = retryable;
+  }
+}
+
+async function readJson(req, maxBytes = JSON_LIMIT_BYTES) {
+  const contentLength = Number(req.headers["content-length"] ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new HttpError(413, "PAYLOAD_TOO_LARGE", "Request body is too large");
+  }
+
+  let total = 0;
+  const chunks = [];
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > maxBytes) {
+      throw new HttpError(413, "PAYLOAD_TOO_LARGE", "Request body is too large");
+    }
+    chunks.push(chunk);
+  }
+
+  if (!chunks.length) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw new HttpError(400, "INVALID_COMMAND", "Request body must be valid JSON");
+  }
+}
+
+function requireProtocolV1(body) {
+  if (body.protocol_version !== 1) {
+    throw new HttpError(400, "INVALID_COMMAND", "protocol_version must equal 1");
+  }
+}
+
+function parseCursor(value, currentEpoch) {
+  if (!value) {
+    return { epoch: currentEpoch, offset: 0 };
+  }
+  const match = /^(\d+):(\d+)$/.exec(value);
+  if (!match) {
+    throw new HttpError(409, "SYNC_RESET_REQUIRED", "Cursor format is invalid");
+  }
+  return { epoch: Number(match[1]), offset: Number(match[2]) };
+}
+
+function cursor(epoch, offset) {
+  return `${epoch}:${offset}`;
+}
+
+function normalizeSyncEvent(core, deviceId, event) {
+  const envelope = core.getEnvelopeForDevice(deviceId, event.envelopeId);
+  if (!envelope) {
+    throw new HttpError(409, "SYNC_RESET_REQUIRED", "Envelope no longer available");
+  }
+
+  return {
+    protocol_version: 1,
+    event_id: event.eventId,
+    cursor: cursor(event.inboxEpoch, event.offset),
+    type: event.type,
+    server_time: event.createdAt,
+    tenant_id: event.tenantId,
+    conversation_id: event.conversationId,
+    payload: {
+      message_id: event.messageId,
+      envelope_id: event.envelopeId,
+      source_revision: envelope.sourceRevision,
+      rendition_type: envelope.renditionType,
+      protected_payload: envelope.protectedPayload,
+      expires_at: envelope.expiresAt,
+    },
+  };
+}
+
+function matchPath(pathname, regex) {
+  const match = regex.exec(pathname);
+  return match ? match.slice(1).map(decodeURIComponent) : null;
+}
+
+export function createHermeneiaHttpServer({ core, authenticate }) {
+  if (!core) {
+    throw new TypeError("core is required");
+  }
+  if (typeof authenticate !== "function") {
+    throw new TypeError("authenticate(req) dependency is required");
+  }
+
+  return http.createServer(async (req, res) => {
+    try {
+      const requestUrl = new URL(req.url ?? "/", "http://localhost");
+
+      if (req.method === "GET" && requestUrl.pathname === "/healthz") {
+        return json(res, 200, { status: "ok" });
+      }
+
+      const actor = await authenticate(req);
+      if (!actor) {
+        throw new HttpError(401, "NOT_AUTHORIZED", "Authentication required");
+      }
+
+      const sendMatch = matchPath(
+        requestUrl.pathname,
+        /^\/v1\/conversations\/([^/]+)\/messages$/,
+      );
+      if (req.method === "POST" && sendMatch) {
+        const body = await readJson(req);
+        requireProtocolV1(body);
+
+        if (
+          typeof body.command_id !== "string" ||
+          typeof body.client_message_id !== "string" ||
+          !body.source ||
+          typeof body.source.text !== "string"
+        ) {
+          throw new HttpError(400, "INVALID_COMMAND", "Invalid send payload");
+        }
+
+        const accepted = await core.sendMessage(actor, {
+          protocol_version: 1,
+          command_id: body.command_id,
+          client_message_id: body.client_message_id,
+          conversation_id: sendMatch[0],
+          source: {
+            text: body.source.text,
+            ...(typeof body.source.language_hint === "string"
+              ? { language_hint: body.source.language_hint }
+              : {}),
+          },
+          ...(typeof body.reply_to_message_id === "string"
+            ? { reply_to_message_id: body.reply_to_message_id }
+            : {}),
+          ...(typeof body.client_authored_at === "string"
+            ? { client_authored_at: body.client_authored_at }
+            : {}),
+        });
+
+        return json(res, 202, accepted);
+      }
+
+      if (req.method === "GET" && requestUrl.pathname === "/v1/sync") {
+        const position = core.getDeviceSyncPosition(actor.deviceId);
+        const parsed = parseCursor(requestUrl.searchParams.get("cursor"), position.inboxEpoch);
+
+        if (parsed.epoch !== position.inboxEpoch) {
+          return json(res, 409, {
+            protocol_version: 1,
+            code: "SYNC_RESET_REQUIRED",
+            new_cursor: cursor(position.inboxEpoch, 0),
+            events: [],
+          });
+        }
+
+        const limit = Math.min(
+          MAX_SYNC_LIMIT,
+          Math.max(1, Number(requestUrl.searchParams.get("limit") ?? 100) || 100),
+        );
+        const waitMs = Math.min(
+          MAX_WAIT_MS,
+          Math.max(0, Number(requestUrl.searchParams.get("wait_ms") ?? 0) || 0),
+        );
+
+        let events = core.syncDevice(actor.deviceId, parsed.offset);
+        if (!events.length && waitMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+          events = core.syncDevice(actor.deviceId, parsed.offset);
+        }
+
+        const selected = events.slice(0, limit);
+        const normalized = selected.map((event) =>
+          normalizeSyncEvent(core, actor.deviceId, event),
+        );
+        const lastOffset = selected.length
+          ? selected[selected.length - 1].offset
+          : parsed.offset;
+
+        return json(res, 200, {
+          protocol_version: 1,
+          events: normalized,
+          next_cursor: cursor(position.inboxEpoch, lastOffset),
+        });
+      }
+
+      if (req.method === "POST" && requestUrl.pathname === "/v1/delivery/acks") {
+        const body = await readJson(req);
+        requireProtocolV1(body);
+
+        if (!Array.isArray(body.acks) || body.acks.length < 1 || body.acks.length > MAX_ACKS) {
+          throw new HttpError(400, "INVALID_COMMAND", "acks must contain 1..100 items");
+        }
+
+        for (const ack of body.acks) {
+          if (!ack || typeof ack.envelope_id !== "string") {
+            throw new HttpError(400, "INVALID_COMMAND", "Invalid delivery ACK");
+          }
+          core.acknowledgeEnvelope(actor.deviceId, ack.envelope_id);
+        }
+
+        return noContent(res);
+      }
+
+      throw new HttpError(404, "NOT_FOUND", "Route not found");
+    } catch (error) {
+      const mapped = mapError(error);
+      return json(res, mapped.status, mapped.body);
+    }
+  });
+}

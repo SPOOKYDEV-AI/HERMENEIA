@@ -408,6 +408,8 @@ Required codes:
     DELIVERY_EXPIRED
     INVALID_COMMAND
     PAYLOAD_TOO_LARGE
+    NOT_FOUND
+    INTERNAL_ERROR
 
 Policy rejection never falls back to a less restrictive provider.
 

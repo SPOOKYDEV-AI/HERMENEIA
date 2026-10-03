@@ -15,7 +15,8 @@ Current checks:
 - T0/T1/T2_ORACLE validation baselines execute without causal leakage;
 - TypeScript core contracts typecheck;
 - executable core builds;
-- messaging invariant tests pass with the AI dispatcher down.
+- messaging invariant tests pass with the AI dispatcher down;
+- HTTP send/sync/ACK integration tests pass locally, including retry/idempotency, cursor reset and payload limits.
 
 This does **not** mean GitHub-hosted CI is permanently forbidden.
 
