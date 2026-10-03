@@ -14,3 +14,65 @@ export interface SendMessageCommand {
   reply_to_message_id?: UUID | null;
   client_authored_at?: string | null;
 }
+
+
+export interface AcceptedMessageResponse {
+  protocol_version: 1;
+  status: "ACCEPTED";
+  message_id: UUID;
+  message_seq: number;
+  source_revision: number;
+  accepted_at: string;
+  translation_status:
+    | "NOT_REQUESTED"
+    | "PENDING"
+    | "READY"
+    | "FAILED"
+    | "SOURCE_REQUIRED"
+    | "EXPIRED"
+    | "SUPERSEDED";
+}
+
+export interface ServerEvent {
+  protocol_version: 1;
+  event_id: UUID;
+  cursor: string;
+  type:
+    | "message.accepted"
+    | "message.available"
+    | "message.edited"
+    | "message.deleted"
+    | "translation.pending"
+    | "translation.ready"
+    | "translation.failed"
+    | "translation.source_required"
+    | "translation.expired"
+    | "delivery.expired"
+    | "membership.changed"
+    | "preferences.changed"
+    | "device.revoked"
+    | "sync.reset_required";
+  server_time: string;
+  tenant_id?: UUID;
+  conversation_id?: UUID | null;
+  payload: Record<string, unknown>;
+}
+
+export interface SyncResponse {
+  protocol_version: 1;
+  events: ServerEvent[];
+  next_cursor: string;
+}
+
+export interface DeliveryAckInput {
+  envelope_id: UUID;
+  persisted_at: string;
+}
+
+export interface ApiErrorBody {
+  code: string;
+  message: string;
+  retryable: boolean;
+  retry_after_ms?: number;
+  details?: Record<string, unknown>;
+}
