@@ -388,9 +388,11 @@ export class HttpMessagingTransport implements MessagingTransport {
 
     const retryable =
       apiError?.retryable ??
-      response.status === 408 ||
-      response.status === 429 ||
-      response.status >= 500;
+      (
+        response.status === 408 ||
+        response.status === 429 ||
+        response.status >= 500
+      );
 
     throw new TransportError(
       apiError?.code ?? `HTTP_${response.status}`,
