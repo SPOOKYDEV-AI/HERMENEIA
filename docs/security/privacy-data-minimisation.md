@@ -22,9 +22,11 @@ These categories must not be conflated.
 
 ## 3. Source data
 
-Original messages are durable source-of-truth data only when the selected product/deployment policy requires their storage.
+By default, HERMENEIA Core processes raw message bodies transiently and does not retain them as durable server-side conversation history.
 
-A future deployment may support shorter retention or ephemeral modes, but those modes must not be simulated by merely hiding messages from the UI.
+If a deployment requires historical message storage, that storage belongs to an explicit client/customer-controlled or opt-in deployment profile with its own purpose, retention, access and deletion rules.
+
+Ephemeral mode must be implemented through actual TTL/purge behaviour, not by merely hiding content from the UI.
 
 Source data must have explicit:
 
@@ -34,6 +36,8 @@ Source data must have explicit:
 - deletion behaviour;
 - backup behaviour;
 - tenant ownership.
+
+Raw transient message buffers must not enter long-term backups by default.
 
 ## 4. Conversation State
 
@@ -183,19 +187,20 @@ Debug access to message content, if ever introduced, must be explicitly controll
 
 ## 13. Deletion
 
-Deletion must account for derived data.
+Deletion must account for both transient and derived data.
 
 A conversation deletion may require removal/invalidation of:
 
-- messages;
-- translations;
+- transient raw message buffers;
+- translation execution metadata where required by policy;
 - embeddings;
 - episode summaries;
 - memory items;
 - context snapshots according to retention policy;
 - caches;
 - retrieval indexes;
-- backup copies according to documented backup lifecycle.
+- active/superseded recovery checkpoints;
+- backup copies according to documented backup lifecycle where such data is included.
 
 A deleted message must not reappear because a stale cache repopulated it.
 
@@ -288,4 +293,7 @@ Privacy minimisation is not considered implemented until tests/metrics can show 
 5. Conversation State remains bounded;
 6. provider payload composition is observable without logging private text;
 7. a context-state rebuild can be performed from authorised durable data;
-8. translation still works when no old raw history is available beyond the configured retention window.
+8. translation still works when no old raw history is available beyond the configured transient window;
+9. raw content is purged according to measurable TTL/conditions;
+10. recovery checkpoints remain bounded and do not contain transcript history by default;
+11. a restart can recover through FAST/PARTIAL/CLEAN modes without fabricating missing history.
