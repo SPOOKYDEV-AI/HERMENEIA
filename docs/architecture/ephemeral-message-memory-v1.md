@@ -44,7 +44,7 @@ Examples:
     locale preference
     entity handles
     confidence
-    last_processed_sequence
+    processed_prefix_sequence
 
 Properties:
 
@@ -154,7 +154,6 @@ Durable updates should normally require one of:
     EXPLICIT_TEXTUAL_CORRECTION
     APPROVED_GLOSSARY_CHANGE
     ADMIN/TENANT_POLICY_CHANGE
-    REPEATED_CONFIRMED_REPAIR
 
 Weak signals remain transient.
 
@@ -263,9 +262,10 @@ but no historical raw messages.
 Therefore:
 
 - uncertain ephemeral state may reset;
-- active conversation state may be rebuilt from structured checkpoints;
-- the client may optionally replay a minimal recent window;
-- translation must degrade safely rather than fabricate missing context.
+- active conversation state may be partially restored from structured checkpoints;
+- the client/customer store may re-supply an exact authorised source revision when required;
+- missing source produces DEGRADED_CONTEXT / SOURCE_REQUIRED;
+- translation must never fabricate missing context.
 
 ## 12. Provenance without raw retention
 
@@ -366,3 +366,10 @@ V1 is not complete until:
 8. restart without raw history degrades safely;
 9. stale transient workers cannot recreate purged content;
 10. metrics prove raw-content purge and bounded transient storage.
+
+
+## 18. Canonical lifecycle contract
+
+[Data Lifecycle — V1](data-lifecycle-v1.md) defines the canonical distinction between client-owned durable history, Core transient source, Delivery Relay payloads and durable structured state.
+
+Confidence or repeated usefulness never creates durable corrective memory without an authorised correction/glossary/policy trigger.
