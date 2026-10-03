@@ -439,6 +439,7 @@ Fields:
     actor_user_id UUID
     actor_device_id UUID
     command_type text
+    command_fingerprint text
     status enum(IN_PROGRESS, SUCCEEDED, FAILED)
     result_ref jsonb
     created_at timestamptz
@@ -447,6 +448,8 @@ Fields:
 PK:
 
     (tenant_id, command_id)
+
+`command_fingerprint` is an opaque canonical operation fingerprint used to reject command_id reuse with a different payload.
 
 `result_ref` is bounded structured result metadata and must not contain a raw message transcript.
 
