@@ -28,18 +28,25 @@ export interface RecipientDeliveryTarget {
 
 export interface ExistingMessageAcceptance {
   messageId: UUID;
+  conversationId: UUID;
+  replyToMessageId: UUID | null;
   messageSeq: number;
-  currentRevision: number;
   acceptedAt: string;
   originalSourceHash: string | null;
 }
 
 export interface CommandReceiptRow {
+  actorUserId: UUID;
+  actorDeviceId: UUID;
   commandType: string;
   commandFingerprint: string | null;
   status: "IN_PROGRESS" | "SUCCEEDED" | "FAILED";
   result: Record<string, unknown>;
 }
+
+export type CommandClaimResult =
+  | { claimed: true }
+  | { claimed: false; existing: CommandReceiptRow };
 
 export interface InboxEventRow {
   inboxEpoch: number;
@@ -111,12 +118,15 @@ export class PostgresMessagingRepository {
     commandId: UUID,
   ): Promise<CommandReceiptRow | undefined> {
     const result = await tx.query<{
+      actor_user_id: UUID;
+      actor_device_id: UUID;
       command_type: string;
       command_fingerprint: string | null;
       status: CommandReceiptRow["status"];
       result_ref: Record<string, unknown>;
     }>(
-      `SELECT command_type, command_fingerprint, status, result_ref
+      `SELECT actor_user_id, actor_device_id,
+              command_type, command_fingerprint, status, result_ref
          FROM command_receipts
         WHERE tenant_id = $1
           AND command_id = $2
@@ -127,12 +137,97 @@ export class PostgresMessagingRepository {
     const row = first(result);
     return row
       ? {
+          actorUserId: row.actor_user_id,
+          actorDeviceId: row.actor_device_id,
           commandType: row.command_type,
           commandFingerprint: row.command_fingerprint,
           status: row.status,
           result: row.result_ref,
         }
       : undefined;
+  }
+
+  async claimCommand(
+    tx: SqlExecutor,
+    input: {
+      actor: ActorContext;
+      commandId: UUID;
+      commandType: string;
+      commandFingerprint: string;
+      now: string;
+    },
+  ): Promise<CommandClaimResult> {
+    const inserted = await tx.query<{ command_id: UUID }>(
+      `INSERT INTO command_receipts(
+         tenant_id, command_id, actor_user_id, actor_device_id,
+         command_type, command_fingerprint, status,
+         result_ref, created_at, updated_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,'IN_PROGRESS','{}'::jsonb,$7,$7)
+       ON CONFLICT (tenant_id, command_id) DO NOTHING
+       RETURNING command_id`,
+      [
+        input.actor.tenantId,
+        input.commandId,
+        input.actor.userId,
+        input.actor.deviceId,
+        input.commandType,
+        input.commandFingerprint,
+        input.now,
+      ],
+    );
+
+    if (inserted.rowCount === 1) {
+      return { claimed: true };
+    }
+
+    const existing = await tx.query<{
+      actor_user_id: UUID;
+      actor_device_id: UUID;
+      command_type: string;
+      command_fingerprint: string | null;
+      status: CommandReceiptRow["status"];
+      result_ref: Record<string, unknown>;
+    }>(
+      `SELECT actor_user_id, actor_device_id,
+              command_type, command_fingerprint, status, result_ref
+         FROM command_receipts
+        WHERE tenant_id = $1
+          AND command_id = $2
+        FOR UPDATE`,
+      [input.actor.tenantId, input.commandId],
+    );
+    const row = first(existing);
+    if (!row) {
+      throw new Error("Command conflict disappeared inside transaction");
+    }
+
+    return {
+      claimed: false,
+      existing: {
+        actorUserId: row.actor_user_id,
+        actorDeviceId: row.actor_device_id,
+        commandType: row.command_type,
+        commandFingerprint: row.command_fingerprint,
+        status: row.status,
+        result: row.result_ref,
+      },
+    };
+  }
+
+  async lockClientMessageKey(
+    tx: SqlExecutor,
+    actor: ActorContext,
+    clientMessageId: UUID,
+  ): Promise<void> {
+    const lockKey = [
+      actor.tenantId,
+      actor.userId,
+      clientMessageId,
+    ].join(":");
+    await tx.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [lockKey],
+    );
   }
 
   async findAcceptedMessageByClientId(
@@ -142,14 +237,16 @@ export class PostgresMessagingRepository {
   ): Promise<ExistingMessageAcceptance | undefined> {
     const result = await tx.query<{
       message_id: UUID;
+      conversation_id: UUID;
+      reply_to_message_id: UUID | null;
       message_seq: number;
-      current_revision: number;
       accepted_at: string;
       source_hash: string | null;
     }>(
       `SELECT mm.message_id,
+              mm.conversation_id,
+              mm.reply_to_message_id,
               mm.message_seq,
-              mm.current_revision,
               mm.accepted_at::text AS accepted_at,
               mr.source_hash
          FROM message_metadata mm
@@ -166,8 +263,9 @@ export class PostgresMessagingRepository {
     return row
       ? {
           messageId: row.message_id,
+          conversationId: row.conversation_id,
+          replyToMessageId: row.reply_to_message_id,
           messageSeq: Number(row.message_seq),
-          currentRevision: Number(row.current_revision),
           acceptedAt: row.accepted_at,
           originalSourceHash: row.source_hash,
         }
@@ -233,12 +331,10 @@ export class PostgresMessagingRepository {
       user_id: UUID;
       device_id: UUID | null;
       credential_version: number | null;
-      public_material_ref: string | null;
     }>(
       `SELECT cm.user_id,
               d.device_id,
-              d.credential_version,
-              d.public_material_ref
+              d.credential_version
          FROM conversation_members cm
          JOIN tenant_memberships tm
            ON tm.tenant_id = cm.tenant_id
@@ -261,16 +357,11 @@ export class PostgresMessagingRepository {
         userId: row.user_id,
         devices: [],
       };
-      if (
-        row.device_id &&
-        row.credential_version !== null &&
-        row.public_material_ref
-      ) {
+      if (row.device_id && row.credential_version !== null) {
         target.devices.push({
           userId: row.user_id,
           deviceId: row.device_id,
           credentialVersion: Number(row.credential_version),
-          publicMaterialRef: row.public_material_ref,
         });
       }
       targets.set(row.user_id, target);
@@ -510,7 +601,7 @@ export class PostgresMessagingRepository {
     );
   }
 
-  async insertCommandReceipt(
+  async markCommandSucceeded(
     tx: SqlExecutor,
     input: {
       tenantId: UUID;
@@ -523,12 +614,18 @@ export class PostgresMessagingRepository {
       now: string;
     },
   ): Promise<void> {
-    await tx.query(
-      `INSERT INTO command_receipts(
-         tenant_id, command_id, actor_user_id, actor_device_id,
-         command_type, command_fingerprint, status,
-         result_ref, created_at, updated_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,'SUCCEEDED',$7::jsonb,$8,$8)`,
+    const updated = await tx.query(
+      `UPDATE command_receipts
+          SET status = 'SUCCEEDED',
+              result_ref = $7::jsonb,
+              updated_at = $8
+        WHERE tenant_id = $1
+          AND command_id = $2
+          AND actor_user_id = $3
+          AND actor_device_id = $4
+          AND command_type = $5
+          AND command_fingerprint = $6
+          AND status = 'IN_PROGRESS'`,
       [
         input.tenantId,
         input.commandId,
@@ -540,6 +637,9 @@ export class PostgresMessagingRepository {
         input.now,
       ],
     );
+    if (updated.rowCount !== 1) {
+      throw new Error("Command receipt was not claimable as succeeded");
+    }
   }
 
   async getDeviceSyncState(
