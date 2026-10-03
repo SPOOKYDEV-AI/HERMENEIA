@@ -51,6 +51,7 @@ Possible elements:
     active_entity_handles
     terminology_state
     tone_register_state
+    pragmatic_state
     temporal_reference_state
     compact_summary_ref
     memory_refs
@@ -248,7 +249,22 @@ The architecture is intentionally compatible with GDPR principles including:
 
 Compliance still depends on the actual controller/processor roles, legal basis, notices, contracts, retention, transfers, security measures and deployed provider configuration.
 
-## 17. Engineering acceptance criteria
+## 17. Affect and intent inference
+
+Pragmatic and affective features derived from messages remain protected derived data when linked to users.
+
+HERMENEIA should minimise these features by default:
+
+- prefer message/episode-scoped signals over durable profiles;
+- attach confidence and temporal scope;
+- expire transient affect aggressively;
+- never infer or persist psychological/mental-health profiles merely to improve translation;
+- do not expose raw affective content in routine logs;
+- delete/invalidate derived pragmatic state together with its authorised source lifecycle.
+
+Affect inference exists to preserve communication intent, not to profile users.
+
+## 18. Engineering acceptance criteria
 
 Privacy minimisation is not considered implemented until tests/metrics can show that:
 
