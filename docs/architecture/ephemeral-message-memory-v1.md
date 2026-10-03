@@ -70,6 +70,25 @@ Examples:
 
 This layer is small and event-driven.
 
+### Layer D — sanitised recovery checkpoint
+
+Purpose:
+
+- automatically recover validated Conversation State after crash/restart;
+- preserve confirmed corrections and stable context without storing a transcript.
+
+Properties:
+
+    structured
+    bounded
+    no verbatim history by default
+    weak hypotheses removed
+    versioned
+    integrity-checked
+    short retention / superseded checkpoints expired
+
+See [Sanitised Recovery Checkpoint — V1](recovery-checkpoint-v1.md).
+
 ## 3. Repair detection
 
 HERMENEIA should recognise conversation-repair patterns.
@@ -237,7 +256,7 @@ After a Core restart, HERMENEIA may have:
 
     durable CorrectionMemory
     approved glossaries/policies
-    bounded structured state/checkpoint
+    latest valid Sanitised Recovery Checkpoint
 
 but no historical raw messages.
 
