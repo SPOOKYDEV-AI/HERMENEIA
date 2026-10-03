@@ -253,3 +253,22 @@ For each profile record:
     recovery mode
 
 Fault-injection tools such as Toxiproxy and container netem/Pumba may be used in reproducible integration tests.
+
+
+## Pilot harness implementation
+
+The executable V1 selector harness is in `research/eval/harness.py`.
+
+Current executable strategies:
+
+- `T0` — no prior context;
+- `T1` — fixed recent causal window;
+- `T2_ORACLE` — gold-labelled upper bound used only to validate plumbing.
+
+`T2_ORACLE` is not HERMENEIA's adaptive Context Engine and must never be reported as T2 product performance.
+
+Local/sandbox verification is executed with:
+
+    python scripts/local_ci.py
+
+Provider translation and blinded quality judging will be added after the Translation contract has a concrete adapter implementation.
