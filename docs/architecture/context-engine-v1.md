@@ -93,6 +93,8 @@ A logical ConversationContextState contains:
     pragmatic_state
     lexical_state
     domain_terminology_state
+    target_language_profile_ref
+    conversation_style_profile
     summary_ref
     memory_index_version
     updated_at
@@ -321,7 +323,8 @@ Logical tasks may include:
 - update_retrieval_index(...);
 - refresh_pragmatic_state(conversation_id, sequence);
 - refresh_lexical_state(conversation_id, sequence);
-- refresh_domain_terminology_state(conversation_id, sequence).
+- refresh_domain_terminology_state(conversation_id, sequence);
+- refresh_conversation_style_profile(conversation_id, sequence).
 
 This logical separation does not imply separate microservices.
 
@@ -445,6 +448,9 @@ At minimum:
     glossary_hit_rate
     terminology_ambiguity_rate
     terminology_consistency_rate
+    style_profile_update_ms
+    locale_resolution_ms
+    neutral_locale_fallback_rate
     async_context_lag_sequences
     translation_provider_ms
     translation_end_to_end_ms
