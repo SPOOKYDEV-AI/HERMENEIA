@@ -89,6 +89,9 @@ The client must avoid splitting:
 
 ## 5. Stability state machine
 
+Detailed stability/invalidation behaviour is defined in [Draft Stability and Reversible Speculation — V1](draft-stability-v1.md).
+
+
 A fragment may move through:
 
     EDITING
@@ -99,6 +102,8 @@ A fragment may move through:
       -> FINAL_REUSED
 
 Any edit touching a fragment after speculation changes its revision/hash and invalidates the old result.
+
+The current edit region is treated as a conservative **mutable frontier**. Earlier untouched blocks may become independent **stable islands** eligible for speculation.
 
 ## 6. Speculative request
 
@@ -223,6 +228,9 @@ It may influence only DraftTranslationState.
 After Send, the final accepted message can update normal working Conversation State.
 
 ## 15. Corrections
+
+Correctness depends on exact revision/hash validation, not on predicting that the user has finished an idea.
+
 
 If the user edits an already speculated paragraph:
 
