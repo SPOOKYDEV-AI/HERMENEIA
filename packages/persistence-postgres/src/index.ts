@@ -625,7 +625,7 @@ export class PostgresMessagingRepository {
       `UPDATE delivery_envelopes
           SET status = 'ACKED',
               acked_at = $4,
-              protected_payload = '\\x'::bytea
+              protected_payload = decode('', 'hex')
         WHERE tenant_id = $1
           AND envelope_id = $2
           AND recipient_device_id = $3
