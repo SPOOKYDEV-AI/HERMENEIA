@@ -194,26 +194,36 @@ Every context improvement must remain comparable with:
 
 ## 15. Data entities
 
-Initial domain model:
+Canonical domain model is defined in [Canonical Domain & Data Model — V1](../architecture/canonical-data-model-v1.md).
 
-- User
-- Conversation
-- ConversationMember
-- MessageMetadata
-- TranslationExecution
-- EpisodeState
-- MemoryItem
-- TranslationRepairEvent
-- CorrectionMemory
-- RecoveryCheckpoint
-- ContextSnapshot
-- TranslationEvaluation
-- ModelExecution
-- UserFeedback
+Core durable entities include:
 
-This is a logical model, not permission to create all tables before their behaviour is implemented.
+- User / Tenant / TenantMembership;
+- Device / Session;
+- Conversation / ConversationMember;
+- MessageMetadata / MessageRevision;
+- ContextSnapshot;
+- TranslationExecution / ProviderExecution;
+- DeliveryEnvelope / DeviceInboxEvent / DeviceSyncState;
+- ConversationContextState;
+- ContextClaim / ProvenanceEdge;
+- TranslationRepairEvent;
+- GlossaryEntry;
+- RecoveryCheckpoint;
+- OutboxJob;
+- DeletionLedger / UsageLedger.
 
-## 16. Translation traceability
+There is intentionally **no generic durable MemoryItem table** in V1. CorrectionMemory is a controlled logical subtype of ContextClaim.
+
+EpisodeState, TargetLanguageProfile and per-speaker/direction ConversationStyleProfile are value objects/projections unless measurements justify dedicated tables.
+
+## 16. Protocol contract
+
+HTTP/realtime semantics are defined in [API & Realtime Protocol — V1](../architecture/protocol-v1.md) and materialised initially in `api/openapi.yaml` plus `packages/protocol/schemas/`.
+
+The protocol is transport-independent: WebSocket and long-poll sync carry the same versioned server events.
+
+## 17. Translation traceability
 
 A translation record should be able to identify:
 
@@ -228,7 +238,7 @@ A translation record should be able to identify:
 - execution status;
 - creation time.
 
-## 17. Product capability acceptance catalogue
+## 18. Product capability acceptance catalogue
 
 These criteria describe the broader product/research programme. **They are not all mandatory for Core Messaging V1.** Release-gating ownership is defined in [Implementation Scope — V1](implementation-scope-v1.md).
 
@@ -313,7 +323,7 @@ The following capabilities must be demonstrated before the relevant scope gradua
 77. The messaging critical path remains usable even when translation is degraded.
 78. Expansion to additional scripts/locales does not require changing core message identity or translation ownership.
 
-## 18. Responsiveness and incremental understanding
+## 19. Responsiveness and incremental understanding
 
 Context construction must not rebuild the complete conversation on every message.
 
@@ -341,14 +351,14 @@ excluding provider inference/network time.
 
 These values are engineering targets to validate, not current performance claims.
 
-## 19. Success definition
+## 20. Success definition
 
 HERMENEIA succeeds only if adaptive context demonstrates measurable value relative to T0/T1 under a documented evaluation method **without making interactive translation unacceptably slow or degrading the messaging experience**.
 
 A visually complete chat UI without quality and latency evidence is not sufficient.
 
 
-## 20. Canonical contract precedence
+## 21. Canonical contract precedence
 
 When older requirements conflict with newer lifecycle/delivery rules, the following are canonical:
 
