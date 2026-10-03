@@ -205,7 +205,20 @@ The current execution-level contracts are:
 
 - [Delivery Contract — V1](delivery-contract-v1.md);
 - [Data Lifecycle — V1](data-lifecycle-v1.md);
+- [Canonical Domain & Data Model — V1](canonical-data-model-v1.md);
+- [API & Realtime Protocol — V1](protocol-v1.md);
 - [Device Trust and Delivery Envelope Security — V1](../security/device-trust-v1.md);
 - [Implementation Scope — V1](../specification/implementation-scope-v1.md).
 
 These documents reconcile older design language. In particular, durable acceptance is independent of translation, the Core does not own durable plaintext history by default, recovery is explicitly partial when sources have expired, and causal publication/erasure epochs guard stale workers and checkpoints.
+
+
+## Canonical ordering model
+
+Implementation must preserve three independent orders:
+
+- conversation `message_seq` for new logical messages;
+- conversation `op_seq` for edits/deletes/corrections and other state-changing operations;
+- device inbox `epoch + offset` for synchronisation.
+
+A global SQL sequence or client timestamp must not be reused as a substitute for these domain-specific orders.

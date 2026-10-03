@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermeneia.dev/schemas/v1/api-error.schema.json",
+  "title": "HERMENEIA API Error V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "code",
+    "message",
+    "retryable"
+  ],
+  "properties": {
+    "code": {
+      "type": "string",
+      "enum": [
+        "IDEMPOTENCY_CONFLICT",
+        "REVISION_CONFLICT",
+        "NOT_AUTHORIZED",
+        "DEVICE_REVOKED",
+        "SOURCE_REQUIRED",
+        "SOURCE_EXPIRED",
+        "SOURCE_REVISION_MISMATCH",
+        "SYNC_CURSOR_EXPIRED",
+        "SYNC_RESET_REQUIRED",
+        "POLICY_REJECTED",
+        "QUOTA_EXCEEDED",
+        "PROVIDER_UNAVAILABLE",
+        "DELIVERY_EXPIRED",
+        "INVALID_COMMAND",
+        "PAYLOAD_TOO_LARGE"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "retry_after_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "details": {
+      "type": "object",
+      "maxProperties": 16
+    }
+  }
+}

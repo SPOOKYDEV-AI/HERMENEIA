@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermeneia.dev/schemas/v1/server-event.schema.json",
+  "title": "HERMENEIA Server Event V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol_version",
+    "event_id",
+    "cursor",
+    "type",
+    "server_time",
+    "payload"
+  ],
+  "properties": {
+    "protocol_version": {
+      "const": 1
+    },
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "cursor": {
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "message.accepted",
+        "message.available",
+        "message.edited",
+        "message.deleted",
+        "translation.pending",
+        "translation.ready",
+        "translation.failed",
+        "translation.source_required",
+        "translation.expired",
+        "delivery.expired",
+        "membership.changed",
+        "preferences.changed",
+        "device.revoked",
+        "sync.reset_required"
+      ]
+    },
+    "server_time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "conversation_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "payload": {
+      "type": "object",
+      "maxProperties": 64
+    }
+  }
+}

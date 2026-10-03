@@ -1,0 +1,763 @@
+openapi: 3.1.0
+info:
+  title: HERMENEIA API
+  version: 0.1.0
+  description: >
+    Canonical V1 application protocol for reliable multilingual messaging.
+    Business semantics are transport-independent. Realtime transports reuse the
+    same event model documented in docs/architecture/protocol-v1.md.
+servers:
+  - url: https://api.example.invalid
+tags:
+  - name: Messages
+  - name: Delivery
+  - name: Sync
+  - name: Translation
+  - name: Preferences
+  - name: Devices
+paths:
+  /v1/conversations/{conversation_id}/messages:
+    post:
+      tags: [Messages]
+      operationId: sendMessage
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+      responses:
+        '202':
+          description: Logical message durably accepted for delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptedMessage'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+  /v1/commands/{command_id}:
+    get:
+      tags: [Messages]
+      operationId: getCommandStatus
+      parameters:
+        - $ref: '#/components/parameters/CommandId'
+      responses:
+        '200':
+          description: Command status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandStatus'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/sync:
+    get:
+      tags: [Sync]
+      operationId: sync
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+        - name: wait_ms
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 30000
+            default: 0
+      responses:
+        '200':
+          description: Ordered device-scoped events.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResponse'
+        '409':
+          description: Cursor cannot be continued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResetRequired'
+  /v1/delivery/acks:
+    post:
+      tags: [Delivery]
+      operationId: acknowledgeDelivery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryAckRequest'
+      responses:
+        '204':
+          description: ACKs accepted idempotently.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /v1/conversations/{conversation_id}/read-cursor:
+    put:
+      tags: [Messages]
+      operationId: updateReadCursor
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReadCursorRequest'
+      responses:
+        '204':
+          description: Read cursor updated.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /v1/messages/{message_id}:
+    patch:
+      tags: [Messages]
+      operationId: editMessage
+      parameters:
+        - $ref: '#/components/parameters/MessageId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EditMessageRequest'
+      responses:
+        '200':
+          description: New immutable source revision accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageRevisionResult'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    delete:
+      tags: [Messages]
+      operationId: deleteMessage
+      parameters:
+        - $ref: '#/components/parameters/MessageId'
+        - name: command_id
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: expected_revision
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Tombstone revision accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageRevisionResult'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /v1/translations/{translation_id}/feedback:
+    post:
+      tags: [Translation]
+      operationId: createTranslationFeedback
+      parameters:
+        - $ref: '#/components/parameters/TranslationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TranslationFeedbackRequest'
+      responses:
+        '202':
+          description: Repair/problem signal recorded.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /v1/conversations/{conversation_id}/corrections:
+    post:
+      tags: [Translation]
+      operationId: createCorrection
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorrectionRequest'
+      responses:
+        '202':
+          description: Correction candidate recorded; authorisation/scope applied by server.
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /v1/translations/{translation_id}/source:
+    post:
+      tags: [Translation]
+      operationId: resupplyTranslationSource
+      parameters:
+        - $ref: '#/components/parameters/TranslationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceResupplyRequest'
+      responses:
+        '202':
+          description: Exact source revision accepted for retry.
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /v1/translations/{translation_id}/retry:
+    post:
+      tags: [Translation]
+      operationId: retryTranslation
+      parameters:
+        - $ref: '#/components/parameters/TranslationId'
+      responses:
+        '202':
+          description: Retry admitted.
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /v1/me/language-preferences:
+    put:
+      tags: [Preferences]
+      operationId: updateLanguagePreferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LanguagePreferenceRequest'
+      responses:
+        '204':
+          description: Preferences updated.
+  /v1/devices:
+    post:
+      tags: [Devices]
+      operationId: registerDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterDeviceRequest'
+      responses:
+        '201':
+          description: Device registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResult'
+    get:
+      tags: [Devices]
+      operationId: listDevices
+      responses:
+        '200':
+          description: Devices for current user.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeviceResult'
+  /v1/devices/{device_id}/revoke:
+    post:
+      tags: [Devices]
+      operationId: revokeDevice
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      responses:
+        '204':
+          description: Device revoked.
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  parameters:
+    ConversationId:
+      name: conversation_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    MessageId:
+      name: message_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    TranslationId:
+      name: translation_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    DeviceId:
+      name: device_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
+    CommandId:
+      name: command_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Uuid'
+  responses:
+    Conflict:
+      description: Domain conflict.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Forbidden:
+      description: Not authorised.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    NotFound:
+      description: Resource not found or not visible.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    PayloadTooLarge:
+      description: Payload rejected by size policy.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    TooManyRequests:
+      description: Quota or rate limit reached.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+    Timestamp:
+      type: string
+      format: date-time
+    LanguageTag:
+      type: string
+      minLength: 2
+      maxLength: 64
+      description: BCP 47 language tag where known.
+    SourceContent:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 65536
+        language_hint:
+          $ref: '#/components/schemas/LanguageTag'
+    SendMessageRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, command_id, client_message_id, source]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        client_message_id:
+          $ref: '#/components/schemas/Uuid'
+        source:
+          $ref: '#/components/schemas/SourceContent'
+        reply_to_message_id:
+          anyOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        client_authored_at:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    AcceptedMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - status
+        - message_id
+        - message_seq
+        - source_revision
+        - accepted_at
+        - translation_status
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        status:
+          type: string
+          const: ACCEPTED
+        message_id:
+          $ref: '#/components/schemas/Uuid'
+        message_seq:
+          type: integer
+          minimum: 1
+        source_revision:
+          type: integer
+          minimum: 1
+        accepted_at:
+          $ref: '#/components/schemas/Timestamp'
+        translation_status:
+          $ref: '#/components/schemas/TranslationStatus'
+    CommandStatus:
+      type: object
+      additionalProperties: false
+      required: [command_id, status]
+      properties:
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [UNKNOWN, IN_PROGRESS, SUCCEEDED, FAILED]
+        result:
+          type: object
+          additionalProperties: true
+    DeliveryAck:
+      type: object
+      additionalProperties: false
+      required: [envelope_id, persisted_at]
+      properties:
+        envelope_id:
+          $ref: '#/components/schemas/Uuid'
+        persisted_at:
+          $ref: '#/components/schemas/Timestamp'
+    DeliveryAckRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, acks]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        acks:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/DeliveryAck'
+    ReadCursorRequest:
+      type: object
+      additionalProperties: false
+      required: [read_message_seq]
+      properties:
+        read_message_seq:
+          type: integer
+          minimum: 0
+        expected_membership_version:
+          type: integer
+          minimum: 0
+    EditMessageRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, command_id, expected_revision, source]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        expected_revision:
+          type: integer
+          minimum: 1
+        source:
+          $ref: '#/components/schemas/SourceContent'
+    MessageRevisionResult:
+      type: object
+      additionalProperties: false
+      required: [message_id, revision, op_seq, status]
+      properties:
+        message_id:
+          $ref: '#/components/schemas/Uuid'
+        revision:
+          type: integer
+          minimum: 1
+        op_seq:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [ACTIVE, DELETED]
+    TranslationFeedbackRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, command_id, kind]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        kind:
+          type: string
+          enum: [PROBLEM, WRONG_MEANING, WRONG_TONE, TERMINOLOGY, OTHER]
+        note:
+          type: string
+          maxLength: 2048
+    CorrectionRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, command_id, kind, requested_scope, payload]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        target_message_id:
+          anyOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        target_source_revision:
+          type: integer
+          minimum: 1
+        target_translation_id:
+          anyOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        kind:
+          type: string
+          enum: [MEANING, TONE, TERMINOLOGY]
+        requested_scope:
+          type: string
+          enum: [MESSAGE, CONVERSATION, TENANT]
+        payload:
+          type: object
+          additionalProperties: true
+          maxProperties: 16
+    SourceResupplyRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - command_id
+        - message_id
+        - source_revision
+        - source_hash
+        - source
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        message_id:
+          $ref: '#/components/schemas/Uuid'
+        source_revision:
+          type: integer
+          minimum: 1
+        source_hash:
+          type: string
+          minLength: 16
+          maxLength: 256
+        source:
+          $ref: '#/components/schemas/SourceContent'
+    LanguagePreferenceRequest:
+      type: object
+      additionalProperties: false
+      required: [target_language]
+      properties:
+        target_language:
+          $ref: '#/components/schemas/LanguageTag'
+        target_locale:
+          $ref: '#/components/schemas/LanguageTag'
+        preferred_register:
+          type: string
+          enum: [NEUTRAL, FORMAL, INFORMAL]
+    RegisterDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, command_id, public_material, credential_version]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        public_material:
+          type: string
+          minLength: 1
+          maxLength: 16384
+        credential_version:
+          type: integer
+          minimum: 1
+        platform:
+          type: string
+          enum: [WEB, ANDROID, IOS, DESKTOP, OTHER]
+    DeviceResult:
+      type: object
+      additionalProperties: false
+      required: [device_id, status, credential_version, registered_at]
+      properties:
+        device_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [ACTIVE, REVOKED, LOST]
+        credential_version:
+          type: integer
+          minimum: 1
+        registered_at:
+          $ref: '#/components/schemas/Timestamp'
+        revoked_at:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    TranslationStatus:
+      type: string
+      enum: [NOT_REQUESTED, PENDING, READY, FAILED, SOURCE_REQUIRED, EXPIRED, SUPERSEDED]
+    ServerEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - event_id
+        - cursor
+        - type
+        - server_time
+        - payload
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        event_id:
+          $ref: '#/components/schemas/Uuid'
+        cursor:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          enum:
+            - message.accepted
+            - message.available
+            - message.edited
+            - message.deleted
+            - translation.pending
+            - translation.ready
+            - translation.failed
+            - translation.source_required
+            - translation.expired
+            - delivery.expired
+            - membership.changed
+            - preferences.changed
+            - device.revoked
+            - sync.reset_required
+        server_time:
+          $ref: '#/components/schemas/Timestamp'
+        tenant_id:
+          $ref: '#/components/schemas/Uuid'
+        conversation_id:
+          anyOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        payload:
+          type: object
+          additionalProperties: true
+    SyncResponse:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, events, next_cursor]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        events:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/ServerEvent'
+        next_cursor:
+          type: string
+    SyncResetRequired:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, code, new_cursor, events]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        code:
+          type: string
+          const: SYNC_RESET_REQUIRED
+        new_cursor:
+          type: string
+        events:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/ServerEvent'
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable]
+      properties:
+        code:
+          type: string
+          enum:
+            - IDEMPOTENCY_CONFLICT
+            - REVISION_CONFLICT
+            - NOT_AUTHORIZED
+            - DEVICE_REVOKED
+            - SOURCE_REQUIRED
+            - SOURCE_EXPIRED
+            - SOURCE_REVISION_MISMATCH
+            - SYNC_CURSOR_EXPIRED
+            - SYNC_RESET_REQUIRED
+            - POLICY_REJECTED
+            - QUOTA_EXCEEDED
+            - PROVIDER_UNAVAILABLE
+            - DELIVERY_EXPIRED
+            - INVALID_COMMAND
+            - PAYLOAD_TOO_LARGE
+        message:
+          type: string
+          maxLength: 1024
+        retryable:
+          type: boolean
+        retry_after_ms:
+          type: integer
+          minimum: 0
+        details:
+          type: object
+          additionalProperties: true
+          maxProperties: 16
