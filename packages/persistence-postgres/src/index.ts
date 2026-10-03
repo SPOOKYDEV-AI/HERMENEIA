@@ -20,15 +20,22 @@ export interface RecipientDevice {
   credentialVersion: number;
 }
 
+export interface RecipientDeliveryTarget {
+  userId: UUID;
+  devices: RecipientDevice[];
+}
+
 export interface ExistingMessageAcceptance {
   messageId: UUID;
   messageSeq: number;
   currentRevision: number;
   acceptedAt: string;
-  sourceHash: string | null;
+  originalSourceHash: string | null;
 }
 
 export interface CommandReceiptRow {
+  commandType: string;
+  commandFingerprint: string | null;
   status: "IN_PROGRESS" | "SUCCEEDED" | "FAILED";
   result: Record<string, unknown>;
 }
@@ -103,10 +110,12 @@ export class PostgresMessagingRepository {
     commandId: UUID,
   ): Promise<CommandReceiptRow | undefined> {
     const result = await tx.query<{
+      command_type: string;
+      command_fingerprint: string | null;
       status: CommandReceiptRow["status"];
       result_ref: Record<string, unknown>;
     }>(
-      `SELECT status, result_ref
+      `SELECT command_type, command_fingerprint, status, result_ref
          FROM command_receipts
         WHERE tenant_id = $1
           AND command_id = $2
@@ -116,7 +125,12 @@ export class PostgresMessagingRepository {
     );
     const row = first(result);
     return row
-      ? { status: row.status, result: row.result_ref }
+      ? {
+          commandType: row.command_type,
+          commandFingerprint: row.command_fingerprint,
+          status: row.status,
+          result: row.result_ref,
+        }
       : undefined;
   }
 
@@ -141,7 +155,7 @@ export class PostgresMessagingRepository {
          JOIN message_revisions mr
            ON mr.tenant_id = mm.tenant_id
           AND mr.message_id = mm.message_id
-          AND mr.revision = mm.current_revision
+          AND mr.revision = 1
         WHERE mm.tenant_id = $1
           AND mm.author_user_id = $2
           AND mm.client_message_id = $3`,
@@ -154,7 +168,7 @@ export class PostgresMessagingRepository {
           messageSeq: Number(row.message_seq),
           currentRevision: Number(row.current_revision),
           acceptedAt: row.accepted_at,
-          sourceHash: row.source_hash,
+          originalSourceHash: row.source_hash,
         }
       : undefined;
   }
@@ -175,6 +189,14 @@ export class PostgresMessagingRepository {
           SET next_message_seq = c.next_message_seq + 1,
               next_op_seq = c.next_op_seq + 1
          FROM conversation_members cm
+         JOIN tenant_memberships tm
+           ON tm.tenant_id = cm.tenant_id
+          AND tm.user_id = cm.user_id
+          AND tm.status = 'ACTIVE'
+         JOIN devices actor_device
+           ON actor_device.device_id = $4
+          AND actor_device.user_id = cm.user_id
+          AND actor_device.status = 'ACTIVE'
         WHERE c.tenant_id = $1
           AND c.conversation_id = $2
           AND c.status = 'ACTIVE'
@@ -187,7 +209,7 @@ export class PostgresMessagingRepository {
                 c.membership_epoch,
                 c.erasure_epoch,
                 c.policy_version`,
-      [actor.tenantId, conversationId, actor.userId],
+      [actor.tenantId, conversationId, actor.userId, actor.deviceId],
     );
     const row = first(result);
     return row
@@ -201,33 +223,69 @@ export class PostgresMessagingRepository {
       : undefined;
   }
 
-  async listRecipientDevices(
+  async listRecipientDeliveryTargets(
     tx: SqlExecutor,
     actor: ActorContext,
     conversationId: UUID,
-  ): Promise<RecipientDevice[]> {
+  ): Promise<RecipientDeliveryTarget[]> {
     const result = await tx.query<{
       user_id: UUID;
-      device_id: UUID;
-      credential_version: number;
+      device_id: UUID | null;
+      credential_version: number | null;
     }>(
-      `SELECT d.user_id, d.device_id, d.credential_version
+      `SELECT cm.user_id,
+              d.device_id,
+              d.credential_version
          FROM conversation_members cm
-         JOIN devices d
+         JOIN tenant_memberships tm
+           ON tm.tenant_id = cm.tenant_id
+          AND tm.user_id = cm.user_id
+          AND tm.status = 'ACTIVE'
+         LEFT JOIN devices d
            ON d.user_id = cm.user_id
           AND d.status = 'ACTIVE'
         WHERE cm.tenant_id = $1
           AND cm.conversation_id = $2
           AND cm.status = 'ACTIVE'
-          AND d.device_id <> $3
-        ORDER BY d.device_id`,
-      [actor.tenantId, conversationId, actor.deviceId],
+          AND cm.user_id <> $3
+        ORDER BY cm.user_id, d.device_id`,
+      [actor.tenantId, conversationId, actor.userId],
     );
-    return result.rows.map((row) => ({
-      userId: row.user_id,
-      deviceId: row.device_id,
-      credentialVersion: Number(row.credential_version),
-    }));
+
+    const targets = new Map<UUID, RecipientDeliveryTarget>();
+    for (const row of result.rows) {
+      const target = targets.get(row.user_id) ?? {
+        userId: row.user_id,
+        devices: [],
+      };
+      if (row.device_id && row.credential_version !== null) {
+        target.devices.push({
+          userId: row.user_id,
+          deviceId: row.device_id,
+          credentialVersion: Number(row.credential_version),
+        });
+      }
+      targets.set(row.user_id, target);
+    }
+    return [...targets.values()];
+  }
+
+  async replyTargetExists(
+    tx: SqlExecutor,
+    tenantId: UUID,
+    conversationId: UUID,
+    messageId: UUID,
+  ): Promise<boolean> {
+    const result = await tx.query<{ found: boolean }>(
+      `SELECT TRUE AS found
+         FROM message_metadata
+        WHERE tenant_id = $1
+          AND conversation_id = $2
+          AND message_id = $3
+        LIMIT 1`,
+      [tenantId, conversationId, messageId],
+    );
+    return Boolean(first(result)?.found);
   }
 
   async insertMessageMetadata(
@@ -452,6 +510,7 @@ export class PostgresMessagingRepository {
       actorUserId: UUID;
       actorDeviceId: UUID;
       commandType: string;
+      commandFingerprint: string;
       result: Record<string, unknown>;
       now: string;
     },
@@ -459,14 +518,16 @@ export class PostgresMessagingRepository {
     await tx.query(
       `INSERT INTO command_receipts(
          tenant_id, command_id, actor_user_id, actor_device_id,
-         command_type, status, result_ref, created_at, updated_at
-       ) VALUES ($1,$2,$3,$4,$5,'SUCCEEDED',$6::jsonb,$7,$7)`,
+         command_type, command_fingerprint, status,
+         result_ref, created_at, updated_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,'SUCCEEDED',$7::jsonb,$8,$8)`,
       [
         input.tenantId,
         input.commandId,
         input.actorUserId,
         input.actorDeviceId,
         input.commandType,
+        input.commandFingerprint,
         JSON.stringify(input.result),
         input.now,
       ],
