@@ -749,6 +749,8 @@ components:
             - DELIVERY_EXPIRED
             - INVALID_COMMAND
             - PAYLOAD_TOO_LARGE
+            - NOT_FOUND
+            - INTERNAL_ERROR
         message:
           type: string
           maxLength: 1024
