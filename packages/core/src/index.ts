@@ -611,6 +611,28 @@ export class InMemoryMessagingCore {
     eventType: "message.available" | "message.edited",
     now: string,
   ): PreparedDelivery {
+    const externalRecipients = [...conversation.members].filter(
+      (userId) => userId !== actor.userId,
+    );
+    const unavailableRecipients = externalRecipients.filter(
+      (userId) =>
+        ![...this.devices.values()].some(
+          (device) =>
+            device.userId === userId &&
+            device.status === "ACTIVE",
+        ),
+    );
+
+    if (
+      externalRecipients.length === 0 ||
+      unavailableRecipients.length > 0
+    ) {
+      throw new DomainError(
+        "RECIPIENT_UNAVAILABLE",
+        "At least one active recipient has no deliverable device",
+      );
+    }
+
     const envelopes: DeliveryEnvelope[] = [];
     const events: DeviceInboxEvent[] = [];
 
