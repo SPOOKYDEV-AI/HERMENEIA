@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "db/migrations/0001_core_messaging.sql"
 SESSION_MIGRATION = ROOT / "db/migrations/0002_session_access_credential.sql"
 RUNTIME_MIGRATION = ROOT / "db/migrations/0003_runtime_alignment.sql"
+COMMAND_MIGRATION = ROOT / "db/migrations/0004_command_fingerprint.sql"
 
 REQUIRED_TABLES = {
     "users",
@@ -65,6 +66,7 @@ def main() -> int:
     sql = MIGRATION.read_text(encoding="utf-8")
     session_sql = SESSION_MIGRATION.read_text(encoding="utf-8")
     runtime_sql = RUNTIME_MIGRATION.read_text(encoding="utf-8")
+    command_sql = COMMAND_MIGRATION.read_text(encoding="utf-8")
     upper = sql.upper()
 
     if not upper.lstrip().startswith("BEGIN;"):
@@ -134,6 +136,15 @@ def main() -> int:
         fail("runtime alignment migration must begin with BEGIN")
     if not runtime_sql.rstrip().endswith("COMMIT;"):
         fail("runtime alignment migration must end with COMMIT")
+
+    if "ADD COLUMN command_fingerprint text" not in command_sql:
+        fail("command migration must add command_fingerprint")
+    if "command_receipts_actor_status_idx" not in command_sql:
+        fail("command migration must index actor/status recovery")
+    if not command_sql.lstrip().startswith("BEGIN;"):
+        fail("command migration must begin with BEGIN")
+    if not command_sql.rstrip().endswith("COMMIT;"):
+        fail("command migration must end with COMMIT")
 
     print(
         "SQL_CONTRACT_PASS "
