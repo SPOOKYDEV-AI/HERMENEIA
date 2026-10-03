@@ -236,6 +236,9 @@ Minimum profiles:
     cellular -> Wi-Fi transition
     connected network with unreachable HERMENEIA endpoint
     provider 429 / 5xx / timeout
+    IPv6-only / NAT64-compatible path
+    WebSocket blocked / HTTP fallback
+    network-generation change with late old-path response
     app background / kill / relaunch
 
 For each profile record:
