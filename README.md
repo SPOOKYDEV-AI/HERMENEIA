@@ -98,7 +98,7 @@ The Context Engine is the main research and engineering differentiator. Messagin
 
 ## Repository status
 
-**Core Messaging implementation active: local-first send/sync/ACK plus executable edit/delete recovery.**
+**Core Messaging implementation active: local-first delivery, mutation recovery and session/device authentication are executable.**
 
 The project is intentionally defining its contracts, architecture and evaluation methodology before committing to application code or model-specific implementations.
 
@@ -114,6 +114,7 @@ The project is intentionally defining its contracts, architecture and evaluation
 - [OpenAPI V1](api/openapi.yaml)
 - [Data Lifecycle — V1](docs/architecture/data-lifecycle-v1.md)
 - [Device Trust and Delivery Envelope Security — V1](docs/security/device-trust-v1.md)
+- [Session & Device Authentication — V1](docs/security/session-device-auth-v1.md)
 - [Architecture Decision Records](docs/architecture/adr/README.md)
 - [Context evaluation protocol](docs/research/evaluation-protocol.md)
 - [Pilot evaluation harness](research/eval/README.md)
