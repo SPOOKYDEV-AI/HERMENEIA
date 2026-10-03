@@ -57,7 +57,12 @@ The corpus should cover at least:
 - long pauses;
 - midnight transitions;
 - old-topic resumption;
-- intentionally irrelevant old context.
+- intentionally irrelevant old context;
+- SMS abbreviations and slang;
+- ambiguous acronyms;
+- domain-specific shorthand;
+- code-switching and mixed-language messages;
+- typos/phonetic spellings where meaning remains recoverable.
 
 ## Metrics
 
@@ -73,6 +78,8 @@ Rate:
 - tone preservation;
 - pragmatic-intent preservation;
 - emoji handling/preservation;
+- colloquial meaning preservation;
+- register preservation without unnecessary formalisation;
 - ambiguity resolution;
 - terminology consistency.
 
