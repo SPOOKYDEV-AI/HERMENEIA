@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "db/migrations/0001_core_messaging.sql"
 SESSION_MIGRATION = ROOT / "db/migrations/0002_session_access_credential.sql"
+RUNTIME_MIGRATION = ROOT / "db/migrations/0003_runtime_alignment.sql"
 
 REQUIRED_TABLES = {
     "users",
@@ -63,6 +64,7 @@ def fail(message: str) -> None:
 def main() -> int:
     sql = MIGRATION.read_text(encoding="utf-8")
     session_sql = SESSION_MIGRATION.read_text(encoding="utf-8")
+    runtime_sql = RUNTIME_MIGRATION.read_text(encoding="utf-8")
     upper = sql.upper()
 
     if not upper.lstrip().startswith("BEGIN;"):
@@ -114,6 +116,24 @@ def main() -> int:
         fail("session access credential reference must use a partial unique index")
     if "access_token" in session_sql.lower() or "bearer_token" in session_sql.lower():
         fail("session migration must not store bearer/access token plaintext")
+
+    runtime_required = [
+        "ADD COLUMN tenant_id uuid",
+        "FOREIGN KEY (tenant_id, user_id)",
+        "REFERENCES tenant_memberships(tenant_id, user_id)",
+        "ALTER COLUMN envelope_id DROP NOT NULL",
+        "'message.edited'",
+        "'message.deleted'",
+        "device_inbox_events_envelope_shape_check",
+    ]
+    for snippet in runtime_required:
+        if snippet not in runtime_sql:
+            fail(f"runtime alignment migration missing invariant: {snippet}")
+
+    if not runtime_sql.lstrip().startswith("BEGIN;"):
+        fail("runtime alignment migration must begin with BEGIN")
+    if not runtime_sql.rstrip().endswith("COMMIT;"):
+        fail("runtime alignment migration must end with COMMIT")
 
     print(
         "SQL_CONTRACT_PASS "
