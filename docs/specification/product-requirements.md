@@ -214,8 +214,36 @@ The MVP is not considered complete until the following are demonstrated:
 14. T0, T1 and T2 can be evaluated on the same corpus.
 15. Deleting conversation data follows through to derived context according to the documented retention model.
 
-## 17. Success definition
+## 17. Responsiveness and incremental understanding
 
-HERMENEIA succeeds only if adaptive context demonstrates measurable value relative to T0/T1 under a documented evaluation method.
+Context construction must not rebuild the complete conversation on every message.
 
-A visually complete chat UI without that evidence is not sufficient.
+The system maintains versioned, incrementally prepared conversation state so that message N helps prepare the translation of message N+1.
+
+The user-visible translation path should:
+
+1. persist the original message;
+2. load prepared context state;
+3. reconcile any recent messages not yet processed asynchronously;
+4. build a bounded ContextSnapshot;
+5. invoke translation;
+6. persist and deliver the result.
+
+Expensive enrichment such as embeddings, summaries, memory extraction and retrieval-index maintenance should normally execute outside the critical path.
+
+The system must measure Context Engine overhead separately from AI-provider latency.
+
+Initial Context Engine targets for a mature MVP are:
+
+    p50 <= 50 ms
+    p95 <= 150 ms
+
+excluding provider inference/network time.
+
+These values are engineering targets to validate, not current performance claims.
+
+## 18. Success definition
+
+HERMENEIA succeeds only if adaptive context demonstrates measurable value relative to T0/T1 under a documented evaluation method **without making interactive translation unacceptably slow**.
+
+A visually complete chat UI without quality and latency evidence is not sufficient.
