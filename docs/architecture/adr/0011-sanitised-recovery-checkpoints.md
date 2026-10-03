@@ -1,6 +1,6 @@
 # ADR-0011 — Sanitised recovery checkpoints instead of raw history replay
 
-**Status:** Accepted  
+**Status:** Accepted — amended by ADR-0016  
 **Date:** 2026-10-03
 
 ## Context
@@ -66,7 +66,9 @@ Conceptually:
           +--> event-triggered replacement
           +--> restart recovery
 
-The checkpoint should be replaced atomically.
+Checkpoint replacement must be atomic **and conditionally fresh**.
+
+Publication requires compare-and-swap validation of the base Context State version, contiguous processed-prefix frontier, applicable erasure epoch and relevant membership/policy versions. A checkpoint computed before deletion/revocation must never become active afterward.
 
 Older checkpoints should be expired according to a small retention policy.
 
@@ -87,13 +89,14 @@ It must not be rewritten for every token/message if this creates unnecessary I/O
 
 After a crash/restart:
 
-1. load the latest valid checkpoint;
-2. validate checksum/schema/strategy compatibility;
-3. restore bounded Conversation State;
+1. load the latest conditionally valid checkpoint;
+2. validate checksum/schema/strategy plus erasure/membership/policy epochs;
+3. restore only bounded admissible state;
 4. restore approved CorrectionMemory references;
-5. mark uncertain ephemeral fields as unknown;
-6. continue translation immediately in recovery mode;
-7. refine state from new messages as they arrive.
+5. mark missing/uncertain source-dependent fields as unknown;
+6. enter FAST, PARTIAL or DEGRADED recovery;
+7. request exact authorised source revisions when a pending translation needs content that no longer exists in Core;
+8. refine state from new messages as they arrive.
 
 The system should not fabricate missing historical details.
 
