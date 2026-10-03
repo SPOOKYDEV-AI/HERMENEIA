@@ -16,7 +16,8 @@ Current checks:
 - TypeScript core contracts typecheck;
 - executable core builds;
 - messaging invariant tests pass with the AI dispatcher down;
-- HTTP send/sync/ACK integration tests pass locally, including retry/idempotency, cursor reset and payload limits.
+- HTTP send/sync/ACK integration tests pass locally, including retry/idempotency, cursor reset and payload limits;
+- client outbox/restart/sync tests pass locally, including lost Send response and lost ACK recovery.
 
 This does **not** mean GitHub-hosted CI is permanently forbidden.
 
