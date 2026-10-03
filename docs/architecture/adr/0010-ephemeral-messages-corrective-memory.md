@@ -1,6 +1,6 @@
 # ADR-0010 — Ephemeral message processing and correction-triggered memory
 
-**Status:** Accepted  
+**Status:** Accepted — amended by ADR-0016  
 **Date:** 2026-10-03
 
 ## Context
@@ -71,8 +71,7 @@ HERMENEIA may create durable corrective memory when one of the following occurs:
 
 1. explicit UI feedback/correction;
 2. explicit natural-language repair with high confidence;
-3. tenant/admin glossary update;
-4. repeated independently confirmed correction within the same scope.
+3. authorised tenant/admin glossary or policy update.
 
 Examples of high-signal conversational repairs:
 
@@ -150,15 +149,23 @@ Costs:
 
 Because raw messages are not durably stored by HERMENEIA Core, full deterministic replay is not always possible.
 
-Recovery modes may include:
+Recovery distinguishes:
 
-- rebuild from durable structured Context State;
-- request/replay authorised recent context from the client/customer-controlled store;
-- fall back to a clean/limited Context State;
-- preserve approved corrective memory and policies while discarding uncertain ephemeral state.
+- **RESTORABLE:** approved corrections, glossaries, policies and compatible checkpoints;
+- **RECALCULABLE_IF_SOURCE_AVAILABLE:** translations/derived analysis that require an authorised source revision;
+- **IRRECOVERABLE:** source expired/deleted and no authorised source remains.
+
+Clients/customer-controlled stores may re-supply the exact required source revision. Otherwise HERMENEIA enters a degraded/source-required state and never fabricates missing history.
 
 Privacy takes precedence over perfect server-side replayability.
 
 ## Revisit when
 
 Revisit only if a specific deployment requires server-side message retention and explicitly opts into a separate retention profile with documented purpose, access, security and deletion rules.
+
+
+## Delivery ownership amendment
+
+For the public asynchronous messaging profile, durable delivery of offline recipients is owned by the Delivery Relay defined in ADR-0016 and [Delivery Contract — V1](../delivery-contract-v1.md).
+
+The Relay stores protected per-device envelopes with TTL/delete-on-ACK semantics. This is separate from Core transient plaintext processing and does not create a server-side conversation transcript.
