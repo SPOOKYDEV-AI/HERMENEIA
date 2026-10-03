@@ -98,7 +98,7 @@ The Context Engine is the main research and engineering differentiator. Messagin
 
 ## Repository status
 
-**Contracts complete; research harness active; executable messaging core started.**
+**Core Messaging implementation active: local-first send/sync/ACK plus executable edit/delete recovery.**
 
 The project is intentionally defining its contracts, architecture and evaluation methodology before committing to application code or model-specific implementations.
 
@@ -121,6 +121,7 @@ The project is intentionally defining its contracts, architecture and evaluation
 - [Executable Core Skeleton](docs/engineering/executable-core-skeleton.md)
 - [HTTP / Sync Adapter — V1 Slice](docs/engineering/http-sync-adapter-v1.md)
 - [Client Local Outbox & Sync Engine — V1 Slice](docs/engineering/client-outbox-sync-v1.md)
+- [Message Mutations & Command Recovery — V1 Slice](docs/engineering/message-mutations-command-recovery-v1.md)
 - [PostgreSQL Core Schema — V1](docs/engineering/postgres-core-schema-v1.md)
 - [Privacy and data minimisation](docs/security/privacy-data-minimisation.md)
 - [Ephemeral messages and corrective memory](docs/architecture/ephemeral-message-memory-v1.md)
