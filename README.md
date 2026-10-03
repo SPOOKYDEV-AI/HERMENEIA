@@ -98,7 +98,7 @@ The Context Engine is the main research and engineering differentiator. Messagin
 
 ## Repository status
 
-**Foundation / pre-implementation.**
+**Contracts complete; research harness active; application implementation starting.**
 
 The project is intentionally defining its contracts, architecture and evaluation methodology before committing to application code or model-specific implementations.
 
@@ -116,6 +116,8 @@ The project is intentionally defining its contracts, architecture and evaluation
 - [Device Trust and Delivery Envelope Security — V1](docs/security/device-trust-v1.md)
 - [Architecture Decision Records](docs/architecture/adr/README.md)
 - [Context evaluation protocol](docs/research/evaluation-protocol.md)
+- [Pilot evaluation harness](research/eval/README.md)
+- [Local / sandbox CI](docs/engineering/local-ci.md)
 - [Privacy and data minimisation](docs/security/privacy-data-minimisation.md)
 - [Ephemeral messages and corrective memory](docs/architecture/ephemeral-message-memory-v1.md)
 - [Sanitised recovery checkpoints](docs/architecture/recovery-checkpoint-v1.md)

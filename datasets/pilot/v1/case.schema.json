@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermeneia.dev/datasets/pilot/v1/case.schema.json",
+  "title": "HERMENEIA Pilot Evaluation Case V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "case_id",
+    "split",
+    "category",
+    "source_language",
+    "target_language",
+    "history",
+    "current_message",
+    "gold_relevant_context_ids",
+    "gold_irrelevant_context_ids",
+    "forbidden_future_ids",
+    "evaluation_guidance"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]+$"
+    },
+    "split": {
+      "type": "string",
+      "enum": [
+        "dev",
+        "validation",
+        "test"
+      ]
+    },
+    "category": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_language": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 64
+    },
+    "target_language": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 64
+    },
+    "target_profile": {
+      "type": "object"
+    },
+    "glossary": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "term",
+          "meaning"
+        ],
+        "properties": {
+          "term": {
+            "type": "string"
+          },
+          "meaning": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "history": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/message"
+      }
+    },
+    "current_message": {
+      "$ref": "#/$defs/message"
+    },
+    "future_messages": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/message"
+      }
+    },
+    "gold_relevant_context_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "gold_irrelevant_context_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "forbidden_future_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "evaluation_guidance": {
+      "type": "object",
+      "required": [
+        "ambiguity",
+        "preserve"
+      ],
+      "properties": {
+        "ambiguity": {
+          "type": "string"
+        },
+        "preserve": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "seq",
+        "author",
+        "text"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "author": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reply_to": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}
