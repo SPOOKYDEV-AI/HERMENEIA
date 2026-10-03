@@ -108,6 +108,8 @@ The project is intentionally defining its contracts, architecture and evaluation
 - [Architecture](docs/architecture/README.md)
 - [Architecture Decision Records](docs/architecture/adr/README.md)
 - [Context evaluation protocol](docs/research/evaluation-protocol.md)
+- [Privacy and data minimisation](docs/security/privacy-data-minimisation.md)
+- [Product profiles](docs/specification/product-profiles.md)
 - [Dataset policy](datasets/README.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)

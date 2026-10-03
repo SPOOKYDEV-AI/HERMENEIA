@@ -148,3 +148,10 @@ Relevant foundation ADRs:
 - [ADR-0001 — Modular monolith first](adr/0001-modular-monolith-first.md)
 - [ADR-0002 — Context is temporal and adaptive](adr/0002-context-is-temporal-and-adaptive.md)
 - [ADR-0003 — Incremental context processing and latency-first translation](adr/0003-incremental-context-and-latency.md)
+- [ADR-0004 — Maintain conversational state instead of replaying history](adr/0004-conversation-state-over-history-replay.md)
+
+## Privacy architecture
+
+HERMENEIA's privacy/data-minimisation model is documented in [Privacy and Data-Minimisation Architecture](../security/privacy-data-minimisation.md).
+
+The central rule is that old raw conversation history is not routinely replayed to AI providers. The Context Engine maintains bounded, versioned conversational state and retrieves older raw context only when necessary.
