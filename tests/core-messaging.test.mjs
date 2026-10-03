@@ -298,3 +298,43 @@ test("sender secondary device still receives a delivery envelope", async () => {
   assert.equal(core.pendingEnvelopes("device-a2").length, 1);
   assert.equal(core.pendingEnvelopes("device-b1").length, 1);
 });
+
+
+test("failed edit delivery preparation leaves prior revision and pending delivery intact", async () => {
+  const core = createCore();
+  const accepted = await core.sendMessage(
+    actor,
+    command("original remains valid"),
+  );
+
+  const oldEnvelope = core.pendingEnvelopes("device-b1")[0];
+  assert.ok(oldEnvelope);
+
+  core.revokeDevice("device-b1");
+
+  await assert.rejects(
+    () =>
+      core.editMessage(actor, {
+        protocol_version: 1,
+        command_id: "cmd-edit-unavailable",
+        message_id: accepted.message_id,
+        expected_revision: 1,
+        source: { text: "edit cannot be delivered" },
+      }),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "RECIPIENT_UNAVAILABLE",
+  );
+
+  assert.equal(
+    core.getMessageMetadata(accepted.message_id).currentRevision,
+    1,
+  );
+  assert.equal(core.getTranslationJobs().length, 1);
+  assert.equal(core.getTranslationJobs()[0].status, "AVAILABLE");
+  assert.equal(core.pendingEnvelopes("device-b1").length, 1);
+  assert.equal(
+    core.pendingEnvelopes("device-b1")[0].envelopeId,
+    oldEnvelope.envelopeId,
+  );
+});
