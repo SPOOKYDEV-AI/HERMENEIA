@@ -161,6 +161,7 @@ Fields:
     session_id UUID PK
     user_id UUID
     device_id UUID
+    access_credential_ref text unique
     refresh_secret_hash text unique
     status enum(ACTIVE, REVOKED, EXPIRED)
     issued_at timestamptz
