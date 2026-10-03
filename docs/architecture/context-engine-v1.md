@@ -91,6 +91,7 @@ A logical ConversationContextState contains:
     recent_entity_set
     recent_language_style
     pragmatic_state
+    lexical_state
     summary_ref
     memory_index_version
     updated_at
@@ -317,7 +318,8 @@ Logical tasks may include:
 - extract_memory_candidates(message_id);
 - promote_or_invalidate_memory(...);
 - update_retrieval_index(...);
-- refresh_pragmatic_state(conversation_id, sequence).
+- refresh_pragmatic_state(conversation_id, sequence);
+- refresh_lexical_state(conversation_id, sequence).
 
 This logical separation does not imply separate microservices.
 
@@ -435,6 +437,9 @@ At minimum:
     pragmatic_inference_ms
     pragmatic_confidence
     emoji_preservation_rate
+    colloquial_resolution_ms
+    ambiguous_acronym_rate
+    conversation_lexical_cache_hit_rate
     async_context_lag_sequences
     translation_provider_ms
     translation_end_to_end_ms

@@ -50,6 +50,7 @@ An administrator may operate the system and inspect technical metrics, but admin
 - long-lived linguistic/terminology memory where justified;
 - emoji-aware and pragmatic-intent-aware translation;
 - preservation of tone/register with uncertainty handling;
+- contextual understanding of slang, acronyms, SMS abbreviations and mixed-language messages;
 - user feedback;
 - T0/T1/T2 evaluation;
 - technical metrics and failure visibility.
@@ -218,6 +219,10 @@ The MVP is not considered complete until the following are demonstrated:
 16. Emoji and compound emoji are preserved correctly in translation.
 17. Tone/intent signals can influence translation without becoming durable emotional profiles.
 18. Low-confidence emotion/intent inference falls back toward semantic fidelity rather than aggressive rewriting.
+19. Common configured SMS abbreviations can be resolved without a model call.
+20. Ambiguous acronyms do not force a single invented meaning when confidence is low.
+21. The original shorthand remains available exactly as written in the source message.
+22. Tenant-specific glossaries remain isolated from other organisations.
 
 ## 17. Responsiveness and incremental understanding
 
