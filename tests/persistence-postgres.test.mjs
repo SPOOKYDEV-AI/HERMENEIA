@@ -304,6 +304,7 @@ test("client_message_id lookup always compares revision 1 source fingerprint", a
         reply_to_message_id: null,
         message_seq: 8,
         accepted_at: "2026-10-03T22:00:00.000Z",
+        client_authored_at: "2026-10-03 21:59:00+00",
         source_hash: "opaque-original-fingerprint",
         accepted_result: {
           protocol_version: 1,
@@ -336,6 +337,7 @@ test("client_message_id lookup always compares revision 1 source fingerprint", a
     replyToMessageId: null,
     messageSeq: 8,
     acceptedAt: "2026-10-03T22:00:00.000Z",
+    clientAuthoredAt: "2026-10-03 21:59:00+00",
     originalSourceHash: "opaque-original-fingerprint",
     acceptedResult: {
       protocol_version: 1,
@@ -350,6 +352,7 @@ test("client_message_id lookup always compares revision 1 source fingerprint", a
 
   const sql = connection.queries[1];
   assert.match(sql.text, /mr\.revision = 1/);
+  assert.match(sql.text, /mm\.client_authored_at::text AS client_authored_at/);
   assert.match(sql.text, /LEFT JOIN LATERAL/);
   assert.match(sql.text, /result_ref->>'message_id'/);
   assert.doesNotMatch(sql.text, /mr\.revision = mm\.current_revision/);
