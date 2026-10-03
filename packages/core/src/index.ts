@@ -322,10 +322,7 @@ export class InMemoryMessagingCore {
     const revision = message.currentRevision + 1;
     const opSeq = conversation.nextOpSeq;
 
-    // Prevent stale undelivered content from winning after this edit.
-    this.revokePendingEnvelopesForMessage(message.messageId);
-    this.supersedeTranslationJobs(message.messageId);
-
+    // Prepare all failure-prone delivery work before destructive mutation.
     const prepared = this.prepareContentDelivery(
       actor,
       conversation,
@@ -340,6 +337,10 @@ export class InMemoryMessagingCore {
       revision,
       now,
     );
+
+    // Only after preparation succeeds may stale undelivered content be revoked.
+    this.revokePendingEnvelopesForMessage(message.messageId);
+    this.supersedeTranslationJobs(message.messageId);
 
     const result: MessageRevisionResult = {
       message_id: message.messageId,
