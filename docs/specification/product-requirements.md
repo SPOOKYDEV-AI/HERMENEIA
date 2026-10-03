@@ -48,6 +48,8 @@ An administrator may operate the system and inspect technical metrics, but admin
 - temporal conversational episodes;
 - contextual retrieval;
 - long-lived linguistic/terminology memory where justified;
+- emoji-aware and pragmatic-intent-aware translation;
+- preservation of tone/register with uncertainty handling;
 - user feedback;
 - T0/T1/T2 evaluation;
 - technical metrics and failure visibility.
@@ -213,6 +215,9 @@ The MVP is not considered complete until the following are demonstrated:
 13. Latency, failures and AI execution metadata are measurable.
 14. T0, T1 and T2 can be evaluated on the same corpus.
 15. Deleting conversation data follows through to derived context according to the documented retention model.
+16. Emoji and compound emoji are preserved correctly in translation.
+17. Tone/intent signals can influence translation without becoming durable emotional profiles.
+18. Low-confidence emotion/intent inference falls back toward semantic fidelity rather than aggressive rewriting.
 
 ## 17. Responsiveness and incremental understanding
 
