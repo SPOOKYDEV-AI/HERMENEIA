@@ -13,6 +13,7 @@ export type DeliveryEnvelopeStatus = "PENDING" | "ACKED" | "EXPIRED" | "REVOKED"
 
 export type DomainErrorCode =
   | "IDEMPOTENCY_CONFLICT"
+  | "REVISION_CONFLICT"
   | "NOT_AUTHORIZED"
   | "DEVICE_REVOKED"
   | "INVALID_COMMAND"
@@ -78,11 +79,12 @@ export interface DeviceInboxEvent {
   inboxEpoch: number;
   offset: number;
   eventId: UUID;
-  type: "message.available";
+  type: "message.available" | "message.edited" | "message.deleted";
   tenantId: UUID;
   conversationId: UUID;
   messageId: UUID;
-  envelopeId: UUID;
+  sourceRevision: number;
+  envelopeId?: UUID;
   createdAt: string;
 }
 
@@ -90,6 +92,19 @@ export interface TranslationJob {
   jobId: UUID;
   messageId: UUID;
   sourceRevision: number;
-  status: "AVAILABLE";
+  status: "AVAILABLE" | "SUPERSEDED";
   createdAt: string;
+}
+
+export interface MessageRevisionResult {
+  message_id: UUID;
+  revision: number;
+  op_seq: number;
+  status: "ACTIVE" | "DELETED";
+}
+
+export interface CommandStatusResult {
+  command_id: UUID;
+  status: "UNKNOWN" | "SUCCEEDED" | "FAILED";
+  result?: Record<string, unknown>;
 }
