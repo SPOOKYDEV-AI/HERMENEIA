@@ -82,11 +82,32 @@ Conceptually:
       reconnect_rate
       throughput_hint
       last_verified_at
+      network_generation
     }
 
 Avoid collecting SSID/location information for optimisation.
 
-## 6. Profile behavior
+## 6. Network generation
+
+Every material network-path change increments a local `network_generation`.
+
+Examples:
+
+    Wi-Fi -> cellular
+    cellular -> Wi-Fi
+    interface loss/recovery
+    proxy/VPN path change
+    endpoint reachability reset
+
+Network-bound work records the generation it started on.
+
+A late result from an older generation must be revalidated before it can affect connection/session state.
+
+User Send remains protected by application idempotency rather than assuming transport cancellation succeeded.
+
+This pattern is inspired by mature mobile messaging stacks such as TDLib, which explicitly tracks network generation.
+
+## 7. Profile behavior
 
 ### GOOD
 
@@ -124,7 +145,7 @@ Avoid collecting SSID/location information for optimisation.
     flush P0 before optional work
     avoid reconnect stampede
 
-## 7. Retry policy
+## 8. Retry policy
 
 Use:
 
@@ -147,7 +168,7 @@ Retryable examples:
     temporary provider/network failure
     429/5xx according to policy
 
-## 8. Request priorities
+## 9. Request priorities
 
 A scheduler should ensure:
 
@@ -159,7 +180,7 @@ A scheduler should ensure:
 
 Speculative work may be cancelled immediately when P0/P1 work arrives.
 
-## 9. Mobile background mode
+## 10. Mobile background mode
 
 Foreground:
 
@@ -176,7 +197,7 @@ Background:
 
 Push payloads should reveal as little message content as possible.
 
-## 10. Connection recovery
+## 11. Connection recovery
 
 A realtime session should track:
 
@@ -195,7 +216,7 @@ On reconnect:
 
 Recovery storage is bounded and separate from conversation history.
 
-## 11. Local outbox
+## 12. Local outbox
 
 The sender device owns pending unsent content.
 
@@ -209,7 +230,7 @@ States:
 
 A crash/restart should not duplicate an acknowledged message.
 
-## 12. Delivery relay
+## 13. Delivery relay
 
 When the recipient is offline, immediate deletion of all server-side payloads is incompatible with reliable asynchronous messaging.
 
@@ -228,7 +249,7 @@ Delete on ACK or TTL expiry.
 
 Key management and multi-device encryption require a separate security ADR before implementation.
 
-## 13. Payload design
+## 14. Payload design
 
 Prefer small, bounded payloads.
 
@@ -241,7 +262,7 @@ Rules:
 - compress only when measurements show a net benefit;
 - avoid custom binary protocols before profiling JSON/HTTP overhead.
 
-## 14. Device capability
+## 15. Device capability
 
 Device capability must affect local optional work, not translation correctness.
 
@@ -259,7 +280,7 @@ Possible inputs should be coarse and privacy-safe:
 
 Do not build a fingerprint from hardware identifiers.
 
-## 15. On-device work
+## 16. On-device work
 
 Good candidates:
 
@@ -277,7 +298,7 @@ Optional benchmark candidates:
 
 Heavy neural segmentation must never be required for typing fluidity.
 
-## 16. Language detection
+## 17. Language detection
 
 Short-message language detection is inherently difficult.
 
@@ -292,7 +313,7 @@ Use combined evidence:
 
 Do not trust a single classifier result on "si", "no", "ok", acronyms, names or mixed-language messages.
 
-## 17. Sentence segmentation
+## 18. Sentence segmentation
 
 V1 should use a layered approach:
 
@@ -304,7 +325,7 @@ V1 should use a layered approach:
 
 The draft path must remain useful when the model is unavailable.
 
-## 18. Battery and radio cost
+## 19. Battery and radio cost
 
 Network chatter wakes radios and consumes battery.
 
@@ -317,7 +338,7 @@ Therefore:
 - reduce speculative work on expensive/constrained links;
 - measure battery impact on physical devices before enabling aggressive defaults.
 
-## 19. Transport candidates
+## 20. Transport candidates
 
 ### WebSocket
 
@@ -374,7 +395,25 @@ Interesting future property:
 
 Do not implement low-level QUIC ourselves in MVP.
 
-## 20. Network fault test matrix
+### Dual-stack / IPv6 / NAT64
+
+Native/mobile networking must support normal platform DNS resolution and IPv4/IPv6 dual-stack behaviour.
+
+Do not hard-code IPv4 literals.
+
+Where the platform HTTP stack exposes it, prefer mature Happy-Eyeballs-style connection establishment rather than implementing address racing ourselves.
+
+Test IPv6-only/NAT64-compatible environments before claiming mobile readiness.
+
+### 0-RTT / early data
+
+Future HTTP/3/QUIC early data can reduce handshake latency but introduces replay considerations.
+
+Do not send non-idempotent semantic operations in early data unless the application operation is explicitly replay-safe.
+
+For HERMENEIA Send, `client_message_id` idempotency remains mandatory even if the transport advertises 0-RTT.
+
+## 21. Network fault test matrix
 
 At minimum test:
 
@@ -388,11 +427,14 @@ At minimum test:
     Wi-Fi -> cellular reconnect
     cellular -> Wi-Fi reconnect
     connected network with unreachable backend
+    IPv6-only / NAT64-compatible environment
+    dual-stack connection race
+    corporate proxy / WebSocket blocked with HTTP fallback
     provider 429
     provider timeout
     app background/kill/relaunch
 
-## 21. Fault-injection tooling
+## 22. Fault-injection tooling
 
 Candidates:
 
@@ -402,7 +444,7 @@ Candidates:
 
 These belong in integration/performance tests, not production dependencies.
 
-## 22. Metrics
+## 23. Metrics
 
 Required:
 
@@ -424,7 +466,7 @@ Required:
 
 Report by network profile/device class without collecting unnecessary identifiers.
 
-## 23. Acceptance criteria
+## 24. Acceptance criteria
 
 V1 is not complete until:
 
@@ -439,4 +481,8 @@ V1 is not complete until:
 9. 3G-like fault profile remains usable;
 10. network test suite covers latency/loss/bandwidth/disconnect/reset;
 11. metrics quantify bytes, retries and send-to-ready latency;
-12. offline-recipient delivery has an explicit TTL/ACK storage design rather than an implicit plaintext history.
+12. offline-recipient delivery has an explicit TTL/ACK storage design rather than an implicit plaintext history;
+13. network-path changes increment/reconcile a network generation so stale transport results cannot silently win;
+14. IPv6/dual-stack/NAT64 environments are tested;
+15. a blocked WebSocket has a defined HTTP-compatible fallback path;
+16. non-idempotent Send semantics do not rely on unsafe transport early-data assumptions.
