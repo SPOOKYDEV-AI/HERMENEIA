@@ -61,6 +61,10 @@ The corpus should cover at least:
 - SMS abbreviations and slang;
 - ambiguous acronyms;
 - domain-specific shorthand;
+- cross-domain terminology collisions;
+- project/tenant glossary precedence;
+- terminology consistency across multiple messages;
+- preserve-vs-translate terminology policy;
 - code-switching and mixed-language messages;
 - typos/phonetic spellings where meaning remains recoverable.
 
