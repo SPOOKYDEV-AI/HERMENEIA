@@ -300,8 +300,9 @@ test("client_message_id lookup always compares revision 1 source fingerprint", a
     {
       rows: [{
         message_id: "message-1",
+        conversation_id: "conversation-1",
+        reply_to_message_id: null,
         message_seq: 8,
-        current_revision: 3,
         accepted_at: "2026-10-03T22:00:00.000Z",
         source_hash: "opaque-original-fingerprint",
       }],
@@ -320,11 +321,14 @@ test("client_message_id lookup always compares revision 1 source fingerprint", a
     ),
   );
 
-  assert.equal(result.currentRevision, 3);
-  assert.equal(
-    result.originalSourceHash,
-    "opaque-original-fingerprint",
-  );
+  assert.deepEqual(result, {
+    messageId: "message-1",
+    conversationId: "conversation-1",
+    replyToMessageId: null,
+    messageSeq: 8,
+    acceptedAt: "2026-10-03T22:00:00.000Z",
+    originalSourceHash: "opaque-original-fingerprint",
+  });
 
   const sql = connection.queries[1];
   assert.match(sql.text, /mr\.revision = 1/);
@@ -408,6 +412,8 @@ test("command receipts persist and retrieve command fingerprint", async () => {
   const connection = new ScriptedConnection([
     {
       rows: [{
+        actor_user_id: "user-1",
+        actor_device_id: "device-1",
         command_type: "message.send",
         command_fingerprint: "fingerprint-1",
         status: "SUCCEEDED",
@@ -425,6 +431,8 @@ test("command receipts persist and retrieve command fingerprint", async () => {
   );
 
   assert.deepEqual(receipt, {
+    actorUserId: "user-1",
+    actorDeviceId: "device-1",
     commandType: "message.send",
     commandFingerprint: "fingerprint-1",
     status: "SUCCEEDED",
@@ -433,4 +441,102 @@ test("command receipts persist and retrieve command fingerprint", async () => {
 
   const sql = connection.queries[1];
   assert.match(sql.text, /command_fingerprint/);
+});
+
+
+test("command claim persists IN_PROGRESS fingerprint and returns existing conflict record", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 0 },
+    {
+      rows: [{
+        actor_user_id: "user-1",
+        actor_device_id: "device-1",
+        command_type: "message.send",
+        command_fingerprint: "fingerprint-1",
+        status: "SUCCEEDED",
+        result_ref: { status: "ACCEPTED" },
+      }],
+      rowCount: 1,
+    },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const claim = await repository.withTransaction((tx) =>
+    repository.claimCommand(tx, {
+      actor: actor(),
+      commandId: "command-1",
+      commandType: "message.send",
+      commandFingerprint: "fingerprint-1",
+      now: "2026-10-03T22:30:00.000Z",
+    }),
+  );
+
+  assert.equal(claim.claimed, false);
+  assert.equal(claim.existing.commandFingerprint, "fingerprint-1");
+
+  const insert = connection.queries[1];
+  assert.match(insert.text, /IN_PROGRESS/);
+  assert.match(insert.text, /ON CONFLICT/);
+  assert.deepEqual(insert.params, [
+    "tenant-1",
+    "command-1",
+    "user-1",
+    "device-1",
+    "message.send",
+    "fingerprint-1",
+    "2026-10-03T22:30:00.000Z",
+  ]);
+  assert.match(connection.queries[2].text, /FOR UPDATE/);
+});
+
+test("client message advisory lock is parameterized and actor scoped", async () => {
+  const connection = new ScriptedConnection([]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  await repository.withTransaction((tx) =>
+    repository.lockClientMessageKey(
+      tx,
+      actor(),
+      "client-message-1",
+    ),
+  );
+
+  const query = connection.queries[1];
+  assert.match(query.text, /pg_advisory_xact_lock/);
+  assert.match(query.text, /hashtextextended/);
+  assert.deepEqual(query.params, [
+    "tenant-1:user-1:client-message-1",
+  ]);
+});
+
+test("markCommandSucceeded fences by actor type fingerprint and IN_PROGRESS state", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 1 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  await repository.withTransaction((tx) =>
+    repository.markCommandSucceeded(tx, {
+      tenantId: "tenant-1",
+      commandId: "command-1",
+      actorUserId: "user-1",
+      actorDeviceId: "device-1",
+      commandType: "message.send",
+      commandFingerprint: "fingerprint-1",
+      result: { status: "ACCEPTED" },
+      now: "2026-10-03T22:30:00.000Z",
+    }),
+  );
+
+  const query = connection.queries[1];
+  assert.match(query.text, /status = 'SUCCEEDED'/);
+  assert.match(query.text, /status = 'IN_PROGRESS'/);
+  assert.match(query.text, /command_fingerprint = \$6/);
+  assert.equal(query.params[6], JSON.stringify({ status: "ACCEPTED" }));
 });
