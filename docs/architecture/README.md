@@ -135,7 +135,7 @@ A resource ID is not proof of authorization.
 
 ## Context Engine
 
-The Context Engine is specified in [Context Engine V1](context-engine-v1.md), with pragmatic/emoji handling defined in [Pragmatics, Emotion Signals and Emoji — V1](pragmatics-affect-v1.md) and informal-language resolution defined in [Colloquial Language, Acronyms and SMS Resolver — V1](colloquial-language-v1.md), professional terminology defined in [Domain Terminology and Jargon Resolver — V1](domain-terminology-v1.md), and locale/style adaptation defined in [Locale and Conversation Style Engine — V1](locale-style-v1.md), derived-memory correctness defined in [Context Integrity, Provenance and Memory Safety — V1](context-integrity-v1.md), no-retention/corrective learning defined in [Ephemeral Message and Corrective Memory Model — V1](ephemeral-message-memory-v1.md), crash recovery defined in [Sanitised Recovery Checkpoint — V1](recovery-checkpoint-v1.md), and long-message latency optimisation defined in [Progressive Long-Message Translation — V1](progressive-long-message-v1.md).
+The Context Engine is specified in [Context Engine V1](context-engine-v1.md), with pragmatic/emoji handling defined in [Pragmatics, Emotion Signals and Emoji — V1](pragmatics-affect-v1.md) and informal-language resolution defined in [Colloquial Language, Acronyms and SMS Resolver — V1](colloquial-language-v1.md), professional terminology defined in [Domain Terminology and Jargon Resolver — V1](domain-terminology-v1.md), and locale/style adaptation defined in [Locale and Conversation Style Engine — V1](locale-style-v1.md), derived-memory correctness defined in [Context Integrity, Provenance and Memory Safety — V1](context-integrity-v1.md), no-retention/corrective learning defined in [Ephemeral Message and Corrective Memory Model — V1](ephemeral-message-memory-v1.md), crash recovery defined in [Sanitised Recovery Checkpoint — V1](recovery-checkpoint-v1.md), long-message latency optimisation defined in [Progressive Long-Message Translation — V1](progressive-long-message-v1.md), and typing/edit fluidity rules defined in [Draft Stability and Reversible Speculation — V1](draft-stability-v1.md).
 
 Its latency model is intentionally incremental: expensive enrichment prepares the next translation asynchronously, while the fast path uses versioned prepared state plus any recent messages that have not yet been processed.
 
@@ -157,6 +157,7 @@ Relevant foundation ADRs:
 - [ADR-0010 — Ephemeral message processing and correction-triggered memory](adr/0010-ephemeral-messages-corrective-memory.md)
 - [ADR-0011 — Sanitised recovery checkpoints instead of raw history replay](adr/0011-sanitised-recovery-checkpoints.md)
 - [ADR-0012 — Progressive draft translation for long messages](adr/0012-progressive-draft-translation.md)
+- [ADR-0013 — Draft speculation uses reversible stability, not predicted user intent](adr/0013-reversible-draft-stability.md)
 
 ## Privacy architecture
 

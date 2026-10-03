@@ -112,6 +112,7 @@ The project is intentionally defining its contracts, architecture and evaluation
 - [Ephemeral messages and corrective memory](docs/architecture/ephemeral-message-memory-v1.md)
 - [Sanitised recovery checkpoints](docs/architecture/recovery-checkpoint-v1.md)
 - [Progressive long-message translation](docs/architecture/progressive-long-message-v1.md)
+- [Draft stability and reversible speculation](docs/architecture/draft-stability-v1.md)
 - [Product profiles](docs/specification/product-profiles.md)
 - [Dataset policy](datasets/README.md)
 - [Contributing](CONTRIBUTING.md)

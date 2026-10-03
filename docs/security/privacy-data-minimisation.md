@@ -298,6 +298,8 @@ Progressive long-message translation therefore requires:
 
 Enterprise tenants may disable speculative draft processing entirely.
 
+Draft stability analysis should remain local. Keystroke cadence, cursor movement and edit history are operational signals for the client state machine and must not become a server-side behavioural profile. Only eligible stable fragment snapshots are transmitted when policy permits.
+
 ## 20. Engineering acceptance criteria
 
 Privacy minimisation is not considered implemented until tests/metrics can show that:

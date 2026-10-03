@@ -264,6 +264,13 @@ The MVP is not considered complete until the following are demonstrated:
 51. Speculative translation failure never blocks normal Send.
 52. Abandoned draft content/results are purged and never create durable memory.
 53. Progressive translation measurably reduces send-to-ready latency for long messages.
+54. Speculation uses reversible fragment stability, not predicted user intent.
+55. The active edit region remains conservative while older stable islands may be prepared independently.
+56. Any source-changing edit invalidates speculative output by exact revision/hash.
+57. Late stale responses are discarded even when request cancellation fails.
+58. Heavy edit churn can pause speculation automatically.
+59. Draft processing never blocks input/rendering.
+60. Final delivery cannot contain text from a stale draft revision.
 
 ## 17. Responsiveness and incremental understanding
 
