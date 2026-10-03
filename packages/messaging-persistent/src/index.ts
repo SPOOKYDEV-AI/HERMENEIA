@@ -360,6 +360,19 @@ export class PersistentSendService {
           return accepted;
         }
 
+        const allocation =
+          await this.deps.repository.allocateMessageAndOperationSequence(
+            tx,
+            actor,
+            command.conversation_id,
+          );
+        if (!allocation) {
+          throw new DomainError(
+            "NOT_AUTHORIZED",
+            "Conversation is not available to actor",
+          );
+        }
+
         if (command.reply_to_message_id) {
           const replyExists = await this.deps.repository.replyTargetExists(
             tx,
@@ -392,19 +405,6 @@ export class PersistentSendService {
           throw new DomainError(
             "RECIPIENT_UNAVAILABLE",
             "At least one active recipient has no deliverable device",
-          );
-        }
-
-        const allocation =
-          await this.deps.repository.allocateMessageAndOperationSequence(
-            tx,
-            actor,
-            command.conversation_id,
-          );
-        if (!allocation) {
-          throw new DomainError(
-            "NOT_AUTHORIZED",
-            "Conversation is not available to actor",
           );
         }
 
