@@ -172,9 +172,9 @@ Retryable examples:
 
 A scheduler should ensure:
 
-    user final message
+    user Send / durable acceptance / required ACK
+        > delivery-critical recovery
         > final translation
-        > ACK/recovery
         > speculative translation
         > telemetry
 
@@ -234,7 +234,7 @@ A crash/restart should not duplicate an acknowledged message.
 
 When the recipient is offline, immediate deletion of all server-side payloads is incompatible with reliable asynchronous messaging.
 
-A dedicated relay may retain:
+For the public asynchronous profile, a dedicated relay must retain:
 
     envelope_id
     recipient/device routing metadata
@@ -247,7 +247,7 @@ The relay should not expose plaintext conversation history to ordinary Core stor
 
 Delete on ACK or TTL expiry.
 
-Key management and multi-device encryption require a separate security ADR before implementation.
+Device trust, rotation/revocation and protected-envelope handling are specified at a contract level in `docs/security/device-trust-v1.md` and still require implementation security review.
 
 ## 14. Payload design
 
