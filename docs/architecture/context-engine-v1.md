@@ -20,7 +20,7 @@ HERMENEIA must not wait for a new message and then rediscover the conversation f
 
 Conversation understanding is maintained incrementally:
 
-    message N persisted
+    message N accepted transiently
           |
           +-- immediate state update
           |
@@ -46,7 +46,7 @@ The next translation should therefore begin from prepared state rather than raw 
     validate + authorize
           |
           v
-    idempotent persistence
+    idempotent metadata acceptance
           |
           v
     server sequence assigned
@@ -102,7 +102,7 @@ A logical ConversationContextState contains:
 
 This state is derived and rebuildable.
 
-PostgreSQL remains the durable source of truth for original messages and durable derived records.
+PostgreSQL remains the durable source of truth for metadata, policies, corrective memory, bounded structured state and recovery checkpoints. Raw message bodies are transient by default.
 
 An in-memory or Redis representation may accelerate access but is never authoritative.
 
@@ -206,11 +206,12 @@ V1 should prefer simple explainable decay functions before learned ranking.
 
 Candidates can come from:
 
-1. recent raw messages;
+1. bounded transient recent messages;
 2. active episode state;
-3. prior episode summaries;
-4. durable MemoryItems;
-5. explicit reply/quote targets.
+3. sanitised recovery checkpoint state;
+4. approved CorrectionMemory;
+5. durable MemoryItems permitted by policy;
+6. explicit reply/quote targets available in the transient/client-supplied context.
 
 Each candidate carries metadata:
 
@@ -304,7 +305,7 @@ Instead it builds the snapshot from:
 
     prepared context through seq 99
     +
-    raw message seq 100
+    transient message seq 100 (if still within TTL / supplied by authorised client)
     +
     current message seq 101
 
@@ -421,7 +422,7 @@ Initial engineering targets, to be validated on a documented environment:
       p50 <= 50 ms
       p95 <= 150 ms
 
-    message persistence before AI
+    message metadata acceptance before AI
       p95 <= 150 ms
 
     end-to-end short-message translation
@@ -469,7 +470,7 @@ The Context Engine V1 is not complete until tests demonstrate:
 1. message N+1 does not require rescanning the complete history;
 2. a warm active conversation uses prepared ContextState;
 3. slow-path lag does not omit unprocessed recent messages;
-4. a cold cache can rebuild a valid minimal snapshot from durable data;
+4. a cold cache can restore a valid minimal snapshot from sanitised checkpoint/policy/correction state without raw history;
 5. duplicate async jobs do not corrupt state;
 6. out-of-order worker completion cannot move last_processed_sequence backwards;
 7. crossing midnight does not force an episode reset;
@@ -477,7 +478,10 @@ The Context Engine V1 is not complete until tests demonstrate:
 9. explicit old-topic references can retrieve older episodes;
 10. snapshots expose the strategy/state versions used;
 11. latency metrics separate Context Engine overhead from provider latency;
-12. deletion cannot leave a cache that reintroduces removed context.
+12. deletion cannot leave a cache that reintroduces removed context;
+13. raw message bodies expire from Core according to transient TTL;
+14. explicit correction can create scoped CorrectionMemory;
+15. restart can enter FAST/PARTIAL/CLEAN recovery without raw-history replay.
 
 ## 25. Non-goals for V1
 
@@ -504,4 +508,14 @@ In particular:
 - derived repetition cannot increase authority by itself;
 - stale worker output cannot move Context State backwards;
 - edits, deletions and corrections invalidate dependent derived state;
-- memory promotion is bounded, versioned and reversible.
+- memory promotion is bounded, versioned and reversible;
+- durable memory requires a defined correction/policy trigger;
+- raw message bodies are transient by default;
+- recovery uses sanitised checkpoints, not conversation transcripts.
+
+
+## 27. Ephemeral messages and recovery
+
+Context Engine V1 follows [Ephemeral Message and Corrective Memory Model — V1](ephemeral-message-memory-v1.md) and [Sanitised Recovery Checkpoint — V1](recovery-checkpoint-v1.md).
+
+The Core keeps raw content only within a bounded transient window required for immediate context, retries and repair detection. Durable learning is event-driven. After failure/restart, validated structured state is restored from a sanitised recovery checkpoint; missing nuance is relearned from new messages rather than fabricated.
