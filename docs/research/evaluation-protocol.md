@@ -86,7 +86,11 @@ The corpus should cover at least:
 - long multi-paragraph messages with progressive translation;
 - edits that invalidate previously speculated paragraphs;
 - abandoned drafts;
-- final reconciliation quality versus full post-Send translation.
+- final reconciliation quality versus full post-Send translation;
+- aggressive delete/rewrite behaviour;
+- backward cursor edits into previously stable paragraphs;
+- paragraph merge/split after speculation;
+- stale provider response arriving after a rewrite.
 
 ## Metrics
 
@@ -122,7 +126,10 @@ Record:
 - send-to-translation-ready latency;
 - speculative fragment reuse rate;
 - speculative invalidation rate;
-- abandoned speculative work/cost.
+- abandoned speculative work/cost;
+- stale-response discard rate;
+- high-churn speculation pause count;
+- send reusable fraction.
 
 ## Experimental discipline
 
@@ -192,3 +199,20 @@ Evaluate:
 - recipient-visible error rate.
 
 Progressive translation is successful only if it reduces perceived latency without degrading final quality or privacy guarantees.
+
+
+## Draft-fluidity evaluation
+
+Progressive translation must be tested under realistic editing behaviour, not only linear typing.
+
+Required edit traces include:
+
+- type -> pause -> continue in same sentence;
+- type paragraph -> later rewrite paragraph;
+- delete a previously speculated paragraph;
+- move cursor backward and insert a new antecedent;
+- redefine terminology used later in the draft;
+- repeatedly edit a high-churn paragraph;
+- press Send while stale speculative requests are still in flight.
+
+The final translation must match the final draft, never an earlier revision.
