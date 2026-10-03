@@ -17,6 +17,7 @@ class FakePersistentSendRepository {
     authorized = true,
     targets,
     failAt = null,
+    failCommit = false,
   } = {}) {
     this.authorized = authorized;
     this.targets = targets ?? [
@@ -50,6 +51,7 @@ class FakePersistentSendRepository {
       },
     ];
     this.failAt = failAt;
+    this.failCommit = failCommit;
 
     this.receipts = new Map();
     this.messagesByClientKey = new Map();
@@ -104,7 +106,12 @@ class FakePersistentSendRepository {
   async withTransaction(work) {
     const snapshot = this.snapshot();
     try {
-      return await work({});
+      const result = await work({});
+      if (this.failCommit) {
+        this.restore(snapshot);
+        throw new Error("forced commit failure");
+      }
+      return result;
     } catch (error) {
       this.restore(snapshot);
       throw error;
@@ -195,6 +202,7 @@ class FakePersistentSendRepository {
           messageSeq: metadata.messageSeq,
           acceptedAt: metadata.acceptedAt,
           originalSourceHash: input.sourceHash ?? null,
+          acceptedResult: null,
         },
       );
     }
@@ -238,6 +246,17 @@ class FakePersistentSendRepository {
 
     receipt.status = "SUCCEEDED";
     receipt.result = clone(input.result);
+
+    if (
+      input.commandType === "message.send" &&
+      typeof input.result.message_id === "string"
+    ) {
+      for (const prior of this.messagesByClientKey.values()) {
+        if (prior.messageId === input.result.message_id) {
+          prior.acceptedResult = clone(input.result);
+        }
+      }
+    }
   }
 }
 
@@ -508,7 +527,7 @@ test("repository failure after transient buffering rolls back DB effects and rem
   assert.deepEqual(sourceStore.stats(), { entries: 0, totalChars: 0 });
 });
 
-test("transient source pressure does not block original delivery and returns SOURCE_REQUIRED", async () => {
+test("transient source pressure does not block original delivery and preserves exact retry result", async () => {
   const tinyStore = new BoundedTransientSourceStore({
     clock: {
       now() {
@@ -521,8 +540,13 @@ test("transient source pressure does not block original delivery and returns SOU
   const { repository, service } = fixture({ sourceStore: tinyStore });
 
   const accepted = await service.sendMessage(actor, command());
+  const retry = await service.sendMessage(
+    actor,
+    command({ command_id: "cmd-source-pressure-retry" }),
+  );
 
   assert.equal(accepted.translation_status, "SOURCE_REQUIRED");
+  assert.deepEqual(retry, accepted);
   assert.equal(repository.metadata.length, 1);
   assert.equal(repository.envelopes.length, 3);
   assert.equal(repository.jobs.length, 1);
@@ -598,7 +622,7 @@ test("source digester is rejected if it returns plaintext", async () => {
   assert.equal(repository.receipts.size, 0);
 });
 
-test("bounded transient source store evicts oldest data and expires by TTL", () => {
+test("bounded transient source store preserves admitted work under pressure and expires by TTL", () => {
   let now = "2026-10-03T22:20:00.000Z";
   const store = new BoundedTransientSourceStore({
     clock: { now: () => now },
@@ -606,35 +630,65 @@ test("bounded transient source store evicts oldest data and expires by TTL", () 
     maxTotalChars: 8,
   });
 
-  store.put({
-    messageId: "m1",
-    sourceRevision: 1,
-    sourceHash: "h1",
-    source: { text: "aaaa" },
-    storedAt: now,
-    expiresAt: "2026-10-03T22:21:00.000Z",
-  });
-  store.put({
-    messageId: "m2",
-    sourceRevision: 1,
-    sourceHash: "h2",
-    source: { text: "bbbb" },
-    storedAt: now,
-    expiresAt: "2026-10-03T22:21:00.000Z",
-  });
-  store.put({
-    messageId: "m3",
-    sourceRevision: 1,
-    sourceHash: "h3",
-    source: { text: "cccc" },
-    storedAt: now,
-    expiresAt: "2026-10-03T22:21:00.000Z",
-  });
+  for (const messageId of ["m1", "m2"]) {
+    store.put({
+      messageId,
+      sourceRevision: 1,
+      sourceHash: messageId,
+      source: { text: "aaaa" },
+      storedAt: now,
+      expiresAt: "2026-10-03T22:21:00.000Z",
+    });
+  }
 
-  assert.equal(store.get("m1", 1), undefined);
+  assert.throws(
+    () =>
+      store.put({
+        messageId: "m3",
+        sourceRevision: 1,
+        sourceHash: "h3",
+        source: { text: "cccc" },
+        storedAt: now,
+        expiresAt: "2026-10-03T22:21:00.000Z",
+      }),
+    /capacity is exhausted/,
+  );
+
+  assert.ok(store.get("m1", 1));
   assert.ok(store.get("m2", 1));
-  assert.ok(store.get("m3", 1));
+  assert.equal(store.get("m3", 1), undefined);
 
   now = "2026-10-03T22:21:00.000Z";
   assert.deepEqual(store.stats(), { entries: 0, totalChars: 0 });
+});
+
+
+test("failed database commit removes newly buffered source", async () => {
+  const { repository, sourceStore, service } = fixture({
+    failCommit: true,
+  });
+
+  await assert.rejects(
+    () => service.sendMessage(actor, command()),
+    /forced commit failure/,
+  );
+
+  assert.equal(repository.receipts.size, 0);
+  assert.equal(repository.metadata.length, 0);
+  assert.deepEqual(sourceStore.stats(), { entries: 0, totalChars: 0 });
+});
+
+test("short source text is accepted when the digest is cryptographic", async () => {
+  const { service } = fixture();
+  const accepted = await service.sendMessage(
+    actor,
+    command({
+      source: {
+        text: "a",
+        language_hint: "fr-FR",
+      },
+    }),
+  );
+
+  assert.equal(accepted.status, "ACCEPTED");
 });
