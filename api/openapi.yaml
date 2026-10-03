@@ -155,17 +155,12 @@ paths:
       operationId: deleteMessage
       parameters:
         - $ref: '#/components/parameters/MessageId'
-        - name: command_id
-          in: query
-          required: true
-          schema:
-            $ref: '#/components/schemas/Uuid'
-        - name: expected_revision
-          in: query
-          required: true
-          schema:
-            type: integer
-            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteMessageRequest'
       responses:
         '200':
           description: Tombstone revision accepted.
@@ -502,6 +497,19 @@ components:
           minimum: 1
         source:
           $ref: '#/components/schemas/SourceContent'
+    DeleteMessageRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, command_id, expected_revision]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        expected_revision:
+          type: integer
+          minimum: 1
     MessageRevisionResult:
       type: object
       additionalProperties: false

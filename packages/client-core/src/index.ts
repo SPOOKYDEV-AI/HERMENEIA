@@ -1,8 +1,14 @@
-import type { UUID } from "../../domain/src/index.js";
+import type {
+  CommandStatusResult,
+  MessageRevisionResult,
+  UUID,
+} from "../../domain/src/index.js";
 import type {
   AcceptedMessageResponse,
   ApiErrorBody,
+  DeleteMessageCommand,
   DeliveryAckInput,
+  EditMessageCommand,
   SendMessageCommand,
   ServerEvent,
   SourceContent,
@@ -56,6 +62,9 @@ export interface ClientClock {
 
 export interface MessagingTransport {
   send(command: SendMessageCommand): Promise<AcceptedMessageResponse>;
+  edit(command: EditMessageCommand): Promise<MessageRevisionResult>;
+  delete(command: DeleteMessageCommand): Promise<MessageRevisionResult>;
+  commandStatus(commandId: UUID): Promise<CommandStatusResult>;
   sync(cursor?: string): Promise<SyncResponse>;
   acknowledge(acks: DeliveryAckInput[]): Promise<void>;
 }
@@ -85,6 +94,7 @@ export interface ClientStore {
     envelope: LocalIncomingEnvelope,
   ): void;
 
+  applyDeleteEventAtomically(event: ServerEvent, messageId: UUID): void;
   applyControlEventAtomically(event: ServerEvent): void;
 
   hasAppliedEvent(eventId: UUID): boolean;
@@ -137,12 +147,18 @@ export class InMemoryClientStore implements ClientStore {
 
     // One synchronous store mutation models the transaction boundary required
     // from IndexedDB/SQLite adapters: envelope + event id + cursor + pending ACK.
-    this.incoming.set(envelope.envelopeId, structuredClone(envelope));
+    this.incoming.set(envelope.messageId, structuredClone(envelope));
     this.appliedEvents.add(event.event_id);
     this.pendingAcks.set(envelope.envelopeId, {
       envelopeId: envelope.envelopeId,
       persistedAt: envelope.persistedAt,
     });
+    this.syncCursor = event.cursor;
+  }
+
+  applyDeleteEventAtomically(event: ServerEvent, messageId: UUID): void {
+    this.incoming.delete(messageId);
+    this.appliedEvents.add(event.event_id);
     this.syncCursor = event.cursor;
   }
 
@@ -258,7 +274,16 @@ export class ClientMessagingEngine {
       if (this.deps.store.hasAppliedEvent(event.event_id)) {
         continue;
       }
-      if (event.type !== "message.available") {
+      if (event.type === "message.deleted") {
+        const messageId = asString(event.payload.message_id, "message_id");
+        this.deps.store.applyDeleteEventAtomically(event, messageId);
+        continue;
+      }
+
+      if (
+        event.type !== "message.available" &&
+        event.type !== "message.edited"
+      ) {
         this.deps.store.applyControlEventAtomically(event);
         continue;
       }
@@ -338,6 +363,45 @@ export class HttpMessagingTransport implements MessagingTransport {
       },
     );
     return (await response.json()) as AcceptedMessageResponse;
+  }
+
+  async edit(command: EditMessageCommand): Promise<MessageRevisionResult> {
+    const response = await this.request(
+      `/v1/messages/${encodeURIComponent(command.message_id)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          protocol_version: command.protocol_version,
+          command_id: command.command_id,
+          expected_revision: command.expected_revision,
+          source: command.source,
+        }),
+      },
+    );
+    return (await response.json()) as MessageRevisionResult;
+  }
+
+  async delete(command: DeleteMessageCommand): Promise<MessageRevisionResult> {
+    const response = await this.request(
+      `/v1/messages/${encodeURIComponent(command.message_id)}`,
+      {
+        method: "DELETE",
+        body: JSON.stringify({
+          protocol_version: command.protocol_version,
+          command_id: command.command_id,
+          expected_revision: command.expected_revision,
+        }),
+      },
+    );
+    return (await response.json()) as MessageRevisionResult;
+  }
+
+  async commandStatus(commandId: UUID): Promise<CommandStatusResult> {
+    const response = await this.request(
+      `/v1/commands/${encodeURIComponent(commandId)}`,
+      { method: "GET" },
+    );
+    return (await response.json()) as CommandStatusResult;
   }
 
   async sync(cursor?: string): Promise<SyncResponse> {

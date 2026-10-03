@@ -339,3 +339,77 @@ test("control events advance the local cursor without creating a message envelop
   assert.equal(store.listIncoming().length, 0);
   assert.equal(store.listPendingAcks().length, 0);
 });
+
+
+test("recipient applies edit as replacement and delete as local removal", async (t) => {
+  const { core, server } = buildServerFixture();
+  t.after(() => server.close());
+  const base = await listen(server);
+
+  const senderTransport = transport(base, "user-a", "device-a");
+  const recipientTransport = transport(base, "user-b", "device-b");
+
+  const senderStore = new InMemoryClientStore();
+  const sender = new ClientMessagingEngine({
+    store: senderStore,
+    transport: senderTransport,
+    ids: deterministicIds(),
+    clock: clientClock(),
+  });
+  sender.setNetworkState("ONLINE");
+
+  const queued = sender.queueMessage("conversation-1", {
+    text: "version one",
+    language_hint: "en-US",
+  });
+  await sender.flushOutbox();
+  const accepted = senderStore.getOutgoing(queued.localId).accepted;
+
+  const recipientStore = new InMemoryClientStore();
+  const recipient = new ClientMessagingEngine({
+    store: recipientStore,
+    transport: recipientTransport,
+    ids: deterministicIds(),
+    clock: clientClock(),
+  });
+  recipient.setNetworkState("ONLINE");
+  await recipient.syncOnce();
+
+  assert.equal(recipientStore.listIncoming().length, 1);
+  assert.match(
+    recipientStore.listIncoming()[0].protectedPayload,
+    /version one$/,
+  );
+
+  const edited = await senderTransport.edit({
+    protocol_version: 1,
+    command_id: "client-edit-1",
+    message_id: accepted.message_id,
+    expected_revision: 1,
+    source: {
+      text: "version two",
+      language_hint: "en-US",
+    },
+  });
+  assert.equal(edited.revision, 2);
+
+  await recipient.syncOnce();
+  assert.equal(recipientStore.listIncoming().length, 1);
+  assert.equal(recipientStore.listIncoming()[0].sourceRevision, 2);
+  assert.match(
+    recipientStore.listIncoming()[0].protectedPayload,
+    /version two$/,
+  );
+
+  const deleted = await senderTransport.delete({
+    protocol_version: 1,
+    command_id: "client-delete-1",
+    message_id: accepted.message_id,
+    expected_revision: 2,
+  });
+  assert.equal(deleted.status, "DELETED");
+
+  await recipient.syncOnce();
+  assert.equal(recipientStore.listIncoming().length, 0);
+  assert.equal(core.getMessageMetadata(accepted.message_id).status, "DELETED");
+});

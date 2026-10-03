@@ -149,3 +149,121 @@ test("non-member cannot send to conversation", async () => {
     (error) => error instanceof DomainError && error.code === "NOT_AUTHORIZED",
   );
 });
+
+
+test("edit creates a new revision without advancing logical message identity", async () => {
+  const core = createCore();
+  const accepted = await core.sendMessage(actor, command("version 1"));
+
+  const result = await core.editMessage(actor, {
+    protocol_version: 1,
+    command_id: "cmd-edit-1",
+    message_id: accepted.message_id,
+    expected_revision: 1,
+    source: {
+      text: "version 2",
+      language_hint: "fr-FR",
+    },
+  });
+
+  assert.equal(result.message_id, accepted.message_id);
+  assert.equal(result.revision, 2);
+  assert.equal(result.op_seq, 2);
+  assert.equal(result.status, "ACTIVE");
+
+  const metadata = core.getMessageMetadata(accepted.message_id);
+  assert.equal(metadata.messageSeq, 1);
+  assert.equal(metadata.currentRevision, 2);
+
+  const jobs = core.getTranslationJobs();
+  assert.equal(jobs.length, 2);
+  assert.equal(jobs[0].status, "SUPERSEDED");
+  assert.equal(jobs[1].status, "AVAILABLE");
+  assert.equal(jobs[1].sourceRevision, 2);
+});
+
+test("retrying the same edit command is idempotent", async () => {
+  const core = createCore();
+  const accepted = await core.sendMessage(actor, command("version 1"));
+
+  const edit = {
+    protocol_version: 1,
+    command_id: "cmd-edit-retry",
+    message_id: accepted.message_id,
+    expected_revision: 1,
+    source: {
+      text: "version 2",
+      language_hint: "fr-FR",
+    },
+  };
+
+  const first = await core.editMessage(actor, edit);
+  const retry = await core.editMessage(actor, edit);
+
+  assert.deepEqual(retry, first);
+  assert.equal(core.getMessageMetadata(accepted.message_id).currentRevision, 2);
+  assert.equal(core.getTranslationJobs().length, 2);
+});
+
+test("stale edit revision is rejected", async () => {
+  const core = createCore();
+  const accepted = await core.sendMessage(actor, command("version 1"));
+
+  await core.editMessage(actor, {
+    protocol_version: 1,
+    command_id: "cmd-edit-good",
+    message_id: accepted.message_id,
+    expected_revision: 1,
+    source: { text: "version 2" },
+  });
+
+  await assert.rejects(
+    () =>
+      core.editMessage(actor, {
+        protocol_version: 1,
+        command_id: "cmd-edit-stale",
+        message_id: accepted.message_id,
+        expected_revision: 1,
+        source: { text: "stale overwrite" },
+      }),
+    (error) => error instanceof DomainError && error.code === "REVISION_CONFLICT",
+  );
+});
+
+test("delete tombstones message and supersedes outstanding translation work", async () => {
+  const core = createCore();
+  const accepted = await core.sendMessage(actor, command("delete me"));
+
+  const result = await core.deleteMessage(actor, {
+    protocol_version: 1,
+    command_id: "cmd-delete-1",
+    message_id: accepted.message_id,
+    expected_revision: 1,
+  });
+
+  assert.equal(result.revision, 2);
+  assert.equal(result.status, "DELETED");
+
+  const metadata = core.getMessageMetadata(accepted.message_id);
+  assert.equal(metadata.status, "DELETED");
+  assert.equal(metadata.currentRevision, 2);
+  assert.equal(core.getTranslationJobs()[0].status, "SUPERSEDED");
+
+  const events = core.syncDevice("device-b1", 0);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, "message.deleted");
+  assert.equal(events[0].sourceRevision, 2);
+  assert.equal(events[0].envelopeId, undefined);
+});
+
+test("command status returns durable logical result to the originating device", async () => {
+  const core = createCore();
+  const accepted = await core.sendMessage(actor, command("recover me"));
+
+  const status = core.getCommandStatus(actor, "cmd-1");
+  assert.equal(status.status, "SUCCEEDED");
+  assert.equal(status.result.message_id, accepted.message_id);
+
+  const unknown = core.getCommandStatus(actor, "unknown-command");
+  assert.equal(unknown.status, "UNKNOWN");
+});

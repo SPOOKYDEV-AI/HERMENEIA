@@ -76,3 +76,19 @@ export interface ApiErrorBody {
   retry_after_ms?: number;
   details?: Record<string, unknown>;
 }
+
+
+export interface EditMessageCommand {
+  protocol_version: 1;
+  command_id: UUID;
+  message_id: UUID;
+  expected_revision: number;
+  source: SourceContent;
+}
+
+export interface DeleteMessageCommand {
+  protocol_version: 1;
+  command_id: UUID;
+  message_id: UUID;
+  expected_revision: number;
+}

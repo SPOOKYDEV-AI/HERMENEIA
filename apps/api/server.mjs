@@ -42,6 +42,7 @@ function mapError(error) {
   if (error instanceof DomainError) {
     switch (error.code) {
       case "IDEMPOTENCY_CONFLICT":
+      case "REVISION_CONFLICT":
         return { status: 409, body: errorBody(error.code, error.message, false) };
       case "NOT_AUTHORIZED":
       case "DEVICE_REVOKED":
@@ -119,6 +120,26 @@ function cursor(epoch, offset) {
 }
 
 function normalizeSyncEvent(core, deviceId, event) {
+  if (event.type === "message.deleted") {
+    return {
+      protocol_version: 1,
+      event_id: event.eventId,
+      cursor: cursor(event.inboxEpoch, event.offset),
+      type: event.type,
+      server_time: event.createdAt,
+      tenant_id: event.tenantId,
+      conversation_id: event.conversationId,
+      payload: {
+        message_id: event.messageId,
+        source_revision: event.sourceRevision,
+      },
+    };
+  }
+
+  if (!event.envelopeId) {
+    throw new HttpError(409, "SYNC_RESET_REQUIRED", "Content event has no envelope");
+  }
+
   const envelope = core.getEnvelopeForDevice(deviceId, event.envelopeId);
   if (!envelope) {
     throw new HttpError(409, "SYNC_RESET_REQUIRED", "Envelope no longer available");
@@ -169,6 +190,18 @@ export function createHermeneiaHttpServer({ core, authenticate }) {
         throw new HttpError(401, "NOT_AUTHORIZED", "Authentication required");
       }
 
+      const commandStatusMatch = matchPath(
+        requestUrl.pathname,
+        /^\/v1\/commands\/([^/]+)$/,
+      );
+      if (req.method === "GET" && commandStatusMatch) {
+        return json(
+          res,
+          200,
+          core.getCommandStatus(actor, commandStatusMatch[0]),
+        );
+      }
+
       const sendMatch = matchPath(
         requestUrl.pathname,
         /^\/v1\/conversations\/([^/]+)\/messages$/,
@@ -206,6 +239,65 @@ export function createHermeneiaHttpServer({ core, authenticate }) {
         });
 
         return json(res, 202, accepted);
+      }
+
+      const messageMatch = matchPath(
+        requestUrl.pathname,
+        /^\/v1\/messages\/([^/]+)$/,
+      );
+
+      if (req.method === "PATCH" && messageMatch) {
+        const body = await readJson(req);
+        requireProtocolV1(body);
+
+        if (
+          typeof body.command_id !== "string" ||
+          typeof body.expected_revision !== "number" ||
+          !Number.isInteger(body.expected_revision) ||
+          body.expected_revision < 1 ||
+          !body.source ||
+          typeof body.source.text !== "string"
+        ) {
+          throw new HttpError(400, "INVALID_COMMAND", "Invalid edit payload");
+        }
+
+        const result = await core.editMessage(actor, {
+          protocol_version: 1,
+          command_id: body.command_id,
+          message_id: messageMatch[0],
+          expected_revision: body.expected_revision,
+          source: {
+            text: body.source.text,
+            ...(typeof body.source.language_hint === "string"
+              ? { language_hint: body.source.language_hint }
+              : {}),
+          },
+        });
+
+        return json(res, 200, result);
+      }
+
+      if (req.method === "DELETE" && messageMatch) {
+        const body = await readJson(req);
+        requireProtocolV1(body);
+
+        if (
+          typeof body.command_id !== "string" ||
+          typeof body.expected_revision !== "number" ||
+          !Number.isInteger(body.expected_revision) ||
+          body.expected_revision < 1
+        ) {
+          throw new HttpError(400, "INVALID_COMMAND", "Invalid delete payload");
+        }
+
+        const result = await core.deleteMessage(actor, {
+          protocol_version: 1,
+          command_id: body.command_id,
+          message_id: messageMatch[0],
+          expected_revision: body.expected_revision,
+        });
+
+        return json(res, 200, result);
       }
 
       if (req.method === "GET" && requestUrl.pathname === "/v1/sync") {
