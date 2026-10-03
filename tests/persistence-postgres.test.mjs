@@ -305,6 +305,15 @@ test("client_message_id lookup always compares revision 1 source fingerprint", a
         message_seq: 8,
         accepted_at: "2026-10-03T22:00:00.000Z",
         source_hash: "opaque-original-fingerprint",
+        accepted_result: {
+          protocol_version: 1,
+          status: "ACCEPTED",
+          message_id: "message-1",
+          message_seq: 8,
+          source_revision: 1,
+          accepted_at: "2026-10-03T22:00:00.000Z",
+          translation_status: "SOURCE_REQUIRED",
+        },
       }],
       rowCount: 1,
     },
@@ -328,10 +337,21 @@ test("client_message_id lookup always compares revision 1 source fingerprint", a
     messageSeq: 8,
     acceptedAt: "2026-10-03T22:00:00.000Z",
     originalSourceHash: "opaque-original-fingerprint",
+    acceptedResult: {
+      protocol_version: 1,
+      status: "ACCEPTED",
+      message_id: "message-1",
+      message_seq: 8,
+      source_revision: 1,
+      accepted_at: "2026-10-03T22:00:00.000Z",
+      translation_status: "SOURCE_REQUIRED",
+    },
   });
 
   const sql = connection.queries[1];
   assert.match(sql.text, /mr\.revision = 1/);
+  assert.match(sql.text, /LEFT JOIN LATERAL/);
+  assert.match(sql.text, /result_ref->>'message_id'/);
   assert.doesNotMatch(sql.text, /mr\.revision = mm\.current_revision/);
 });
 
