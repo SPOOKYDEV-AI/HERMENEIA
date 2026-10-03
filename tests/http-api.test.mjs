@@ -145,6 +145,22 @@ test("HTTP Send retry + recipient sync + ACK works while AI is down", async (t) 
   });
   assert.equal(ackResponse.status, 204);
   assert.equal(core.pendingEnvelopes("device-b").length, 0);
+
+  // ACK is idempotent even though the protected relay payload was deleted.
+  const secondAck = await fetch(`${base}/v1/delivery/acks`, {
+    method: "POST",
+    headers: authHeaders("user-b", "device-b"),
+    body: JSON.stringify({
+      protocol_version: 1,
+      acks: [
+        {
+          envelope_id: envelopeId,
+          persisted_at: "2026-10-03T20:00:02.000Z",
+        },
+      ],
+    }),
+  });
+  assert.equal(secondAck.status, 204);
 });
 
 test("HTTP idempotency conflict is a typed 409", async (t) => {
