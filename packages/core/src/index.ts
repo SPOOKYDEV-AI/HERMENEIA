@@ -203,7 +203,7 @@ export class InMemoryMessagingCore {
       if (previous.logicalFingerprint !== logicalFingerprint) {
         throw new DomainError(
           "IDEMPOTENCY_CONFLICT",
-          "client_message_id was already used with different source content",
+          "client_message_id was already used for a different logical message",
         );
       }
       this.storeCommandReceipt(
