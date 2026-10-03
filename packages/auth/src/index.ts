@@ -35,6 +35,12 @@ export class InMemorySessionRegistry {
   constructor(private readonly deps: SessionRegistryDependencies) {}
 
   registerSession(record: SessionRecord): void {
+    if (this.byId.has(record.sessionId)) {
+      throw new Error("Session identifier already registered");
+    }
+    if (this.deps.credentials.get(record.accessCredentialRef)) {
+      throw new Error("Access credential reference already registered");
+    }
     if (record.status !== "ACTIVE") {
       throw new Error("New sessions must start ACTIVE");
     }
