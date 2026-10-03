@@ -61,7 +61,7 @@ interface ConversationRecord {
 }
 
 interface DedupeRecord {
-  fingerprint: string;
+  logicalFingerprint: string;
   accepted: AcceptedMessage;
 }
 
@@ -192,10 +192,15 @@ export class InMemoryMessagingCore {
       actor.userId,
       command.client_message_id,
     ].join(":");
+    const logicalFingerprint = [
+      command.conversation_id,
+      sourceFingerprint,
+      command.reply_to_message_id ?? "",
+    ].join("|");
 
     const previous = this.dedupe.get(dedupeKey);
     if (previous) {
-      if (previous.fingerprint !== sourceFingerprint) {
+      if (previous.logicalFingerprint !== logicalFingerprint) {
         throw new DomainError(
           "IDEMPOTENCY_CONFLICT",
           "client_message_id was already used with different source content",
@@ -286,7 +291,7 @@ export class InMemoryMessagingCore {
     this.applyPreparedDelivery(prepared);
     this.translationJobs.set(translationJob.jobId, translationJob);
     this.dedupe.set(dedupeKey, {
-      fingerprint: sourceFingerprint,
+      logicalFingerprint,
       accepted,
     });
     this.storeCommandReceipt(
