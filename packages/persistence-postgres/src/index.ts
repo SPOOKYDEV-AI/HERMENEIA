@@ -32,6 +32,7 @@ export interface ExistingMessageAcceptance {
   replyToMessageId: UUID | null;
   messageSeq: number;
   acceptedAt: string;
+  clientAuthoredAt: string | null;
   originalSourceHash: string | null;
   acceptedResult: Record<string, unknown> | null;
 }
@@ -242,6 +243,7 @@ export class PostgresMessagingRepository {
       reply_to_message_id: UUID | null;
       message_seq: number;
       accepted_at: string;
+      client_authored_at: string | null;
       source_hash: string | null;
       accepted_result: Record<string, unknown> | null;
     }>(
@@ -250,6 +252,7 @@ export class PostgresMessagingRepository {
               mm.reply_to_message_id,
               mm.message_seq,
               mm.accepted_at::text AS accepted_at,
+              mm.client_authored_at::text AS client_authored_at,
               mr.source_hash,
               original_receipt.result_ref AS accepted_result
          FROM message_metadata mm
@@ -281,6 +284,7 @@ export class PostgresMessagingRepository {
           replyToMessageId: row.reply_to_message_id,
           messageSeq: Number(row.message_seq),
           acceptedAt: row.accepted_at,
+          clientAuthoredAt: row.client_authored_at,
           originalSourceHash: row.source_hash,
           acceptedResult: row.accepted_result,
         }
