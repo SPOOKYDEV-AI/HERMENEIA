@@ -77,7 +77,12 @@ The corpus should cover at least:
 - contradictory facts with different validity periods;
 - edited/deleted source messages;
 - stale async worker completion;
-- attempts to promote chat text into privileged policy or glossary state.
+- attempts to promote chat text into privileged policy or glossary state;
+- restart with no raw server-side history;
+- recovery from a valid sanitised checkpoint;
+- corrupt/incompatible checkpoint fallback;
+- vague translation complaint vs explicit correction;
+- transient-buffer expiry during an active conversation.
 
 ## Metrics
 
@@ -148,7 +153,10 @@ Required scenarios include:
 - a deleted source message must not reappear through cache or memory;
 - stale worker output must be rejected;
 - translation output must never become evidence for source meaning;
-- derived state must be rebuildable from authorised source data.
+- derived state must recover safely without assuming raw server-side source history;
+- a sanitised checkpoint must restore useful context without reconstructing a transcript;
+- a vague complaint must reduce trust without inventing a correction;
+- explicit correction must produce scoped durable corrective memory.
 
 ## Primary question
 

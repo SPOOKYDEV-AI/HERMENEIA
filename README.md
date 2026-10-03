@@ -86,7 +86,7 @@ The Context Engine is the main research and engineering differentiator.
 
 ## Engineering principles
 
-- original messages are immutable source data;
+- raw message bodies are transient in HERMENEIA Core by default;
 - translations are replaceable and versioned;
 - context selection is observable and reproducible;
 - AI providers remain replaceable;
@@ -109,6 +109,8 @@ The project is intentionally defining its contracts, architecture and evaluation
 - [Architecture Decision Records](docs/architecture/adr/README.md)
 - [Context evaluation protocol](docs/research/evaluation-protocol.md)
 - [Privacy and data minimisation](docs/security/privacy-data-minimisation.md)
+- [Ephemeral messages and corrective memory](docs/architecture/ephemeral-message-memory-v1.md)
+- [Sanitised recovery checkpoints](docs/architecture/recovery-checkpoint-v1.md)
 - [Product profiles](docs/specification/product-profiles.md)
 - [Dataset policy](datasets/README.md)
 - [Contributing](CONTRIBUTING.md)

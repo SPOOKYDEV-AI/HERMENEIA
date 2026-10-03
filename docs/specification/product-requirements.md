@@ -43,11 +43,11 @@ An administrator may operate the system and inspect technical metrics, but admin
 - automatic source-language detection;
 - per-recipient translation;
 - WebSocket or equivalent real-time delivery;
-- immutable original messages;
-- versioned translations;
+- original message bodies processed transiently by HERMENEIA Core rather than durably stored by default;
+- versioned translation execution metadata without requiring durable message-body retention;
 - temporal conversational episodes;
 - contextual retrieval;
-- long-lived linguistic/terminology memory where justified;
+- durable corrective linguistic/terminology memory only when triggered by explicit or strongly evidenced correction events;
 - emoji-aware and pragmatic-intent-aware translation;
 - preservation of tone/register with uncertainty handling;
 - contextual understanding of slang, acronyms, SMS abbreviations and mixed-language messages;
@@ -55,7 +55,8 @@ An administrator may operate the system and inspect technical metrics, but admin
 - locale- and region-aware target formulation;
 - dynamic conversation style profiling from the first exchanges with confidence and ongoing updates;
 - provenance-aware memory and reversible context derivation;
-- user correction/edit/delete propagation through derived context;
+- correction-triggered context updates with no random durable self-learning;
+- sanitised recovery checkpoints for automatic context recovery without raw-history replay;
 - user feedback;
 - T0/T1/T2 evaluation;
 - technical metrics and failure visibility.
@@ -132,11 +133,12 @@ The exact formula is an implementation detail and must be versioned.
 
 ## 10. Translation invariants
 
-- Original content is never replaced by translated content.
-- A failed translation never loses the original message.
+- HERMENEIA Core does not durably retain raw original message bodies by default.
+- Original content may remain available through the client or customer-controlled storage layer.
+- A failed translation must not require durable server-side retention of the message body.
 - Translation provider/model/strategy are recorded.
 - Provider-specific code stays behind an adapter boundary.
-- A translation can be regenerated without rewriting the original message.
+- A translation can be regenerated when the authorised client/customer store supplies the required source content/context.
 
 ## 11. Baselines
 
@@ -175,11 +177,13 @@ Initial domain model:
 - User
 - Conversation
 - ConversationMember
-- Message
-- Translation
-- Episode
-- EpisodeMessage
+- MessageMetadata
+- TranslationExecution
+- EpisodeState
 - MemoryItem
+- TranslationRepairEvent
+- CorrectionMemory
+- RecoveryCheckpoint
 - ContextSnapshot
 - TranslationEvaluation
 - ModelExecution
@@ -208,11 +212,11 @@ The MVP is not considered complete until the following are demonstrated:
 
 1. Two users with different preferred languages can exchange messages.
 2. Each recipient receives a translation in their language.
-3. The original message remains available.
+3. The original message remains available through the client or authorised customer-controlled history layer; HERMENEIA Core does not require durable raw-message storage.
 4. An ambiguous message can use prior context.
 5. Temporal or semantic discontinuity can create a new episode.
 6. Crossing midnight alone does not force a new episode.
-7. A relevant old episode can be retrieved.
+7. Relevant prior context can be restored from bounded structured state/corrective memory, or supplied by an authorised client history layer when raw detail is required.
 8. Stale context is penalised unless explicitly referenced.
 9. Provider failure preserves the original message.
 10. Failed translation work can be retried safely.
@@ -220,7 +224,7 @@ The MVP is not considered complete until the following are demonstrated:
 12. Cross-conversation unauthorised access is rejected.
 13. Latency, failures and AI execution metadata are measurable.
 14. T0, T1 and T2 can be evaluated on the same corpus.
-15. Deleting conversation data follows through to derived context according to the documented retention model.
+15. Deleting conversation scope removes transient buffers, derived context, corrective memory and recovery checkpoints according to policy.
 16. Emoji and compound emoji are preserved correctly in translation.
 17. Tone/intent signals can influence translation without becoming durable emotional profiles.
 18. Low-confidence emotion/intent inference falls back toward semantic fidelity rather than aggressive rewriting.
@@ -243,7 +247,15 @@ The MVP is not considered complete until the following are demonstrated:
 35. Message deletion cannot allow stale workers/caches to recreate deleted context.
 36. Previous translations are never treated as primary semantic evidence.
 37. Stale async workers cannot overwrite a newer Context State.
-38. Derived Context State can be rebuilt from authorised durable sources.
+38. Derived Context State can recover safely without assuming raw server-side history exists.
+39. Raw message bodies are not durably stored by HERMENEIA Core by default.
+40. A vague complaint such as "il a mal traduit" marks prior interpretation suspect but does not invent a correction.
+41. An explicit correction can create scoped CorrectionMemory with provenance.
+42. Low-confidence inference cannot become durable memory without a defined trigger.
+43. Raw transient content is purged according to explicit TTL/conditions.
+44. A sanitised RecoveryCheckpoint can restore useful validated context without storing a transcript.
+45. Recovery checkpoints remain bounded and exclude weak hypotheses by default.
+46. Corrupt/incompatible checkpoints fall back to partial or clean recovery without blocking messaging.
 
 ## 17. Responsiveness and incremental understanding
 
@@ -253,12 +265,12 @@ The system maintains versioned, incrementally prepared conversation state so tha
 
 The user-visible translation path should:
 
-1. persist the original message;
+1. accept and sequence the message without durably storing its body;
 2. load prepared context state;
-3. reconcile any recent messages not yet processed asynchronously;
+3. reconcile bounded transient recent context;
 4. build a bounded ContextSnapshot;
 5. invoke translation;
-6. persist and deliver the result.
+6. deliver the result and purge raw transient content according to policy.
 
 Expensive enrichment such as embeddings, summaries, memory extraction and retrieval-index maintenance should normally execute outside the critical path.
 

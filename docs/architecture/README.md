@@ -63,7 +63,7 @@ Provider adapters implement interfaces owned by the application/domain boundary.
 
 ### Message
 
-The original message is source-of-truth data and is not overwritten by a translation.
+The original message is the semantic source of truth for its translation, but HERMENEIA Core does not durably retain raw message bodies by default. Content is processed transiently and may be retained by the client or a customer-controlled store.
 
 ### Translation
 
@@ -83,7 +83,7 @@ Any queued operation that may run more than once must be idempotent.
 
 ## Initial persistence direction
 
-PostgreSQL is the system of record.
+PostgreSQL is the system of record for durable metadata, approved policy/glossary state, bounded structured Context State, corrective memory and recovery checkpoints — not raw conversation bodies by default.
 
 Vector search may use PostgreSQL vector capabilities initially rather than introducing a second specialised database before scale requires it.
 
@@ -94,7 +94,7 @@ A queue/cache may be added for:
 - embedding generation;
 - short-lived cache.
 
-It must not become the source of truth for durable messages.
+It must not become a hidden durable conversation archive.
 
 ## Observability
 
@@ -135,7 +135,7 @@ A resource ID is not proof of authorization.
 
 ## Context Engine
 
-The Context Engine is specified in [Context Engine V1](context-engine-v1.md), with pragmatic/emoji handling defined in [Pragmatics, Emotion Signals and Emoji — V1](pragmatics-affect-v1.md) and informal-language resolution defined in [Colloquial Language, Acronyms and SMS Resolver — V1](colloquial-language-v1.md), professional terminology defined in [Domain Terminology and Jargon Resolver — V1](domain-terminology-v1.md), and locale/style adaptation defined in [Locale and Conversation Style Engine — V1](locale-style-v1.md), and derived-memory correctness defined in [Context Integrity, Provenance and Memory Safety — V1](context-integrity-v1.md).
+The Context Engine is specified in [Context Engine V1](context-engine-v1.md), with pragmatic/emoji handling defined in [Pragmatics, Emotion Signals and Emoji — V1](pragmatics-affect-v1.md) and informal-language resolution defined in [Colloquial Language, Acronyms and SMS Resolver — V1](colloquial-language-v1.md), professional terminology defined in [Domain Terminology and Jargon Resolver — V1](domain-terminology-v1.md), and locale/style adaptation defined in [Locale and Conversation Style Engine — V1](locale-style-v1.md), derived-memory correctness defined in [Context Integrity, Provenance and Memory Safety — V1](context-integrity-v1.md), no-retention/corrective learning defined in [Ephemeral Message and Corrective Memory Model — V1](ephemeral-message-memory-v1.md), and crash recovery defined in [Sanitised Recovery Checkpoint — V1](recovery-checkpoint-v1.md).
 
 Its latency model is intentionally incremental: expensive enrichment prepares the next translation asynchronously, while the fast path uses versioned prepared state plus any recent messages that have not yet been processed.
 
@@ -154,9 +154,11 @@ Relevant foundation ADRs:
 - [ADR-0007 — Domain terminology is resolved with scoped, provenance-aware glossaries](adr/0007-domain-terminology-scoped-glossaries.md)
 - [ADR-0008 — Translation style and locale are dynamic contextual profiles](adr/0008-dynamic-locale-and-style-profiles.md)
 - [ADR-0009 — Context integrity requires provenance, authority and reversible derived memory](adr/0009-context-integrity-provenance.md)
+- [ADR-0010 — Ephemeral message processing and correction-triggered memory](adr/0010-ephemeral-messages-corrective-memory.md)
+- [ADR-0011 — Sanitised recovery checkpoints instead of raw history replay](adr/0011-sanitised-recovery-checkpoints.md)
 
 ## Privacy architecture
 
 HERMENEIA's privacy/data-minimisation model is documented in [Privacy and Data-Minimisation Architecture](../security/privacy-data-minimisation.md).
 
-The central rule is that old raw conversation history is not routinely replayed to AI providers. The Context Engine maintains bounded, versioned conversational state and retrieves older raw context only when necessary.
+The central rule is stronger than avoiding replay: HERMENEIA Core does not durably retain raw conversation bodies by default. It operates on transient message content, bounded structured state, event-driven corrective memory and sanitised recovery checkpoints.
