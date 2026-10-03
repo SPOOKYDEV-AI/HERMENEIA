@@ -412,3 +412,54 @@ Action:
 5. Measure bytes/message and battery/network wakeups.
 6. Benchmark provider routing using latency + quality + cost.
 7. Prototype encrypted offline delivery envelope separately from AI Context Core.
+
+
+## 17. Additional network findings
+
+### TDLib / Telegram — network generation
+
+Repositories:
+
+- https://github.com/tdlib/td
+- https://github.com/DrKLO/Telegram
+
+TDLib explicitly maintains a `network_generation` that changes with network state/path changes.
+
+HERMENEIA takeaway:
+
+    attach network generation to connection/session work
+    revalidate/discard stale results from an old path
+    keep Send correctness at application idempotency level
+
+### curl — Happy Eyeballs and NAT64 awareness
+
+Repository:
+https://github.com/curl/curl
+
+Observed:
+
+- mature IPv4/IPv6 Happy Eyeballs connection racing;
+- explicit NAT64/DNS64 handling considerations.
+
+HERMENEIA takeaway:
+
+    mobile readiness includes IPv6-only/NAT64
+    do not hard-code IPv4
+    rely on mature platform/network stacks rather than custom address racing
+
+### QUIC early data — replay awareness
+
+Repository:
+https://github.com/cloudflare/quiche
+
+Observed:
+
+- explicit 0-RTT/early-data support.
+
+HERMENEIA takeaway:
+
+0-RTT is interesting for latency but must not undermine Send semantics.
+
+    application idempotency is mandatory
+    early data should be treated as replayable unless proven otherwise
+    do not make HERMENEIA correctness depend on transport-level uniqueness
