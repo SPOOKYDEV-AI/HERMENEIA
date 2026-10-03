@@ -143,6 +143,7 @@ test("message sequence allocation is parameterized and membership-scoped", async
     "tenant-1",
     maliciousConversationId,
     "user-1",
+    "device-1",
   ]);
 });
 
@@ -291,4 +292,145 @@ test("persistent session lookup binds to the tenant stored on the session", asyn
     "credential-ref",
     "2026-10-03T22:30:00.000Z",
   ]);
+});
+
+
+test("client_message_id lookup always compares revision 1 source fingerprint", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{
+        message_id: "message-1",
+        message_seq: 8,
+        current_revision: 3,
+        accepted_at: "2026-10-03T22:00:00.000Z",
+        source_hash: "opaque-original-fingerprint",
+      }],
+      rowCount: 1,
+    },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const result = await repository.withTransaction((tx) =>
+    repository.findAcceptedMessageByClientId(
+      tx,
+      actor(),
+      "client-message-1",
+    ),
+  );
+
+  assert.equal(result.currentRevision, 3);
+  assert.equal(
+    result.originalSourceHash,
+    "opaque-original-fingerprint",
+  );
+
+  const sql = connection.queries[1];
+  assert.match(sql.text, /mr\.revision = 1/);
+  assert.doesNotMatch(sql.text, /mr\.revision = mm\.current_revision/);
+});
+
+test("recipient delivery plan preserves sender secondary devices and exposes recipients with no device", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [
+        {
+          user_id: "user-a",
+          device_id: "device-a2",
+          credential_version: 2,
+          public_material_ref: "pub:a2",
+        },
+        {
+          user_id: "user-b",
+          device_id: "device-b",
+          credential_version: 5,
+          public_material_ref: "pub:b",
+        },
+        {
+          user_id: "user-c",
+          device_id: null,
+          credential_version: null,
+          public_material_ref: null,
+        },
+      ],
+      rowCount: 3,
+    },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const targets = await repository.withTransaction((tx) =>
+    repository.listRecipientDeliveryTargets(
+      tx,
+      actor(),
+      "conversation-1",
+    ),
+  );
+
+  assert.deepEqual(targets, [
+    {
+      userId: "user-a",
+      devices: [{
+        userId: "user-a",
+        deviceId: "device-a2",
+        credentialVersion: 2,
+        publicMaterialRef: "pub:a2",
+      }],
+    },
+    {
+      userId: "user-b",
+      devices: [{
+        userId: "user-b",
+        deviceId: "device-b",
+        credentialVersion: 5,
+        publicMaterialRef: "pub:b",
+      }],
+    },
+    {
+      userId: "user-c",
+      devices: [],
+    },
+  ]);
+
+  const sql = connection.queries[1];
+  assert.match(sql.text, /LEFT JOIN devices/);
+  assert.match(sql.text, /d\.device_id <> \$3/);
+  assert.deepEqual(sql.params, [
+    "tenant-1",
+    "conversation-1",
+    "device-1",
+  ]);
+});
+
+test("command receipts persist and retrieve command fingerprint", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{
+        command_type: "message.send",
+        command_fingerprint: "fingerprint-1",
+        status: "SUCCEEDED",
+        result_ref: { status: "ACCEPTED" },
+      }],
+      rowCount: 1,
+    },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const receipt = await repository.withTransaction((tx) =>
+    repository.findCommandReceipt(tx, actor(), "command-1"),
+  );
+
+  assert.deepEqual(receipt, {
+    commandType: "message.send",
+    commandFingerprint: "fingerprint-1",
+    status: "SUCCEEDED",
+    result: { status: "ACCEPTED" },
+  });
+
+  const sql = connection.queries[1];
+  assert.match(sql.text, /command_fingerprint/);
 });
