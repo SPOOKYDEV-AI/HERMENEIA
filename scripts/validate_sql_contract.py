@@ -50,6 +50,8 @@ REQUIRED_SNIPPETS = [
     "WHERE rendition_type = 'ORIGINAL'",
     "WHERE status = 'AVAILABLE'",
     "protected_payload bytea NOT NULL",
+    "UNIQUE (tenant_id, job_type, business_key)",
+    "FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id)",
 ]
 
 
