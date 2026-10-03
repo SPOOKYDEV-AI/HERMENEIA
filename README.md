@@ -2,7 +2,7 @@
 
 > **Traduire les mots. Préserver le sens.**
 
-HERMENEIA is an open-source research and engineering project exploring **context-aware multilingual communication**.
+HERMENEIA is an open-source research and engineering project exploring **context-aware multilingual communication** with a global, mobile-first messaging product direction.
 
 The project aims to build a real-time messaging system where each participant can write and read in their preferred language. Its core research problem is not translation alone: HERMENEIA must determine **which conversational context is still relevant at a given moment**, use that context to resolve ambiguity, and preserve meaning, tone and terminology across languages.
 
@@ -82,7 +82,7 @@ Planned logical modules:
 - Evaluation
 - Observability
 
-The Context Engine is the main research and engineering differentiator.
+The Context Engine is the main research and engineering differentiator. Messaging reliability, latency and mobile/network behaviour are treated as product prerequisites rather than secondary scaffolding.
 
 ## Engineering principles
 
@@ -105,6 +105,7 @@ The project is intentionally defining its contracts, architecture and evaluation
 ## Documentation
 
 - [Product requirements](docs/specification/product-requirements.md)
+- [Product North Star — Global Messaging First](docs/specification/product-north-star.md)
 - [Architecture](docs/architecture/README.md)
 - [Architecture Decision Records](docs/architecture/adr/README.md)
 - [Context evaluation protocol](docs/research/evaluation-protocol.md)

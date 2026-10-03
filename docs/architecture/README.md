@@ -159,6 +159,7 @@ Relevant foundation ADRs:
 - [ADR-0012 — Progressive draft translation for long messages](adr/0012-progressive-draft-translation.md)
 - [ADR-0013 — Draft speculation uses reversible stability, not predicted user intent](adr/0013-reversible-draft-stability.md)
 - [ADR-0014 — Mobile-network-first adaptive transport and client orchestration](adr/0014-mobile-network-first-adaptive-transport.md)
+- [ADR-0015 — Messaging parity is a product prerequisite; contextual translation is the differentiator](adr/0015-messaging-parity-contextual-translation.md)
 
 ## Privacy architecture
 
@@ -184,3 +185,14 @@ The client owns a Network Orchestrator for:
 The application protocol remains transport-independent so WebSocket, HTTP streaming/long-poll and future HTTP/3/QUIC optimisations can be benchmarked without changing domain logic.
 
 Research references and candidate technologies are tracked in [GitHub Architecture Landscape Scan — 2026-10-03](../research/github-landscape-2026-10-03.md).
+
+
+## Product architecture North Star
+
+HERMENEIA is globally language-agnostic at the domain layer.
+
+One source message may later produce multiple recipient-specific translations, each using the recipient's target language/locale/profile while preserving one shared source event.
+
+Messaging interaction quality is treated as a prerequisite. HERMENEIA's differentiated architecture remains the Context/Memory/Translation system rather than unrelated social-network feature breadth.
+
+See [Product North Star — Global Messaging First](../specification/product-north-star.md).

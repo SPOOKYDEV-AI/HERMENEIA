@@ -1,8 +1,20 @@
 # Product Profiles
 
-HERMENEIA is designed around one core translation/context engine with multiple product profiles.
+HERMENEIA is designed around one global messaging/context core with multiple product profiles. Geography changes language, locale, regulatory and deployment constraints — not the underlying conversation model.
 
 The profiles must share the same domain logic. Enterprise capability must not become a forked second product.
+
+## Global product rule
+
+The product must not assume a French domestic market or a single source/target language pair.
+
+Commercial rollout may deliberately focus on selected countries/language pairs first, but:
+
+- user identity is not tied to one language;
+- each conversation participant owns a preferred target language/locale;
+- group-message architecture must eventually support different target locales per recipient;
+- regional language variants are first-class;
+- market sequencing is separate from technical global readiness.
 
 ## Consumer
 

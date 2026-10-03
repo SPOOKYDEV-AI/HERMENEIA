@@ -6,9 +6,11 @@
 
 ## 1. Product statement
 
-HERMENEIA is a real-time multilingual messaging system that translates conversations while selecting context dynamically according to semantic relevance, temporal continuity and conversational structure.
+HERMENEIA is a real-time multilingual messaging system that must deliver mainstream-quality messaging interactions while translating conversations through dynamic semantic, temporal and conversational context.
 
 The product must preserve meaning without requiring every translation request to include the entire conversation history.
+
+HERMENEIA is not architected around a privileged pivot language. Source and target language/locale are first-class and recipient-specific.
 
 ## 2. Core research problem
 
@@ -16,7 +18,20 @@ The product must preserve meaning without requiring every translation request to
 
 The system must compare adaptive context retrieval against simpler baselines rather than assuming more context is better.
 
-## 3. MVP users
+## 3. Product North Star constraints
+
+The MVP is deliberately narrower than the long-term product, but must preserve these architectural constraints:
+
+- messaging performance/reliability is a prerequisite, not a differentiator;
+- contextual translation is the primary differentiator;
+- global language/locale expansion must not require a domain-model redesign;
+- production clients are expected to be mobile-first even if the research MVP begins on responsive web;
+- one source message must be able to support multiple recipient-specific translations in future group conversations;
+- no source/target pair is required to pivot through French or English at the HERMENEIA domain layer.
+
+See [Product North Star — Global Messaging First](product-north-star.md).
+
+## 4. MVP users
 
 ### Standard user
 
@@ -34,7 +49,7 @@ A user can:
 
 An administrator may operate the system and inspect technical metrics, but administrator status must not imply unrestricted access to private message bodies.
 
-## 4. MVP in scope
+## 5. MVP in scope
 
 - responsive web application;
 - authentication;
@@ -66,7 +81,7 @@ An administrator may operate the system and inspect technical metrics, but admin
 - T0/T1/T2 evaluation;
 - technical metrics and failure visibility.
 
-## 5. Explicitly out of scope for MVP
+## 6. Explicitly out of scope for MVP
 
 - voice/video calls;
 - live speech translation;
@@ -79,7 +94,7 @@ An administrator may operate the system and inspect technical metrics, but admin
 
 Out-of-scope features may be reconsidered only after the core context hypothesis is measured.
 
-## 6. Context model
+## 7. Context model
 
 Context is not equivalent to the last N messages.
 
@@ -92,7 +107,7 @@ The system recognises four layers:
 
 A date boundary is a signal, never a hard reset.
 
-## 7. Episode continuity
+## 8. Episode continuity
 
 Episode continuity should consider:
 
@@ -106,7 +121,7 @@ Episode continuity should consider:
 
 The initial engine may use a weighted heuristic, but its inputs and version must be observable and replaceable.
 
-## 8. Temporal memory
+## 9. Temporal memory
 
 Remembered information may include:
 
@@ -120,7 +135,7 @@ Remembered information may include:
 
 Old information must not be treated as permanently true.
 
-## 9. Context budget
+## 10. Context budget
 
 The Context Builder must operate under an explicit budget. Candidate context should be ranked by usefulness relative to token/latency cost.
 
@@ -136,7 +151,7 @@ semantic relevance
 
 The exact formula is an implementation detail and must be versioned.
 
-## 10. Translation invariants
+## 11. Translation invariants
 
 - HERMENEIA Core does not durably retain raw original message bodies by default.
 - Original content may remain available through the client or customer-controlled storage layer.
@@ -145,7 +160,7 @@ The exact formula is an implementation detail and must be versioned.
 - Provider-specific code stays behind an adapter boundary.
 - A translation can be regenerated when the authorised client/customer store supplies the required source content/context.
 
-## 11. Baselines
+## 12. Baselines
 
 Every context improvement must remain comparable with:
 
@@ -153,7 +168,7 @@ Every context improvement must remain comparable with:
 - **T1:** fixed window of recent messages;
 - **T2:** adaptive temporal context.
 
-## 12. Reliability requirements
+## 13. Reliability requirements
 
 - client retries must not create duplicate messages;
 - server ordering must not depend only on client timestamps;
@@ -162,7 +177,7 @@ Every context improvement must remain comparable with:
 - unfinished async work must be recoverable;
 - database constraints must protect core invariants.
 
-## 13. Security and privacy requirements
+## 14. Security and privacy requirements
 
 - strict conversation membership authorization;
 - TLS in deployed environments;
@@ -175,7 +190,7 @@ Every context improvement must remain comparable with:
 - data minimisation;
 - deletion of relevant derived data when source conversation data is removed.
 
-## 14. Data entities
+## 15. Data entities
 
 Initial domain model:
 
@@ -196,7 +211,7 @@ Initial domain model:
 
 This is a logical model, not permission to create all tables before their behaviour is implemented.
 
-## 15. Translation traceability
+## 16. Translation traceability
 
 A translation record should be able to identify:
 
@@ -211,7 +226,7 @@ A translation record should be able to identify:
 - execution status;
 - creation time.
 
-## 16. Acceptance criteria
+## 17. Acceptance criteria
 
 The MVP is not considered complete until the following are demonstrated:
 
@@ -289,8 +304,12 @@ The MVP is not considered complete until the following are demonstrated:
 72. IPv6/dual-stack/NAT64 operation is included in mobile readiness tests.
 73. WebSocket-blocked environments have an HTTP-compatible fallback strategy.
 74. Transport early-data/replay behaviour cannot duplicate a logical Send.
+75. Domain/API contracts do not require an English or French pivot language.
+76. One source message can support multiple recipient-specific target locale/profile translations without duplicating source semantics.
+77. The messaging critical path remains usable even when translation is degraded.
+78. Expansion to additional scripts/locales does not require changing core message identity or translation ownership.
 
-## 17. Responsiveness and incremental understanding
+## 18. Responsiveness and incremental understanding
 
 Context construction must not rebuild the complete conversation on every message.
 
@@ -318,8 +337,8 @@ excluding provider inference/network time.
 
 These values are engineering targets to validate, not current performance claims.
 
-## 18. Success definition
+## 19. Success definition
 
-HERMENEIA succeeds only if adaptive context demonstrates measurable value relative to T0/T1 under a documented evaluation method **without making interactive translation unacceptably slow**.
+HERMENEIA succeeds only if adaptive context demonstrates measurable value relative to T0/T1 under a documented evaluation method **without making interactive translation unacceptably slow or degrading the messaging experience**.
 
 A visually complete chat UI without quality and latency evidence is not sufficient.
