@@ -85,6 +85,8 @@ export interface ClientStore {
     envelope: LocalIncomingEnvelope,
   ): void;
 
+  applyControlEventAtomically(event: ServerEvent): void;
+
   hasAppliedEvent(eventId: UUID): boolean;
   listIncoming(): LocalIncomingEnvelope[];
 
@@ -141,6 +143,11 @@ export class InMemoryClientStore implements ClientStore {
       envelopeId: envelope.envelopeId,
       persistedAt: envelope.persistedAt,
     });
+    this.syncCursor = event.cursor;
+  }
+
+  applyControlEventAtomically(event: ServerEvent): void {
+    this.appliedEvents.add(event.event_id);
     this.syncCursor = event.cursor;
   }
 
@@ -252,6 +259,7 @@ export class ClientMessagingEngine {
         continue;
       }
       if (event.type !== "message.available") {
+        this.deps.store.applyControlEventAtomically(event);
         continue;
       }
 
