@@ -285,6 +285,10 @@ The MVP is not considered complete until the following are demonstrated:
 68. Network tests cover high RTT, low bandwidth, jitter, loss, timeout, reset and temporary disconnect.
 69. Bytes transferred and retry/reconnect counts are measurable per network profile.
 70. Offline-recipient delivery uses an explicit TTL/ACK relay or customer-controlled store rather than implicit plaintext history.
+71. Network-path changes cannot let stale transport results overwrite newer connection state.
+72. IPv6/dual-stack/NAT64 operation is included in mobile readiness tests.
+73. WebSocket-blocked environments have an HTTP-compatible fallback strategy.
+74. Transport early-data/replay behaviour cannot duplicate a logical Send.
 
 ## 17. Responsiveness and incremental understanding
 
