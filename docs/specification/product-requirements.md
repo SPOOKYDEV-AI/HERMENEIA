@@ -212,11 +212,11 @@ The MVP is not considered complete until the following are demonstrated:
 
 1. Two users with different preferred languages can exchange messages.
 2. Each recipient receives a translation in their language.
-3. The original message remains available.
+3. The original message remains available through the client or authorised customer-controlled history layer; HERMENEIA Core does not require durable raw-message storage.
 4. An ambiguous message can use prior context.
 5. Temporal or semantic discontinuity can create a new episode.
 6. Crossing midnight alone does not force a new episode.
-7. A relevant old episode can be retrieved.
+7. Relevant prior context can be restored from bounded structured state/corrective memory, or supplied by an authorised client history layer when raw detail is required.
 8. Stale context is penalised unless explicitly referenced.
 9. Provider failure preserves the original message.
 10. Failed translation work can be retried safely.
@@ -224,7 +224,7 @@ The MVP is not considered complete until the following are demonstrated:
 12. Cross-conversation unauthorised access is rejected.
 13. Latency, failures and AI execution metadata are measurable.
 14. T0, T1 and T2 can be evaluated on the same corpus.
-15. Deleting conversation data follows through to derived context according to the documented retention model.
+15. Deleting conversation scope removes transient buffers, derived context, corrective memory and recovery checkpoints according to policy.
 16. Emoji and compound emoji are preserved correctly in translation.
 17. Tone/intent signals can influence translation without becoming durable emotional profiles.
 18. Low-confidence emotion/intent inference falls back toward semantic fidelity rather than aggressive rewriting.
