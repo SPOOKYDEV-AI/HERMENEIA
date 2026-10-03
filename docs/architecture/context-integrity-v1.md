@@ -408,15 +408,19 @@ Correctness is more important than keeping a stale cache available.
 
 ## 22. Recovery
 
-All derived state must be rebuildable from authorised durable sources and approved policy/glossary state.
+HERMENEIA Core does not assume that raw message history exists on the server.
 
-A disaster-recovery procedure should be able to:
+Recovery therefore uses, in order:
 
-1. discard derived caches/state;
-2. replay authorised sources;
-3. rebuild episodes/claims/memory;
-4. compare resulting strategy versions;
-5. restore service.
+1. current policies/glossaries;
+2. approved CorrectionMemory;
+3. the latest valid Sanitised Recovery Checkpoint;
+4. optional minimal recent context replayed by an authorised client/customer-controlled store;
+5. clean contextual relearning from new messages.
+
+The system must never fabricate missing historical details merely to reconstruct a previous state.
+
+A recovery checkpoint is not allowed to become a hidden transcript.
 
 ## 23. Metrics
 
@@ -464,4 +468,6 @@ V1 is not complete until:
 9. privileged policy/glossary state cannot be created from chat text;
 10. memory remains bounded;
 11. durable memory promotion is policy/version controlled;
-12. the entire derived Context State can be rebuilt from authorised durable sources.
+12. useful Context State can recover from approved durable structured state without assuming raw server-side history;
+13. durable learning occurs only through defined correction/policy triggers;
+14. recovery checkpoints exclude weak hypotheses and raw transcript content by default.
