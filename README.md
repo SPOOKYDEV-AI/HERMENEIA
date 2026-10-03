@@ -119,6 +119,7 @@ The project is intentionally defining its contracts, architecture and evaluation
 - [Pilot evaluation harness](research/eval/README.md)
 - [Local / sandbox CI](docs/engineering/local-ci.md)
 - [Executable Core Skeleton](docs/engineering/executable-core-skeleton.md)
+- [PostgreSQL Core Schema — V1](docs/engineering/postgres-core-schema-v1.md)
 - [Privacy and data minimisation](docs/security/privacy-data-minimisation.md)
 - [Ephemeral messages and corrective memory](docs/architecture/ephemeral-message-memory-v1.md)
 - [Sanitised recovery checkpoints](docs/architecture/recovery-checkpoint-v1.md)
