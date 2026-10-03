@@ -8,7 +8,11 @@ import {
   InMemoryMessagingCore,
 } from "../.build/packages/core/src/index.js";
 
-function createCore({ secondRecipientDevice = false } = {}) {
+function createCore({
+  secondRecipientDevice = false,
+  recipientDevice = true,
+  senderSecondDevice = false,
+} = {}) {
   let id = 0;
   const core = new InMemoryMessagingCore({
     ids: {
@@ -42,8 +46,13 @@ function createCore({ secondRecipientDevice = false } = {}) {
   });
 
   core.registerDevice("user-a", "device-a");
-  core.registerDevice("user-b", "device-b1");
-  if (secondRecipientDevice) {
+  if (senderSecondDevice) {
+    core.registerDevice("user-a", "device-a2");
+  }
+  if (recipientDevice) {
+    core.registerDevice("user-b", "device-b1");
+  }
+  if (recipientDevice && secondRecipientDevice) {
     core.registerDevice("user-b", "device-b2");
   }
   core.registerConversation("tenant-1", "conversation-1", ["user-a", "user-b"]);
@@ -266,4 +275,26 @@ test("command status returns durable logical result to the originating device", 
 
   const unknown = core.getCommandStatus(actor, "unknown-command");
   assert.equal(unknown.status, "UNKNOWN");
+});
+
+
+test("Send is not ACCEPTED when an external recipient has no deliverable device", async () => {
+  const core = createCore({ recipientDevice: false });
+
+  await assert.rejects(
+    () => core.sendMessage(actor, command("cannot promise delivery")),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "RECIPIENT_UNAVAILABLE",
+  );
+
+  assert.equal(core.getMessageCount(), 0);
+});
+
+test("sender secondary device still receives a delivery envelope", async () => {
+  const core = createCore({ senderSecondDevice: true });
+  await core.sendMessage(actor, command("sync my second device"));
+
+  assert.equal(core.pendingEnvelopes("device-a2").length, 1);
+  assert.equal(core.pendingEnvelopes("device-b1").length, 1);
 });
