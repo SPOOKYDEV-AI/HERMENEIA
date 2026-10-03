@@ -423,7 +423,29 @@ Indexes:
 
 ACK is per envelope/device.
 
-### 3.14 DeviceSyncState
+### 3.14 CommandReceipt
+
+Purpose: durable command-status/idempotency lookup for transport retries where the client may have lost the original response.
+
+Fields:
+
+    tenant_id UUID
+    command_id UUID
+    actor_user_id UUID
+    actor_device_id UUID
+    command_type text
+    status enum(IN_PROGRESS, SUCCEEDED, FAILED)
+    result_ref jsonb
+    created_at timestamptz
+    updated_at timestamptz
+
+PK:
+
+    (tenant_id, command_id)
+
+`result_ref` is bounded structured result metadata and must not contain a raw message transcript.
+
+### 3.15 DeviceSyncState
 
 Fields:
 
@@ -435,7 +457,7 @@ Fields:
 
 Changing/resetting the inbox increments `inbox_epoch`.
 
-### 3.15 DeviceInboxEvent
+### 3.16 DeviceInboxEvent
 
 Purpose: ordered sync/realtime journal per device.
 
@@ -464,7 +486,7 @@ Unique:
 
 `metadata` is schema-bounded and must not become a hidden transcript.
 
-### 3.16 ConversationContextState
+### 3.17 ConversationContextState
 
 Purpose: current bounded derived projection.
 
@@ -497,7 +519,7 @@ Writes require CAS on `state_version` plus epoch compatibility.
 
 The projection is bounded and may be partially restorable, not universally rebuildable.
 
-### 3.17 ContextClaim
+### 3.18 ContextClaim
 
 Purpose: structured assertion with explicit authority/provenance semantics.
 
@@ -529,7 +551,7 @@ Scope must be represented through explicit typed columns/constraints, not an unc
 
 `CORRECTIVE_DURABLE` requires an authorised repair/glossary/policy trigger.
 
-### 3.18 ProvenanceEdge
+### 3.19 ProvenanceEdge
 
 Purpose: bounded dependency graph for invalidation.
 
@@ -552,7 +574,7 @@ Created_at timestamptz.
 
 Reverse indexes from each source family to derived claims are required.
 
-### 3.19 TranslationRepairEvent
+### 3.20 TranslationRepairEvent
 
 Purpose: capture feedback/repair without assuming a correction exists.
 
@@ -577,7 +599,7 @@ Unique:
 
 A vague problem report creates no durable semantic correction by itself.
 
-### 3.20 CorrectionMemory
+### 3.21 CorrectionMemory
 
 CorrectionMemory is a **logical subtype of ContextClaim**, not a generic table.
 
@@ -591,7 +613,7 @@ Requirements:
 
 There is intentionally no generic persistent `MemoryItem` table in V1.
 
-### 3.21 GlossaryEntry
+### 3.22 GlossaryEntry
 
 Fields:
 
@@ -624,7 +646,7 @@ Scope CHECK:
 
 Project/team scope is deferred until the domain contains a real Project/Workspace entity.
 
-### 3.22 RecoveryCheckpoint
+### 3.23 RecoveryCheckpoint
 
 Fields:
 
@@ -652,14 +674,14 @@ Only one ACTIVE pointer/state per conversation.
 
 Publication is conditional on all base versions/epochs still matching.
 
-### 3.23 OutboxJob
+### 3.24 OutboxJob
 
 Purpose: durable server-side work queue using PostgreSQL initially.
 
 Fields:
 
     job_id UUID PK
-    tenant_id UUID nullable
+    tenant_id UUID
     job_type text
     business_key text
     payload_ref jsonb
@@ -674,11 +696,11 @@ Fields:
 
 Unique:
 
-    (job_type, business_key)
+    (tenant_id, job_type, business_key)
 
 Workers may use leases/`SKIP LOCKED`, but correctness still relies on idempotent effects and publication guards.
 
-### 3.24 DeletionLedger
+### 3.25 DeletionLedger
 
 Purpose: prevent resurrection after restore/replay.
 
@@ -700,7 +722,7 @@ Exactly one typed target is required.
 
 No deleted content is stored.
 
-### 3.25 UsageLedger
+### 3.26 UsageLedger
 
 Purpose: budget and cost admission.
 

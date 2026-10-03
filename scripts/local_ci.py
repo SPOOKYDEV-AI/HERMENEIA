@@ -34,6 +34,8 @@ def validate_json_files() -> None:
 
 def main() -> int:
     validate_json_files()
+    run(sys.executable, "scripts/validate_sql_contract.py")
+    run(sys.executable, "scripts/postgres_integration.py")
     run(sys.executable, "-m", "compileall", "-q", "research", "tests")
     run(sys.executable, "research/eval/harness.py", "validate")
     run(sys.executable, "-m", "unittest", "discover", "-s", "tests/eval", "-p", "test_*.py")
