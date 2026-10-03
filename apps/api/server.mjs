@@ -47,6 +47,8 @@ function mapError(error) {
       case "NOT_AUTHORIZED":
       case "DEVICE_REVOKED":
         return { status: 403, body: errorBody(error.code, error.message, false) };
+      case "RECIPIENT_UNAVAILABLE":
+        return { status: 503, body: errorBody(error.code, error.message, true) };
       case "DELIVERY_EXPIRED":
         return { status: 410, body: errorBody(error.code, error.message, false) };
       case "INVALID_COMMAND":
