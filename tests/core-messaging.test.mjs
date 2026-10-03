@@ -338,3 +338,47 @@ test("failed edit delivery preparation leaves prior revision and pending deliver
     oldEnvelope.envelopeId,
   );
 });
+
+
+test("client_message_id cannot be reused for another conversation or reply semantic", async () => {
+  const core = createCore();
+  const first = await core.sendMessage(actor, command("same source"));
+
+  core.registerConversation(
+    "tenant-1",
+    "conversation-2",
+    ["user-a", "user-b"],
+  );
+
+  await assert.rejects(
+    () =>
+      core.sendMessage(
+        actor,
+        {
+          ...command("same source"),
+          command_id: "cmd-other-conversation",
+          conversation_id: "conversation-2",
+        },
+      ),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "IDEMPOTENCY_CONFLICT",
+  );
+
+  await assert.rejects(
+    () =>
+      core.sendMessage(
+        actor,
+        {
+          ...command("same source"),
+          command_id: "cmd-other-reply",
+          reply_to_message_id: first.message_id,
+        },
+      ),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "IDEMPOTENCY_CONFLICT",
+  );
+
+  assert.equal(core.getMessageCount(), 1);
+});
