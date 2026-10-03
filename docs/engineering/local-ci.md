@@ -18,7 +18,8 @@ Current checks:
 - messaging invariant tests pass with the AI dispatcher down;
 - HTTP send/sync/ACK integration tests pass locally, including retry/idempotency, cursor reset and payload limits;
 - client outbox/restart/sync tests pass locally, including lost Send response and lost ACK recovery;
-- edit/delete/command-recovery tests pass locally, including stale revisions, mutation retry idempotence and client replacement/removal.
+- edit/delete/command-recovery tests pass locally, including stale revisions, mutation retry idempotence and client replacement/removal;
+- Bearer session tests pass locally, including expiry, revocation and spoofed identity rejection.
 
 This does **not** mean GitHub-hosted CI is permanently forbidden.
 
