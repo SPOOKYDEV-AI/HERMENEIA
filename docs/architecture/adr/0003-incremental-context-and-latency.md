@@ -1,6 +1,6 @@
 # ADR-0003 — Incremental context processing and latency-first translation
 
-**Status:** Accepted  
+**Status:** Accepted — amended by ADR-0016  
 **Date:** 2026-10-03
 
 ## Context
@@ -15,7 +15,7 @@ A purely asynchronous context pipeline is also insufficient: a new message can a
 
 HERMENEIA will maintain conversation understanding **incrementally**.
 
-After every persisted message, the system will update or schedule updates for a versioned conversation context state.
+After every durably accepted logical message, the system may update or schedule updates for a versioned conversation context state. Durable message acceptance is defined by ADR-0016 and does not require provider translation.
 
 Translation uses two coordinated paths.
 
@@ -23,13 +23,13 @@ Translation uses two coordinated paths.
 
 Runs on the critical user-visible path and must do only work needed to translate the current message:
 
-1. persist/idempotently accept the original message;
-2. load the latest context state;
-3. detect whether the state is behind the current conversation sequence;
-4. supplement it with recent unprocessed messages when necessary;
-5. select a bounded ContextSnapshot;
+1. obtain the already-accepted source revision from the authorised transient source path;
+2. load the latest compatible context state;
+3. inspect the contiguous processed-prefix frontier and explicit gaps;
+4. supplement only with authorised transient/re-supplied source revisions that are causally prior to the current message;
+5. select a bounded causal ContextSnapshot;
 6. invoke the selected translation provider;
-7. persist and deliver the translation.
+7. conditionally publish the translation only if source revision, access, policy and erasure epochs are still valid.
 
 ### Slow path
 
@@ -39,13 +39,13 @@ Runs asynchronously and prepares future translations:
 - entity extraction;
 - episode scoring/closure;
 - episode summaries;
-- memory candidate extraction;
-- memory promotion/decay;
+- ephemeral claim/candidate extraction;
+- working-state decay/expiry;
 - retrieval indexes;
 - evaluation metadata;
 - cache refresh.
 
-The slow path must never be required to complete before the original message is safely persisted.
+The slow path must never be required to complete before the logical message is durably accepted for delivery. Durable corrective memory requires an authorised correction/policy trigger; confidence or repeated usefulness alone is insufficient.
 
 ## Context freshness
 
@@ -53,20 +53,19 @@ Each conversation context state must expose at least:
 
     conversation_id
     context_version
-    last_processed_sequence
+    processed_prefix_sequence
+    processing_gaps
     updated_at
     active_episode_id
     active_episode_version
 
 Each persisted message receives a server-side conversation sequence.
 
-When:
+The context state represents a **contiguous processed prefix**, not merely the largest sequence ever completed.
 
-    last_processed_sequence < current_message_sequence - 1
+Out-of-order workers may finish later sequences, but those completions remain gaps/pending results until all causally prior required operations are incorporated. Context for message N must never contain information introduced only by messages N+1 or later.
 
-the fast path treats the prepared context as partially stale and includes the missing recent messages directly during ContextSnapshot construction.
-
-This prevents background lag from silently dropping relevant context.
+When transient source for a required gap no longer exists, the engine enters a degraded/source-required path instead of pretending the gap was reconstructed.
 
 ## Precomputation
 
@@ -114,7 +113,8 @@ Costs:
 - context state becomes versioned mutable derived data;
 - workers and fast-path logic must coordinate via sequence/version metadata;
 - eventual consistency must be explicitly tested;
-- summaries/indexes need rebuild/recovery procedures.
+- summaries/indexes need bounded restore/recovery procedures;
+- exact reconstruction is impossible when required source content has expired and no authorised client/customer source remains.
 
 ## Alternatives considered
 
