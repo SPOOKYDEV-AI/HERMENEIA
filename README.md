@@ -113,6 +113,8 @@ The project is intentionally defining its contracts, architecture and evaluation
 - [Sanitised recovery checkpoints](docs/architecture/recovery-checkpoint-v1.md)
 - [Progressive long-message translation](docs/architecture/progressive-long-message-v1.md)
 - [Draft stability and reversible speculation](docs/architecture/draft-stability-v1.md)
+- [Mobile network and performance architecture](docs/architecture/mobile-network-performance-v1.md)
+- [GitHub architecture landscape scan](docs/research/github-landscape-2026-10-03.md)
 - [Product profiles](docs/specification/product-profiles.md)
 - [Dataset policy](datasets/README.md)
 - [Contributing](CONTRIBUTING.md)

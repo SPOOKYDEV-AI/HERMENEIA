@@ -135,7 +135,7 @@ A resource ID is not proof of authorization.
 
 ## Context Engine
 
-The Context Engine is specified in [Context Engine V1](context-engine-v1.md), with pragmatic/emoji handling defined in [Pragmatics, Emotion Signals and Emoji — V1](pragmatics-affect-v1.md) and informal-language resolution defined in [Colloquial Language, Acronyms and SMS Resolver — V1](colloquial-language-v1.md), professional terminology defined in [Domain Terminology and Jargon Resolver — V1](domain-terminology-v1.md), and locale/style adaptation defined in [Locale and Conversation Style Engine — V1](locale-style-v1.md), derived-memory correctness defined in [Context Integrity, Provenance and Memory Safety — V1](context-integrity-v1.md), no-retention/corrective learning defined in [Ephemeral Message and Corrective Memory Model — V1](ephemeral-message-memory-v1.md), crash recovery defined in [Sanitised Recovery Checkpoint — V1](recovery-checkpoint-v1.md), long-message latency optimisation defined in [Progressive Long-Message Translation — V1](progressive-long-message-v1.md), and typing/edit fluidity rules defined in [Draft Stability and Reversible Speculation — V1](draft-stability-v1.md).
+The Context Engine is specified in [Context Engine V1](context-engine-v1.md), with pragmatic/emoji handling defined in [Pragmatics, Emotion Signals and Emoji — V1](pragmatics-affect-v1.md) and informal-language resolution defined in [Colloquial Language, Acronyms and SMS Resolver — V1](colloquial-language-v1.md), professional terminology defined in [Domain Terminology and Jargon Resolver — V1](domain-terminology-v1.md), and locale/style adaptation defined in [Locale and Conversation Style Engine — V1](locale-style-v1.md), derived-memory correctness defined in [Context Integrity, Provenance and Memory Safety — V1](context-integrity-v1.md), no-retention/corrective learning defined in [Ephemeral Message and Corrective Memory Model — V1](ephemeral-message-memory-v1.md), crash recovery defined in [Sanitised Recovery Checkpoint — V1](recovery-checkpoint-v1.md), long-message latency optimisation defined in [Progressive Long-Message Translation — V1](progressive-long-message-v1.md), and typing/edit fluidity rules defined in [Draft Stability and Reversible Speculation — V1](draft-stability-v1.md), and mobile/network behaviour defined in [Mobile Network and Performance Architecture — V1](mobile-network-performance-v1.md).
 
 Its latency model is intentionally incremental: expensive enrichment prepares the next translation asynchronously, while the fast path uses versioned prepared state plus any recent messages that have not yet been processed.
 
@@ -158,9 +158,29 @@ Relevant foundation ADRs:
 - [ADR-0011 — Sanitised recovery checkpoints instead of raw history replay](adr/0011-sanitised-recovery-checkpoints.md)
 - [ADR-0012 — Progressive draft translation for long messages](adr/0012-progressive-draft-translation.md)
 - [ADR-0013 — Draft speculation uses reversible stability, not predicted user intent](adr/0013-reversible-draft-stability.md)
+- [ADR-0014 — Mobile-network-first adaptive transport and client orchestration](adr/0014-mobile-network-first-adaptive-transport.md)
 
 ## Privacy architecture
 
 HERMENEIA's privacy/data-minimisation model is documented in [Privacy and Data-Minimisation Architecture](../security/privacy-data-minimisation.md).
 
 The central rule is stronger than avoiding replay: HERMENEIA Core does not durably retain raw conversation bodies by default. It operates on transient message content, bounded structured state, event-driven corrective memory and sanitised recovery checkpoints.
+
+
+## Mobile/network architecture
+
+HERMENEIA treats mobile network conditions as a first-class runtime concern.
+
+The client owns a Network Orchestrator for:
+
+- local outbox;
+- connectivity vs service reachability;
+- retry/backoff;
+- request priorities;
+- connection recovery;
+- adaptive speculative translation;
+- foreground/background behavior.
+
+The application protocol remains transport-independent so WebSocket, HTTP streaming/long-poll and future HTTP/3/QUIC optimisations can be benchmarked without changing domain logic.
+
+Research references and candidate technologies are tracked in [GitHub Architecture Landscape Scan — 2026-10-03](../research/github-landscape-2026-10-03.md).

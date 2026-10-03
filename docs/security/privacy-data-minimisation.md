@@ -300,7 +300,25 @@ Enterprise tenants may disable speculative draft processing entirely.
 
 Draft stability analysis should remain local. Keystroke cadence, cursor movement and edit history are operational signals for the client state machine and must not become a server-side behavioural profile. Only eligible stable fragment snapshots are transmitted when policy permits.
 
-## 20. Engineering acceptance criteria
+## 20. Mobile network privacy
+
+Network optimisation must not become device/location profiling.
+
+HERMENEIA may use coarse operational hints such as:
+
+- connectivity type;
+- service reachability;
+- metered/expensive status;
+- cellular generation hint;
+- measured HERMENEIA RTT/failure rate.
+
+It should not request SSID/location permission merely to optimise translation networking.
+
+Push payloads should contain the minimum routing information necessary and avoid plaintext conversation content where possible.
+
+An offline-delivery relay, if used, must have strict TTL/delete-on-ACK semantics and must not be represented as conversation history.
+
+## 21. Engineering acceptance criteria
 
 Privacy minimisation is not considered implemented until tests/metrics can show that:
 

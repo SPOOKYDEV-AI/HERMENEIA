@@ -58,6 +58,10 @@ An administrator may operate the system and inspect technical metrics, but admin
 - correction-triggered context updates with no random durable self-learning;
 - sanitised recovery checkpoints for automatic context recovery without raw-history replay;
 - progressive translation of stable fragments for long messages, with final reconciliation before delivery;
+- adaptive mobile networking across Wi-Fi/3G/4G/5G and intermittent connectivity;
+- local outbox and idempotent send/retry;
+- connection/session recovery without full state replay;
+- mobile background/push-aware delivery behavior;
 - user feedback;
 - T0/T1/T2 evaluation;
 - technical metrics and failure visibility.
@@ -271,6 +275,20 @@ The MVP is not considered complete until the following are demonstrated:
 58. Heavy edit churn can pause speculation automatically.
 59. Draft processing never blocks input/rendering.
 60. Final delivery cannot contain text from a stale draft revision.
+61. A message queued while offline can send automatically when connectivity returns without duplication.
+62. Wi-Fi/cellular transition does not lose or duplicate an accepted message.
+63. Service reachability is distinguished from merely being connected to a network.
+64. User Send/final translation always preempts speculative/network-optional work.
+65. Speculative translation automatically reduces or stops on constrained/expensive connections.
+66. Background mobile operation does not assume a permanent socket.
+67. Reconnection resumes from bounded session/offset state instead of full conversation replay.
+68. Network tests cover high RTT, low bandwidth, jitter, loss, timeout, reset and temporary disconnect.
+69. Bytes transferred and retry/reconnect counts are measurable per network profile.
+70. Offline-recipient delivery uses an explicit TTL/ACK relay or customer-controlled store rather than implicit plaintext history.
+71. Network-path changes cannot let stale transport results overwrite newer connection state.
+72. IPv6/dual-stack/NAT64 operation is included in mobile readiness tests.
+73. WebSocket-blocked environments have an HTTP-compatible fallback strategy.
+74. Transport early-data/replay behaviour cannot duplicate a logical Send.
 
 ## 17. Responsiveness and incremental understanding
 
