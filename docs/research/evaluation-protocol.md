@@ -46,6 +46,11 @@ The corpus should cover at least:
 - terminology;
 - idioms;
 - tone/register;
+- emoji-dependent intent;
+- punctuation/casing-dependent intent;
+- humour and laughter forms;
+- affection/reassurance;
+- frustration/urgency;
 - sarcasm where feasible;
 - relative time references;
 - topic changes;
@@ -66,6 +71,8 @@ Rate:
 - naturalness;
 - contextual coherence;
 - tone preservation;
+- pragmatic-intent preservation;
+- emoji handling/preservation;
 - ambiguity resolution;
 - terminology consistency.
 
@@ -90,6 +97,23 @@ Record:
 - Do not silently remove failed cases from results.
 - Report confidence intervals or uncertainty when sample size permits.
 - Separate model improvements from context-engine improvements.
+
+## Contrastive pragmatic tests
+
+The corpus should include minimal pairs where lexical content stays nearly constant while pragmatic signals change, for example:
+
+    "Super."
+    "Super !"
+    "Super 😂"
+    "Super 🙃"
+
+and:
+
+    "Merci"
+    "Merci ❤️"
+    "Merci..."
+
+These cases test whether HERMENEIA preserves communicative intent without inventing stronger emotion than the source supports.
 
 ## Primary question
 
