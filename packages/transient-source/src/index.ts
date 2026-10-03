@@ -8,6 +8,7 @@ export interface TransientSourceKey {
 }
 
 export interface TransientSourceRecord extends TransientSourceKey {
+  sourceHash: string;
   source: SourceContent;
   createdAt: string;
   expiresAt: string;
@@ -55,20 +56,18 @@ export class InMemoryTransientSourceStore implements TransientSourceStore {
     const key = keyOf(record);
     const approxBytes = approximateBytes(record.source);
     const previous = this.records.get(key);
+    if (previous) {
+      return false;
+    }
 
-    const nextEntries = previous ? this.records.size : this.records.size + 1;
-    const nextBytes =
-      this.approxBytes - (previous?.approxBytes ?? 0) + approxBytes;
+    const nextEntries = this.records.size + 1;
+    const nextBytes = this.approxBytes + approxBytes;
 
     if (
       nextEntries > this.maxEntries ||
       nextBytes > this.maxApproxBytes
     ) {
       return false;
-    }
-
-    if (previous) {
-      this.approxBytes -= previous.approxBytes;
     }
 
     this.records.set(key, {
