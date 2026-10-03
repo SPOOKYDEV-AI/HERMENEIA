@@ -51,6 +51,8 @@ An administrator may operate the system and inspect technical metrics, but admin
 
 ## 5. MVP in scope
 
+Implementation priority is defined in [Implementation Scope — V1](implementation-scope-v1.md). The capability catalogue below includes Core, beta and experimental directions; it is not one undifferentiated release gate.
+
 - responsive web application;
 - authentication;
 - private 1:1 conversations;
@@ -72,7 +74,7 @@ An administrator may operate the system and inspect technical metrics, but admin
 - provenance-aware memory and reversible context derivation;
 - correction-triggered context updates with no random durable self-learning;
 - sanitised recovery checkpoints for automatic context recovery without raw-history replay;
-- progressive translation of stable fragments for long messages, with final reconciliation before delivery;
+- experimental progressive translation of stable fragments for long messages, gated by benchmark evidence before adoption;
 - adaptive mobile networking across Wi-Fi/3G/4G/5G and intermittent connectivity;
 - local outbox and idempotent send/retry;
 - connection/session recovery without full state replay;
@@ -226,9 +228,11 @@ A translation record should be able to identify:
 - execution status;
 - creation time.
 
-## 17. Acceptance criteria
+## 17. Product capability acceptance catalogue
 
-The MVP is not considered complete until the following are demonstrated:
+These criteria describe the broader product/research programme. **They are not all mandatory for Core Messaging V1.** Release-gating ownership is defined in [Implementation Scope — V1](implementation-scope-v1.md).
+
+The following capabilities must be demonstrated before the relevant scope graduates:
 
 1. Two users with different preferred languages can exchange messages.
 2. Each recipient receives a translation in their language.
@@ -299,7 +303,7 @@ The MVP is not considered complete until the following are demonstrated:
 67. Reconnection resumes from bounded session/offset state instead of full conversation replay.
 68. Network tests cover high RTT, low bandwidth, jitter, loss, timeout, reset and temporary disconnect.
 69. Bytes transferred and retry/reconnect counts are measurable per network profile.
-70. Offline-recipient delivery uses an explicit TTL/ACK relay or customer-controlled store rather than implicit plaintext history.
+70. Offline-recipient delivery in the public asynchronous profile uses a required TTL/ACK Delivery Relay rather than implicit plaintext history.
 71. Network-path changes cannot let stale transport results overwrite newer connection state.
 72. IPv6/dual-stack/NAT64 operation is included in mobile readiness tests.
 73. WebSocket-blocked environments have an HTTP-compatible fallback strategy.
@@ -342,3 +346,22 @@ These values are engineering targets to validate, not current performance claims
 HERMENEIA succeeds only if adaptive context demonstrates measurable value relative to T0/T1 under a documented evaluation method **without making interactive translation unacceptably slow or degrading the messaging experience**.
 
 A visually complete chat UI without quality and latency evidence is not sufficient.
+
+
+## 20. Canonical contract precedence
+
+When older requirements conflict with newer lifecycle/delivery rules, the following are canonical:
+
+1. ADR-0016 — durable acceptance, source ownership and causal publication;
+2. Delivery Contract — V1;
+3. Data Lifecycle — V1;
+4. Device Trust and Delivery Envelope Security — V1;
+5. Implementation Scope — V1.
+
+In particular:
+
+- `ACCEPTED` is independent of translation;
+- public asynchronous delivery requires a Relay;
+- durable corrective memory requires an authorised trigger;
+- exact recovery is impossible when required source text no longer exists in any authorised source;
+- progressive draft translation is experimental rather than a Core V1 requirement.

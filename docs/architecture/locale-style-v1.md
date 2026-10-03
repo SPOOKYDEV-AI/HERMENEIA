@@ -34,7 +34,9 @@ Possible fields:
 
 ### Conversation Style Profile
 
-Conversation-oriented and ephemeral.
+Speaker/direction-oriented and ephemeral.
+
+A conversation must not have one undifferentiated style profile that can cause one participant's register to be imposed on another. V1 models style at least by **speaker**, and may refine it by speaker→recipient direction when the interaction requires it.
 
 Possible fields:
 
@@ -49,6 +51,8 @@ Possible fields:
     technicality
     sentence_length_preference
     punctuation_style
+    speaker_id
+    recipient_id_optional
     confidence
     last_updated_sequence
 
@@ -79,7 +83,7 @@ Conceptually:
     warmth = 0.45
     confidence = 0.66
 
-Each following message updates the estimate.
+Each following message from the relevant speaker/direction updates that estimate.
 
 ## 4. Dynamic update
 
@@ -256,7 +260,7 @@ Cheap style features can be extracted synchronously:
     message length
     sentence count
 
-Prepared Conversation Style Profile handles more complex inference.
+Prepared per-speaker/per-direction Conversation Style Profile handles more complex inference.
 
 This keeps first-message adaptation fast.
 
@@ -290,7 +294,7 @@ Policy is versioned and included in translation traceability.
 Possible logical entities:
 
     TargetLanguageProfile
-    ConversationStyleProfile
+    ConversationStyleProfileBySpeakerOrDirection
     RegionalLexeme
     StyleSignal
     StylePolicy
@@ -337,4 +341,5 @@ V1 is not complete until:
 7. style changes affect formulation without changing semantic meaning;
 8. enterprise policy can constrain style adaptation;
 9. style/locale provenance is traceable;
-10. evaluation demonstrates multiple valid formulations for identical semantic intent.
+10. evaluation demonstrates multiple valid formulations for identical semantic intent;
+11. one participant's inferred register cannot silently overwrite another participant's style profile.

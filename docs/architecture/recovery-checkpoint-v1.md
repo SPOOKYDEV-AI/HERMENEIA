@@ -28,7 +28,7 @@ Good:
       technicality = 0.91
     unresolved_refs:
       ISSUE_3
-    last_processed_sequence = 184
+    processed_prefix_sequence = 184
     correction_memory_refs = [...]
 
 The checkpoint stores current validated understanding, not the text that created it.
@@ -44,7 +44,11 @@ Conceptually:
       checkpoint_version
       schema_version
       context_strategy_version
-      last_processed_sequence
+      processed_prefix_sequence
+      processing_gap_refs
+      erasure_epoch
+      membership_epoch
+      policy_version
       active_episode_state
       terminology_state
       lexical_state
@@ -124,18 +128,21 @@ Useful refresh triggers:
 
 Checkpoint creation should be debounced and bounded.
 
-## 8. Atomic replacement
+## 8. Conditional atomic publication
 
-Checkpoint writes must be atomic.
+Checkpoint writes must be atomic **and freshness-checked**.
 
 Pattern:
 
     create candidate checkpoint
-      -> validate
+      -> validate schema/content bounds
+      -> CAS base Context State version
+      -> verify processed prefix/gaps
+      -> verify erasure/membership/policy epochs
       -> mark ACTIVE
       -> mark previous SUPERSEDED
 
-A partially written checkpoint must never become active.
+A partially written or causally stale checkpoint must never become active.
 
 ## 9. Compatibility
 
@@ -167,9 +174,9 @@ Latest valid checkpoint restored.
 
 Checkpoint restored but some sections dropped because of version/sensitivity/expiry.
 
-### CLEAN_RECOVERY
+### DEGRADED_RECOVERY
 
-No valid checkpoint. Start with:
+No sufficiently valid checkpoint/source set. Start with:
 
     tenant policy
     target language profile
@@ -177,7 +184,7 @@ No valid checkpoint. Start with:
     CorrectionMemory
     empty live Conversation State
 
-The next messages rebuild contextual state incrementally.
+The next messages rebuild contextual state incrementally. Source-dependent pending work becomes `SOURCE_REQUIRED` when exact source content is no longer authorised/available.
 
 ## 11. Corrective memory priority
 
@@ -251,8 +258,8 @@ V1 is not complete until:
 3. low-confidence hypotheses are excluded;
 4. CorrectionMemory overrides stale checkpoint interpretation;
 5. corrupt/incompatible checkpoints fall back safely;
-6. checkpoint writes are atomic;
+6. checkpoint publication is atomic and guarded by Context State/erasure/membership/policy versions;
 7. checkpoint size remains bounded as conversation length grows;
 8. deletion removes active/superseded checkpoints;
 9. stale workers cannot recreate invalidated checkpoints;
-10. recovery metrics identify FAST/PARTIAL/CLEAN modes.
+10. recovery metrics identify FAST/PARTIAL/DEGRADED modes.

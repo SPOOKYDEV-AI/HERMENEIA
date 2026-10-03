@@ -1,6 +1,6 @@
-# Progressive Long-Message Translation — V1
+# Progressive Long-Message Translation — Experimental
 
-**Status:** Design baseline  
+**Status:** Experimental hypothesis — not required for Core V1  
 **Scope:** Client, Context Engine, Translation Engine, Privacy  
 **Goal:** make long multilingual messages feel nearly instantaneous at Send
 
@@ -128,11 +128,11 @@ Ephemeral state shared across fragments:
     entity_handles
     style_constraints
     discourse_state
-    translated_tail_summary
+    source_tail_context_refs
     strategy_version
     context_state_version
 
-This allows paragraph N+1 to remain consistent with paragraph N without replaying the entire draft.
+This allows paragraph N+1 to remain consistent with paragraph N using source-derived context and explicit terminology/entity decisions. Previous translated text is never semantic evidence.
 
 ## 8. Final reconciliation
 
@@ -295,9 +295,9 @@ Test scenarios include:
 9. context state changes while a draft is open;
 10. tenant policy disabling draft processing.
 
-## 20. Acceptance criteria
+## 20. Experimental adoption criteria
 
-V1 is not complete until:
+This feature is not required for Core V1. It may graduate only after:
 
 1. no draft fragment is delivered before Send;
 2. stable fragments can be translated before Send under allowed policy;
@@ -309,3 +309,16 @@ V1 is not complete until:
 8. unsent drafts never create durable Conversation State or CorrectionMemory;
 9. tenant policy can disable all draft processing;
 10. progressive path measurably reduces send-to-ready latency on long messages.
+
+
+## 21. Graduation gate
+
+Progressive translation remains disabled by default until a controlled benchmark demonstrates:
+
+- materially lower p95 Send-to-Ready latency on eligible long messages;
+- non-inferior semantic/style quality against full post-Send translation;
+- bounded speculative cost/waste;
+- no measurable degradation of Send/ACK SLO;
+- acceptable radio/battery impact on constrained mobile networks.
+
+Stable-island complexity is preserved as a research design, not a prerequisite for the first production messaging core.

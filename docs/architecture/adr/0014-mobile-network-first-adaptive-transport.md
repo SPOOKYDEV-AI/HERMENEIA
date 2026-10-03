@@ -1,6 +1,6 @@
 # ADR-0014 — Mobile-network-first adaptive transport and client orchestration
 
-**Status:** Accepted  
+**Status:** Accepted — amended by ADR-0016  
 **Date:** 2026-10-03
 
 ## Context
@@ -140,13 +140,13 @@ Zero durable plaintext retention creates a delivery problem when the recipient i
 HERMENEIA therefore separates:
 
 1. **AI/context Core** — no durable raw plaintext history by default;
-2. **Delivery Relay** — optional short-lived delivery envelopes until recipient acknowledgement.
+2. **Delivery Relay** — required for the public asynchronous profile when recipients may be offline.
 
-Target design for the relay is an opaque encrypted payload, strict TTL and delete-on-ACK.
+The relay uses protected per-device payload envelopes, strict TTL and delete-on-ACK semantics.
 
 This does **not** make HERMENEIA end-to-end encrypted, because plaintext is processed transiently by the AI translation path before envelope creation.
 
-If an opaque relay cannot yet be implemented, the MVP must document the temporary retention/security trade-off explicitly rather than claiming zero retention.
+If the required relay contract is not implemented, the public asynchronous messaging profile is not complete.
 
 ## Recovery
 

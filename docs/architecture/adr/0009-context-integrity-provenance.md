@@ -1,6 +1,6 @@
 # ADR-0009 — Context integrity requires provenance, authority and reversible derived memory
 
-**Status:** Accepted  
+**Status:** Accepted — amended by ADR-0016  
 **Date:** 2026-10-03
 
 ## Context
@@ -112,14 +112,18 @@ Conflicting evidence should be represented explicitly.
 
 HERMENEIA must not resolve contradictions by choosing whichever derived artifact was created last.
 
-Resolution should consider:
+Resolution must not collapse authority, scope and confidence into one score.
 
-- source authority;
-- recency;
-- explicit confirmation;
-- scope;
-- confidence;
-- organisation/user policy.
+Evaluate in order:
+
+1. authorisation/policy admissibility;
+2. source admissibility;
+3. authority class;
+4. scope relevance;
+5. temporal validity;
+6. extraction confidence.
+
+Confidence can refine an admissible inference; it cannot grant permission or override a stronger authorised source outside scope.
 
 ## Consequences
 

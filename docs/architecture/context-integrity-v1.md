@@ -104,31 +104,22 @@ Typical relations:
     INVALIDATED_BY
     OVERRIDDEN_BY
 
-## 5. Authority order
+## 5. Authority resolution
 
-This is not a universal numerical score; it is an interpretation rule.
+Authority is **not** one numerical ranking.
 
-A possible V1 precedence is:
+Resolve contextual candidates in this order:
 
-    tenant/security policy
-      >
-    explicit user preference/correction
-      >
-    approved glossary
-      >
-    explicit source message fact
-      >
-    strong inference
-      >
-    weak inference
-      >
-    hypothesis
-      >
-    derived summary wording
+1. authorisation and policy admissibility;
+2. source admissibility;
+3. assertion authority;
+4. scope relevance;
+5. temporal validity;
+6. extraction/inference confidence.
 
-Scope still matters.
+High confidence never grants a lower-authority source permission to override an approved higher-authority policy/glossary outside its allowed scope.
 
-A project glossary can legitimately override a generic dictionary within that project, while a user correction can override an earlier inference inside one conversation.
+A user's correction of their own intended meaning can override an earlier inference in the justified scope. It does not automatically create tenant-wide policy.
 
 ## 6. No self-reinforcement
 
@@ -269,28 +260,31 @@ It may:
 
 but never silently move state backwards.
 
-## 14. Memory promotion
+## 14. Durable memory promotion
 
-Not every useful inference should become durable memory.
+Not every useful inference becomes durable memory.
 
-Promotion should require criteria such as:
+**Confidence, repeated usefulness, repeated model output or age are never sufficient durable-promotion triggers.**
 
-    repeated usefulness
-    sufficient confidence
-    appropriate scope
-    non-sensitive purpose
-    no contradiction
-    retention compatibility
+Durable corrective/terminology memory requires an authorised event such as:
 
-Possible lifecycle:
+    explicit UI correction
+    explicit textual correction within justified scope
+    approved glossary change
+    authorised tenant/admin policy mutation
 
-    CANDIDATE
-      -> ACTIVE
-      -> CONFIRMED
-      -> STALE
-      -> EXPIRED / INVALIDATED
+Inference may remain in bounded ephemeral working state with confidence/TTL, but it expires unless a valid durable trigger occurs.
 
-Promotion policy must be versioned.
+Durable promotion records:
+
+    trigger type
+    actor
+    authorised scope
+    provenance
+    source revision/event
+    policy/strategy version
+
+Promotion policy must be versioned and auditable.
 
 ## 15. Memory classes
 
@@ -429,8 +423,8 @@ Required metrics may include:
     context_claims_active
     context_claims_invalidated
     context_claims_contradicted
-    memory_candidates_promoted
-    memory_candidates_rejected
+    durable_corrections_created
+    durable_correction_rejections
     stale_derived_write_rejections
     context_rebuild_count
     context_rebuild_ms
@@ -467,7 +461,7 @@ V1 is not complete until:
 8. translations are never treated as primary semantic evidence;
 9. privileged policy/glossary state cannot be created from chat text;
 10. memory remains bounded;
-11. durable memory promotion is policy/version controlled;
+11. durable memory creation requires an authorised correction/glossary/policy trigger and is policy/version controlled;
 12. useful Context State can recover from approved durable structured state without assuming raw server-side history;
 13. durable learning occurs only through defined correction/policy triggers;
 14. recovery checkpoints exclude weak hypotheses and raw transcript content by default.
