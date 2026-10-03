@@ -1,0 +1,13 @@
+{
+  "name": "hermeneia",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test tests/core-messaging.test.mjs"
+  }
+}
