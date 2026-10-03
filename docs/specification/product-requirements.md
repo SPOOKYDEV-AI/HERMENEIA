@@ -51,6 +51,7 @@ An administrator may operate the system and inspect technical metrics, but admin
 - emoji-aware and pragmatic-intent-aware translation;
 - preservation of tone/register with uncertainty handling;
 - contextual understanding of slang, acronyms, SMS abbreviations and mixed-language messages;
+- scoped professional/domain terminology with tenant/project glossary precedence;
 - user feedback;
 - T0/T1/T2 evaluation;
 - technical metrics and failure visibility.
@@ -223,6 +224,9 @@ The MVP is not considered complete until the following are demonstrated:
 20. Ambiguous acronyms do not force a single invented meaning when confidence is low.
 21. The original shorthand remains available exactly as written in the source message.
 22. Tenant-specific glossaries remain isolated from other organisations.
+23. Project/team terminology can override tenant/domain defaults deterministically.
+24. Terminology provenance and glossary version can be traced for a translation.
+25. Common glossary hits do not require a model call.
 
 ## 17. Responsiveness and incremental understanding
 
