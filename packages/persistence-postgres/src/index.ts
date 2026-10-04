@@ -1493,6 +1493,34 @@ export class PostgresMessagingRepository {
       : undefined;
   }
 
+  async expireDeliveryEnvelopesBatch(
+    tx: SqlExecutor,
+    input: {
+      now: string;
+      limit: number;
+    },
+  ): Promise<number> {
+    const result = await tx.query(
+      `WITH candidates AS (
+         SELECT tenant_id, envelope_id
+           FROM delivery_envelopes
+          WHERE status = 'PENDING'
+            AND expires_at <= $1
+          ORDER BY expires_at, tenant_id, envelope_id
+          FOR UPDATE SKIP LOCKED
+          LIMIT $2
+       )
+       UPDATE delivery_envelopes de
+          SET status = 'EXPIRED',
+              protected_payload = decode('', 'hex')
+         FROM candidates c
+        WHERE de.tenant_id = c.tenant_id
+          AND de.envelope_id = c.envelope_id`,
+      [input.now, input.limit],
+    );
+    return result.rowCount;
+  }
+
   async expirePendingDeviceEnvelopes(
     tx: SqlExecutor,
     input: {
