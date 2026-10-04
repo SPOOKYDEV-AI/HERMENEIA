@@ -10,6 +10,24 @@ import type {
   SqlTransactionManager,
 } from "../../persistence/src/index.js";
 
+export interface TranslationFanoutTarget {
+  recipientUserId: UUID;
+  targetLanguageTag: string;
+  targetProfileVersion: number;
+}
+
+export interface TranslationFanoutPlan {
+  conversationId: UUID;
+  sourceLanguageTag: string | null;
+  targets: TranslationFanoutTarget[];
+}
+
+export interface TranslationRecipientDevice {
+  deviceId: UUID;
+  credentialVersion: number;
+  publicMaterialRef: string;
+}
+
 function first<Row extends Record<string, unknown>>(
   result: SqlQueryResult<Row>,
 ): Row | undefined {
@@ -61,6 +79,82 @@ export class PostgresTranslationRepository {
 
   withTransaction<T>(work: (tx: SqlExecutor) => Promise<T>): Promise<T> {
     return this.transactions.withTransaction(work);
+  }
+
+  async loadFanoutPlan(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      sourceMessageId: UUID;
+      sourceRevision: number;
+    },
+  ): Promise<TranslationFanoutPlan | undefined> {
+    const source = await tx.query<{
+      conversation_id: UUID;
+      declared_source_language: string | null;
+    }>(
+      `SELECT mm.conversation_id,
+              mr.declared_source_language
+         FROM message_metadata mm
+         JOIN message_revisions mr
+           ON mr.tenant_id = mm.tenant_id
+          AND mr.message_id = mm.message_id
+          AND mr.revision = $3
+        WHERE mm.tenant_id = $1
+          AND mm.message_id = $2
+          AND mm.current_revision = $3
+          AND mm.status = 'ACTIVE'`,
+      [
+        input.tenantId,
+        input.sourceMessageId,
+        input.sourceRevision,
+      ],
+    );
+    const sourceRow = first(source);
+    if (!sourceRow) return undefined;
+
+    const targets = await tx.query<{
+      user_id: UUID;
+      target_language_tag: string;
+      membership_version: number;
+    }>(
+      `SELECT cm.user_id,
+              COALESCE(
+                NULLIF(trim(cm.target_locale_override), ''),
+                NULLIF(trim(cm.target_language_tag), '')
+              ) AS target_language_tag,
+              cm.membership_version
+         FROM message_metadata mm
+         JOIN conversation_members cm
+           ON cm.tenant_id = mm.tenant_id
+          AND cm.conversation_id = mm.conversation_id
+          AND cm.status = 'ACTIVE'
+          AND cm.user_id <> mm.author_user_id
+        WHERE mm.tenant_id = $1
+          AND mm.message_id = $2
+          AND mm.current_revision = $3
+          AND mm.status = 'ACTIVE'
+          AND COALESCE(
+                NULLIF(trim(cm.target_locale_override), ''),
+                NULLIF(trim(cm.target_language_tag), '')
+              ) IS NOT NULL
+        ORDER BY cm.user_id`,
+      [
+        input.tenantId,
+        input.sourceMessageId,
+        input.sourceRevision,
+      ],
+    );
+
+    return {
+      conversationId: sourceRow.conversation_id,
+      sourceLanguageTag: sourceRow.declared_source_language,
+      targets: targets.rows.map((row) => ({
+        recipientUserId: row.user_id,
+        targetLanguageTag: row.target_language_tag,
+        targetProfileVersion: Number(row.membership_version),
+      })),
+    };
   }
 
   async findTranslationExecution(
@@ -201,6 +295,180 @@ export class PostgresTranslationRepository {
     );
     const row = first(result);
     return row ? mapTranslation(row) : undefined;
+  }
+
+  async lockCurrentTranslationForPublish(
+    tx: SqlExecutor,
+    tenantId: UUID,
+    translationId: UUID,
+  ): Promise<TranslationExecutionRecord | undefined> {
+    const result = await tx.query<TranslationRow>(
+      `SELECT te.tenant_id,
+              te.translation_id,
+              te.conversation_id,
+              te.source_message_id,
+              te.source_revision,
+              te.recipient_user_id,
+              te.target_language_tag,
+              te.target_profile_version,
+              te.context_snapshot_id,
+              te.strategy_version,
+              te.status,
+              te.next_attempt_at::text AS next_attempt_at,
+              te.created_at::text AS created_at,
+              te.ready_at::text AS ready_at,
+              te.superseded_at::text AS superseded_at
+         FROM translation_executions te
+         JOIN message_metadata mm
+           ON mm.tenant_id = te.tenant_id
+          AND mm.conversation_id = te.conversation_id
+          AND mm.message_id = te.source_message_id
+          AND mm.current_revision = te.source_revision
+          AND mm.status = 'ACTIVE'
+         JOIN conversation_members cm
+           ON cm.tenant_id = te.tenant_id
+          AND cm.conversation_id = te.conversation_id
+          AND cm.user_id = te.recipient_user_id
+          AND cm.status = 'ACTIVE'
+          AND cm.membership_version = te.target_profile_version
+          AND COALESCE(
+                NULLIF(trim(cm.target_locale_override), ''),
+                NULLIF(trim(cm.target_language_tag), '')
+              ) = te.target_language_tag
+        WHERE te.tenant_id = $1
+          AND te.translation_id = $2
+          AND te.status = 'PENDING'
+        FOR UPDATE OF te, mm, cm`,
+      [tenantId, translationId],
+    );
+    const row = first(result);
+    return row ? mapTranslation(row) : undefined;
+  }
+
+  async listRecipientDevicesForPublish(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      recipientUserId: UUID;
+    },
+  ): Promise<TranslationRecipientDevice[]> {
+    const result = await tx.query<{
+      device_id: UUID;
+      credential_version: number;
+      public_material_ref: string;
+    }>(
+      `SELECT d.device_id,
+              d.credential_version,
+              d.public_material_ref
+         FROM devices d
+         JOIN tenant_memberships tm
+           ON tm.tenant_id = $1
+          AND tm.user_id = d.user_id
+          AND tm.status = 'ACTIVE'
+        WHERE d.user_id = $2
+          AND d.status = 'ACTIVE'
+          AND length(d.public_material_ref) > 0
+        ORDER BY d.device_id
+        FOR SHARE OF d`,
+      [input.tenantId, input.recipientUserId],
+    );
+    return result.rows.map((row) => ({
+      deviceId: row.device_id,
+      credentialVersion: Number(row.credential_version),
+      publicMaterialRef: row.public_material_ref,
+    }));
+  }
+
+  async scheduleRetry(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      translationId: UUID;
+      nextAttemptAt: string;
+    },
+  ): Promise<boolean> {
+    const result = await tx.query(
+      `UPDATE translation_executions
+          SET next_attempt_at = $3
+        WHERE tenant_id = $1
+          AND translation_id = $2
+          AND status = 'PENDING'`,
+      [
+        input.tenantId,
+        input.translationId,
+        input.nextAttemptAt,
+      ],
+    );
+    return result.rowCount === 1;
+  }
+
+  async markFailed(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      translationId: UUID;
+    },
+  ): Promise<boolean> {
+    const result = await tx.query(
+      `UPDATE translation_executions
+          SET status = 'FAILED',
+              next_attempt_at = NULL
+        WHERE tenant_id = $1
+          AND translation_id = $2
+          AND status = 'PENDING'`,
+      [input.tenantId, input.translationId],
+    );
+    return result.rowCount === 1;
+  }
+
+  async markReady(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      translationId: UUID;
+      readyAt: string;
+    },
+  ): Promise<boolean> {
+    const result = await tx.query(
+      `UPDATE translation_executions
+          SET status = 'READY',
+              next_attempt_at = NULL,
+              ready_at = $3
+        WHERE tenant_id = $1
+          AND translation_id = $2
+          AND status = 'PENDING'`,
+      [
+        input.tenantId,
+        input.translationId,
+        input.readyAt,
+      ],
+    );
+    return result.rowCount === 1;
+  }
+
+  async markSuperseded(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      translationId: UUID;
+      supersededAt: string;
+    },
+  ): Promise<boolean> {
+    const result = await tx.query(
+      `UPDATE translation_executions
+          SET status = 'SUPERSEDED',
+              next_attempt_at = NULL,
+              superseded_at = $3
+        WHERE tenant_id = $1
+          AND translation_id = $2
+          AND status IN ('PENDING','SOURCE_REQUIRED')`,
+      [
+        input.tenantId,
+        input.translationId,
+        input.supersededAt,
+      ],
+    );
+    return result.rowCount === 1;
   }
 
   async markSourceRequired(
