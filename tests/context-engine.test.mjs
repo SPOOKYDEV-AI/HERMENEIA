@@ -57,6 +57,10 @@ function input(overrides = {}) {
     snapshotId: "snapshot-1",
     conversationId: "conversation-1",
     messageId: "message-8",
+    sourceRevision: 1,
+    recipientUserId: "user-b",
+    targetLanguageTag: "fr-FR",
+    targetProfileVersion: 3,
     currentSequence: 8,
     now: "2026-10-04T20:00:00.000Z",
     strategy: "T2_ADAPTIVE_V1",
@@ -79,6 +83,10 @@ test("T0 emits no prior context and keeps snapshot content-free", () => {
 
   assert.deepEqual(result.selected, []);
   assert.equal(result.snapshot.tokenEstimate, 0);
+  assert.equal(result.snapshot.sourceRevision, 1);
+  assert.equal(result.snapshot.recipientUserId, "user-b");
+  assert.equal(result.snapshot.targetLanguageTag, "fr-FR");
+  assert.equal(result.snapshot.targetProfileVersion, 3);
   assert.equal(
     JSON.stringify(result.snapshot).includes(
       "TOP SECRET SOURCE BODY",
