@@ -239,7 +239,6 @@ export class PersistentDeviceService<Tx> {
     validateCommandIdentity(command.command_id, command.device_id);
     validateMaterial(command.public_material_ref);
     this.validateMaterialFormat(command.public_material_ref);
-    this.validateMaterialFormat(command.public_material_ref);
     const platform = command.platform ?? "OTHER";
     validatePlatform(platform);
 
@@ -350,6 +349,7 @@ export class PersistentDeviceService<Tx> {
   ): Promise<DeviceResult> {
     validateCommandIdentity(command.command_id, command.device_id);
     validateMaterial(command.public_material_ref);
+    this.validateMaterialFormat(command.public_material_ref);
     if (
       !Number.isInteger(command.expected_credential_version) ||
       command.expected_credential_version < 1
