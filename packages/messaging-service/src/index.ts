@@ -170,6 +170,16 @@ export interface PersistentMessagingStore<Tx> {
     },
   ): Promise<number>;
 
+  cancelStartedProviderAttempts(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      messageId: UUID;
+      throughRevision: number;
+      now: string;
+    },
+  ): Promise<number>;
+
   supersedeTranslationExecutions(
     tx: Tx,
     input: {
@@ -994,6 +1004,13 @@ export class PersistentMessagingService<Tx> {
           now,
         });
 
+        await this.deps.store.cancelStartedProviderAttempts(tx, {
+          tenantId: actor.tenantId,
+          messageId: command.message_id,
+          throughRevision: previousRevision,
+          now,
+        });
+
         await this.deps.store.supersedeTranslationExecutions(tx, {
           tenantId: actor.tenantId,
           messageId: command.message_id,
@@ -1266,6 +1283,13 @@ export class PersistentMessagingService<Tx> {
       });
 
       await this.deps.store.supersedeTranslationJobs(tx, {
+        tenantId: actor.tenantId,
+        messageId: command.message_id,
+        throughRevision: previousRevision,
+        now,
+      });
+
+      await this.deps.store.cancelStartedProviderAttempts(tx, {
         tenantId: actor.tenantId,
         messageId: command.message_id,
         throughRevision: previousRevision,
