@@ -26,8 +26,8 @@ Current checks:
 - translation recovery tests cover exact source re-supply, actor/device exposure authorization, stale source/profile supersession, transient rollback and manual retry lifecycle;
 - translation publish/control-event tests enforce no historical backfill to newly enrolled device IDs;
 - persistent process tests cover built-in HPKE defaults and separate provider-module loading;
-- SQL migration validation covers migrations 0001..0010;
-- live PostgreSQL integration replays down migrations 0010→0001, then up migrations 0001→0010, then schema smoke tests when `psql` and `HERMENEIA_TEST_DATABASE_URL` are available.
+- SQL migration validation covers migrations 0001..0011;
+- live PostgreSQL integration replays down migrations 0011→0001, then up migrations 0001→0011, then schema smoke tests when `psql` and `HERMENEIA_TEST_DATABASE_URL` are available.
 
 Node gate:
 
