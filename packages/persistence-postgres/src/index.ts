@@ -621,7 +621,7 @@ export class PostgresMessagingRepository {
         WHERE tenant_id = $1
           AND source_message_id = $2
           AND source_revision <= $3
-          AND status IN ('PENDING','SOURCE_REQUIRED')`,
+          AND status IN ('PENDING','SOURCE_REQUIRED','READY')`,
       [
         input.tenantId,
         input.messageId,
