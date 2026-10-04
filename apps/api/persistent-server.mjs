@@ -29,6 +29,8 @@ export async function createPersistentHermeneiaHttpRuntime(options = {}) {
       commandService: runtime.commandService,
       mutationService: runtime.mutationService,
       deliveryService: runtime.deliveryService,
+      translationRecoveryService:
+        runtime.translationRecoveryService,
     });
 
     let closed = false;
