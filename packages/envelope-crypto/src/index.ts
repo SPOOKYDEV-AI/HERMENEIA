@@ -275,9 +275,9 @@ export async function encodeHpkeP256PublicMaterial(
   return `${PUBLIC_MATERIAL_PREFIX}${base64UrlEncode(raw)}`;
 }
 
-export async function decodeHpkeP256PublicMaterial(
+export function validateHpkeP256PublicMaterialSyntax(
   value: string,
-): Promise<CryptoKey> {
+): void {
   if (
     typeof value !== "string" ||
     !value.startsWith(PUBLIC_MATERIAL_PREFIX)
@@ -298,7 +298,15 @@ export async function decodeHpkeP256PublicMaterial(
       "public_material_ref must contain one RFC 9180 uncompressed P-256 key",
     );
   }
+}
 
+export async function decodeHpkeP256PublicMaterial(
+  value: string,
+): Promise<CryptoKey> {
+  validateHpkeP256PublicMaterialSyntax(value);
+  const raw = base64UrlDecode(
+    value.slice(PUBLIC_MATERIAL_PREFIX.length),
+  );
   return createSuite().kem.deserializePublicKey(raw);
 }
 
