@@ -43,7 +43,13 @@ function mapError(error) {
     switch (error.code) {
       case "IDEMPOTENCY_CONFLICT":
       case "REVISION_CONFLICT":
+      case "SOURCE_REVISION_MISMATCH":
+      case "SOURCE_REQUIRED":
         return { status: 409, body: errorBody(error.code, error.message, false) };
+      case "SOURCE_BUFFER_UNAVAILABLE":
+        return { status: 503, body: errorBody(error.code, error.message, true) };
+      case "SOURCE_EXPIRED":
+        return { status: 410, body: errorBody(error.code, error.message, false) };
       case "NOT_AUTHORIZED":
       case "DEVICE_REVOKED":
         return { status: 403, body: errorBody(error.code, error.message, false) };
@@ -178,6 +184,7 @@ export function createHermeneiaHttpServer({
   commandService = core,
   mutationService = core,
   deliveryService = null,
+  translationRecoveryService = null,
 }) {
   if (!sendService || typeof sendService.sendMessage !== "function") {
     throw new TypeError("sendService.sendMessage is required");
@@ -197,6 +204,18 @@ export function createHermeneiaHttpServer({
       "mutationService.editMessage and mutationService.deleteMessage are required",
     );
   }
+  if (
+    translationRecoveryService !== null &&
+    (
+      typeof translationRecoveryService.resupplySource !== "function" ||
+      typeof translationRecoveryService.retryTranslation !== "function"
+    )
+  ) {
+    throw new TypeError(
+      "translationRecoveryService.resupplySource and retryTranslation are required",
+    );
+  }
+
   if (
     deliveryService !== null &&
     (
@@ -350,6 +369,86 @@ export function createHermeneiaHttpServer({
         });
 
         return json(res, 200, result);
+      }
+
+      const translationSourceMatch = matchPath(
+        requestUrl.pathname,
+        /^\/v1\/translations\/([^/]+)\/source$/,
+      );
+
+      if (req.method === "POST" && translationSourceMatch) {
+        if (!translationRecoveryService) {
+          throw new HttpError(
+            503,
+            "PROVIDER_UNAVAILABLE",
+            "Translation recovery service unavailable",
+            true,
+          );
+        }
+
+        const body = await readJson(req);
+        requireProtocolV1(body);
+
+        if (
+          typeof body.command_id !== "string" ||
+          typeof body.message_id !== "string" ||
+          typeof body.source_revision !== "number" ||
+          !Number.isInteger(body.source_revision) ||
+          body.source_revision < 1 ||
+          typeof body.source_ref !== "string" ||
+          body.source_ref.length < 16 ||
+          !body.source ||
+          typeof body.source.text !== "string" ||
+          body.source.text.length < 1
+        ) {
+          throw new HttpError(
+            400,
+            "INVALID_COMMAND",
+            "Invalid source re-supply payload",
+          );
+        }
+
+        const result =
+          await translationRecoveryService.resupplySource(actor, {
+            protocol_version: 1,
+            command_id: body.command_id,
+            translation_id: translationSourceMatch[0],
+            message_id: body.message_id,
+            source_revision: body.source_revision,
+            source_ref: body.source_ref,
+            source: {
+              text: body.source.text,
+              ...(typeof body.source.language_hint === "string"
+                ? { language_hint: body.source.language_hint }
+                : {}),
+            },
+          });
+
+        return json(res, 202, result);
+      }
+
+      const translationRetryMatch = matchPath(
+        requestUrl.pathname,
+        /^\/v1\/translations\/([^/]+)\/retry$/,
+      );
+
+      if (req.method === "POST" && translationRetryMatch) {
+        if (!translationRecoveryService) {
+          throw new HttpError(
+            503,
+            "PROVIDER_UNAVAILABLE",
+            "Translation recovery service unavailable",
+            true,
+          );
+        }
+
+        const result =
+          await translationRecoveryService.retryTranslation(
+            actor,
+            translationRetryMatch[0],
+          );
+
+        return json(res, 202, result);
       }
 
       if (req.method === "GET" && requestUrl.pathname === "/v1/sync") {
