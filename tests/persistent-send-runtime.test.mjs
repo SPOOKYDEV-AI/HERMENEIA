@@ -277,6 +277,15 @@ test("persistent Send runtime composes PostgreSQL service and persistent bearer 
   assert.equal(typeof runtime.outboxService.complete, "function");
   assert.equal(typeof runtime.outboxService.retry, "function");
   assert.equal(typeof runtime.outboxService.deadLetter, "function");
+  assert.equal(typeof runtime.translationService.ensurePending, "function");
+  assert.equal(
+    typeof runtime.translationService.startProviderAttempt,
+    "function",
+  );
+  assert.equal(
+    typeof runtime.translationService.completeProviderAttempt,
+    "function",
+  );
   assert.equal(typeof runtime.authenticate, "function");
 
   const authenticated = await runtime.authenticate({
