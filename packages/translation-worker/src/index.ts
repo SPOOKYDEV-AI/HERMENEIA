@@ -64,6 +64,7 @@ export interface TranslationWorkerProvider {
 
 export interface TranslationEnvelopeProtector {
   protect(input: {
+    envelopeId: UUID;
     tenantId: UUID;
     conversationId: UUID;
     messageId: UUID;
@@ -682,6 +683,7 @@ export class TranslationWorkerService<Tx> {
         const envelopeId = this.deps.ids.next("env");
         const protectedPayload =
           await this.deps.envelopeProtector.protect({
+            envelopeId,
             tenantId: execution.tenantId,
             conversationId: execution.conversationId,
             messageId: execution.sourceMessageId,
