@@ -273,7 +273,7 @@ Verified in the local sandbox for this slice:
 - HTTP Send, command recovery, edit/delete and sync/ACK routing to persistent services;
 - tenant-isolated sync state and out-of-order ACK protection;
 - persistent mutation rollback, stale-revision rejection and command replay;
-- static SQL migration contract through migrations 0001..0010;
+- static SQL migration contract through migrations 0001..0011;
 - provider late-response fencing after concurrent edit/delete;
 - pure persistent HTTP composition including translation source recovery;
 - no durable plaintext token/column in the SQL contract.
@@ -283,7 +283,7 @@ Latest focused regression gates after mutation/provider hardening:
 - persistent messaging + repository mutation focus: **13/13 PASS**;
 - stale provider completion focus: **1/1 PASS**;
 - strict worker typecheck/build after explicit transaction result typing: **PASS**;
-- exact remote migration invariant scan 0001..0010: **PASS**;
+- exact remote migration invariant scan 0001..0011: **PASS**;
 - Python migration scripts compile: **PASS**;
 - live PostgreSQL runner: **SKIP** in the current sandbox because `psql` and the test DB URL are absent.
 
@@ -307,14 +307,14 @@ The repository now contains:
 - `apps/api/persistent-send-runtime.mjs` composing PostgreSQL repositories, transient source storage, versioned HMAC source fingerprints, session authentication and the canonical persistent Send service;
 - explicit HTTP injection of that Send service.
 
-The runtime fails closed when the reviewed envelope-protection dependency is absent. No test-only or plaintext envelope protection is enabled as a production fallback.
+The persistent server uses the built-in HPKE P-256 envelope implementation by default. A local security module may override that boundary explicitly, but there is no plaintext or TEST_ONLY production fallback. External cryptographic review and platform interoperability validation remain required before a production cryptography claim.
 
 `apps/api/start-persistent-server.mjs` is the executable process entrypoint. It requires a local `HERMENEIA_SECURITY_MODULE`, starts the persistent HTTP server, supports an embedded/external translation worker mode, and performs idempotent graceful shutdown.
 
 Still required before a production claim:
 
 - execute the actual external `pg` dependency against a live PostgreSQL instance;
-- apply rollback 0010→0001, migrations 0001→0010 and smoke tests through `scripts/postgres_integration.py`;
+- apply rollback 0011→0001, migrations 0001→0011 and smoke tests through `scripts/postgres_integration.py`;
 - complete the dedicated envelope cryptography review and provide that implementation;
 - validate the full translation provider/publication path against a real provider adapter;
 - run the persistent process entrypoint under its target deployment/runtime and verify graceful SIGTERM/SIGINT shutdown.
