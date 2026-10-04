@@ -1700,6 +1700,7 @@ test("ORIGINAL envelope persistence is fenced by active membership device and cr
   assert.match(query.text, /tm\.status = 'ACTIVE'/);
   assert.match(query.text, /d\.status = 'ACTIVE'/);
   assert.match(query.text, /d\.credential_version = \$8/);
+  assert.match(query.text, /FOR UPDATE OF d, cm, tm/);
   assert.deepEqual(query.params, [
     "tenant-1",
     "envelope-original-1",
@@ -1777,6 +1778,7 @@ test("TRANSLATION envelope persistence is fenced by active device user and crede
   assert.match(query.text, /d\.user_id = \$7/);
   assert.match(query.text, /d\.status = 'ACTIVE'/);
   assert.match(query.text, /d\.credential_version = \$9/);
+  assert.match(query.text, /FOR UPDATE OF d/);
 });
 
 test("TRANSLATION envelope persistence fails after device rotation or revocation", async () => {
