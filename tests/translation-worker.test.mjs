@@ -43,6 +43,7 @@ class FakeWorkerStore {
       credentialVersion: 4,
       publicMaterialRef: "pub:b1",
     }];
+    this.controlDevices = ["device-b1"];
     this.forceCompleteStale = false;
   }
 
@@ -253,7 +254,7 @@ class FakeWorkerStore {
 
   async listRecipientControlDevices() {
     return this.current
-      ? this.devices.map((device) => device.deviceId)
+      ? clone(this.controlDevices)
       : [];
   }
 
@@ -826,4 +827,35 @@ test("stale lease at final commit rolls back translation envelopes and READY sta
   assert.equal(f.store.state.events.length, 0);
   assert.equal(child.status, "LEASED");
   assert.equal(f.store.state.attempts[0].status, "SUCCEEDED");
+});
+
+
+test("source-required control does not backfill old message metadata to a newly added device", async () => {
+  const f = fixture();
+  await fanoutOne(f);
+
+  f.store.devices.push({
+    deviceId: "device-b-new",
+    credentialVersion: 1,
+    publicMaterialRef: "pub:b-new",
+  });
+
+  assert.equal(
+    await f.worker.runExecuteOnce(),
+    "SOURCE_REQUIRED",
+  );
+
+  const controlEvents = f.store.state.events.filter(
+    (event) => event.eventType === "translation.source_required",
+  );
+  assert.deepEqual(
+    controlEvents.map((event) => event.deviceId),
+    ["device-b1"],
+  );
+  assert.equal(
+    controlEvents.some(
+      (event) => event.deviceId === "device-b-new",
+    ),
+    false,
+  );
 });
