@@ -331,6 +331,7 @@ export interface PersistentEnvelopeProtector {
    * Production implementations must use a separately reviewed construction.
    */
   protect(input: {
+    envelopeId: UUID;
     tenantId: UUID;
     conversationId: UUID;
     messageId: UUID;
@@ -693,6 +694,7 @@ export class PersistentMessagingService<Tx> {
             const envelopeId = this.deps.ids.next("env");
             const protectedPayload =
               await this.deps.envelopeProtector.protect({
+                envelopeId,
                 tenantId: actor.tenantId,
                 conversationId: command.conversation_id,
                 messageId: proposedMessageId,
@@ -1020,6 +1022,7 @@ export class PersistentMessagingService<Tx> {
             const envelopeId = this.deps.ids.next("env");
             const protectedPayload =
               await this.deps.envelopeProtector.protect({
+                envelopeId,
                 tenantId: actor.tenantId,
                 conversationId: message.conversationId,
                 messageId: command.message_id,
