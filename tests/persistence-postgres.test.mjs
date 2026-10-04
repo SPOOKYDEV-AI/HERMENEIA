@@ -201,6 +201,7 @@ test("ACK purges protected payload and advances only the contiguous terminal pre
     "2026-10-03T22:30:00.000Z",
   ]);
   assert.deepEqual(connection.queries[5].params, [
+    "tenant-1",
     "device-1",
     19,
     "2026-10-03T22:30:00.000Z",
@@ -249,6 +250,7 @@ test("out-of-order ACK cannot skip an earlier pending inbox event", async () => 
 
   assert.equal(result, "ACKED");
   assert.deepEqual(connection.queries[5].params, [
+    "tenant-1",
     "device-1",
     17,
     "2026-10-03T22:30:00.000Z",
@@ -289,6 +291,125 @@ test("already ACKed envelope is idempotent and does not re-run purge updates", a
       "COMMIT",
     ],
   );
+});
+
+test("inbox offset allocation creates tenant-scoped sync state", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{ inbox_epoch: 3, offset_value: 12 }],
+      rowCount: 1,
+    },
+    { rows: [], rowCount: 1 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const result = await repository.withTransaction((tx) =>
+    repository.allocateDeviceInboxOffset(
+      tx,
+      "tenant-1",
+      "device-1",
+    ),
+  );
+
+  assert.deepEqual(result, {
+    inboxEpoch: 3,
+    offset: 12,
+  });
+  assert.match(
+    connection.queries[2].text,
+    /INSERT INTO tenant_device_sync_states/,
+  );
+  assert.deepEqual(connection.queries[2].params, [
+    "tenant-1",
+    "device-1",
+    3,
+  ]);
+});
+
+test("device sync state is authorised and isolated by tenant", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{
+        inbox_epoch: 4,
+        next_offset: 21,
+        last_acked_offset: 8,
+      }],
+      rowCount: 1,
+    },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const state = await repository.withTransaction((tx) =>
+    repository.getDeviceSyncState(tx, actor()),
+  );
+
+  assert.deepEqual(state, {
+    inboxEpoch: 4,
+    nextOffset: 21,
+    lastAckedOffset: 8,
+  });
+
+  const sql = connection.queries[1];
+  assert.match(sql.text, /tenant_memberships/);
+  assert.match(sql.text, /tenant_device_sync_states/);
+  assert.deepEqual(sql.params, [
+    "tenant-1",
+    "user-1",
+    "device-1",
+  ]);
+});
+
+test("inbox event replay is filtered by authenticated tenant and device", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{
+        inbox_epoch: 4,
+        offset_value: 9,
+        event_id: "event-9",
+        event_type: "message.available",
+        tenant_id: "tenant-1",
+        conversation_id: "conversation-1",
+        message_id: "message-1",
+        envelope_id: "envelope-1",
+        source_revision: 1,
+        protected_payload_b64: "Y2lwaGVydGV4dA==",
+        rendition_type: "ORIGINAL",
+        expires_at: "2026-10-05T00:00:00.000Z",
+        created_at: "2026-10-04T00:00:00.000Z",
+      }],
+      rowCount: 1,
+    },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const rows = await repository.withTransaction((tx) =>
+    repository.listInboxEvents(tx, {
+      tenantId: "tenant-1",
+      deviceId: "device-1",
+      inboxEpoch: 4,
+      afterOffset: 8,
+      limit: 100,
+    }),
+  );
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].tenantId, "tenant-1");
+  const sql = connection.queries[1];
+  assert.match(sql.text, /die\.tenant_id = \$1/);
+  assert.match(sql.text, /die\.device_id = \$2/);
+  assert.deepEqual(sql.params, [
+    "tenant-1",
+    "device-1",
+    4,
+    8,
+    100,
+  ]);
 });
 
 test("sync cursor reset is required for wrong epoch or purged history", () => {
