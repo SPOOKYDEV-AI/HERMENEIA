@@ -329,6 +329,28 @@ export class PostgresTranslationRepository {
     return row ? mapTranslation(row) : undefined;
   }
 
+  async listRecipientControlDevices(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      recipientUserId: UUID;
+    },
+  ): Promise<UUID[]> {
+    const result = await tx.query<{ device_id: UUID }>(
+      `SELECT d.device_id
+         FROM devices d
+         JOIN tenant_memberships tm
+           ON tm.tenant_id = $1
+          AND tm.user_id = d.user_id
+          AND tm.status = 'ACTIVE'
+        WHERE d.user_id = $2
+          AND d.status = 'ACTIVE'
+        ORDER BY d.device_id`,
+      [input.tenantId, input.recipientUserId],
+    );
+    return result.rows.map((row) => row.device_id);
+  }
+
   async listRecipientDevicesForPublish(
     tx: SqlExecutor,
     input: {
