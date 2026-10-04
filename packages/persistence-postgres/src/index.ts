@@ -696,6 +696,66 @@ export class PostgresMessagingRepository {
     return [...targets.values()];
   }
 
+  async listMessageEditDeliveryTargets(
+    tx: SqlExecutor,
+    actor: ActorContext,
+    messageId: UUID,
+  ): Promise<RecipientDeliveryTarget[]> {
+    const result = await tx.query<{
+      user_id: UUID;
+      device_id: UUID;
+      credential_version: number;
+      public_material_ref: string;
+    }>(
+      `SELECT DISTINCT d.user_id,
+                       die.device_id,
+                       d.credential_version,
+                       d.public_material_ref
+         FROM device_inbox_events die
+         JOIN message_metadata mm
+           ON mm.tenant_id = die.tenant_id
+          AND mm.message_id = die.message_id
+         JOIN conversation_members cm
+           ON cm.tenant_id = mm.tenant_id
+          AND cm.conversation_id = mm.conversation_id
+          AND cm.user_id = d.user_id
+          AND cm.status = 'ACTIVE'
+         JOIN tenant_memberships tm
+           ON tm.tenant_id = mm.tenant_id
+          AND tm.user_id = d.user_id
+          AND tm.status = 'ACTIVE'
+         JOIN devices d
+           ON d.device_id = die.device_id
+          AND d.status = 'ACTIVE'
+          AND length(d.public_material_ref) > 0
+        WHERE die.tenant_id = $1
+          AND die.message_id = $2
+          AND die.device_id <> $3
+          AND die.event_type IN (
+            'message.available',
+            'message.edited'
+          )
+        ORDER BY d.user_id, die.device_id`,
+      [actor.tenantId, messageId, actor.deviceId],
+    );
+
+    const targets = new Map<UUID, RecipientDeliveryTarget>();
+    for (const row of result.rows) {
+      const target = targets.get(row.user_id) ?? {
+        userId: row.user_id,
+        devices: [],
+      };
+      target.devices.push({
+        userId: row.user_id,
+        deviceId: row.device_id,
+        credentialVersion: Number(row.credential_version),
+        publicMaterialRef: row.public_material_ref,
+      });
+      targets.set(row.user_id, target);
+    }
+    return [...targets.values()];
+  }
+
   async listMessageDeletionEventDevices(
     tx: SqlExecutor,
     actor: ActorContext,
