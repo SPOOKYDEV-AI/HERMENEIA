@@ -379,6 +379,11 @@ export class ContextEngine {
     const selected: SelectedContextItem[] = [];
     const selectedIds = new Set<string>();
     let usedTokens = 0;
+    const softBandUsed = {
+      immediate: 0,
+      episode: 0,
+      memory: 0,
+    };
 
     const selectFrom = (
       pool: ScoredCandidate[],
@@ -390,10 +395,14 @@ export class ContextEngine {
         | "CORRECTION_OR_POLICY"
         | "RECOVERY_CHECKPOINT"
         | "ADAPTIVE_UTILITY",
+      softBand:
+        | "immediate"
+        | "episode"
+        | "memory"
+        | null,
       softBandLimit: number | null,
       bypassUtility = false,
     ) => {
-      let bandUsed = 0;
       for (const entry of sortScored(pool)) {
         if (
           selectedIds.has(entry.candidate.candidateId)
@@ -407,8 +416,10 @@ export class ContextEngine {
           continue;
         }
         if (
+          softBand !== null &&
           softBandLimit !== null &&
-          bandUsed + entry.tokenEstimate >
+          softBandUsed[softBand] +
+            entry.tokenEstimate >
             softBandLimit
         ) {
           continue;
@@ -430,7 +441,10 @@ export class ContextEngine {
         });
         selectedIds.add(entry.candidate.candidateId);
         usedTokens += entry.tokenEstimate;
-        bandUsed += entry.tokenEstimate;
+        if (softBand !== null) {
+          softBandUsed[softBand] +=
+            entry.tokenEstimate;
+        }
       }
     };
 
@@ -453,6 +467,7 @@ export class ContextEngine {
       freshness,
       "FRESHNESS_RECONCILIATION",
       null,
+      null,
       true,
     );
 
@@ -462,6 +477,7 @@ export class ContextEngine {
           candidate.explicitReference === true,
       ),
       "EXPLICIT_REFERENCE",
+      null,
       null,
       true,
     );
@@ -473,6 +489,7 @@ export class ContextEngine {
           "IMMEDIATE_MESSAGE",
       ),
       "IMMEDIATE_CONTEXT",
+      "immediate",
       input.budget.immediateReserveTokens,
     );
 
@@ -484,6 +501,7 @@ export class ContextEngine {
           candidate.activeEpisode === true,
       ),
       "ACTIVE_EPISODE",
+      "episode",
       input.budget.activeEpisodeReserveTokens,
     );
 
@@ -496,6 +514,7 @@ export class ContextEngine {
             "APPROVED_POLICY",
       ),
       "CORRECTION_OR_POLICY",
+      "memory",
       input.budget.memoryReserveTokens,
     );
 
@@ -506,12 +525,14 @@ export class ContextEngine {
           "RECOVERY_CHECKPOINT",
       ),
       "RECOVERY_CHECKPOINT",
+      "memory",
       input.budget.memoryReserveTokens,
     );
 
     selectFrom(
       scored,
       "ADAPTIVE_UTILITY",
+      null,
       null,
     );
 
