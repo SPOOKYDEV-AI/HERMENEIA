@@ -393,7 +393,7 @@ export class TranslationWorkerService<Tx> {
               translation_id: execution.translationId,
               message_id: execution.sourceMessageId,
               source_revision: execution.sourceRevision,
-              source_hash: payload.sourceHash,
+              source_hash: plan.sourceHash,
             },
             priority: 10,
             availableAt: this.deps.clock.now(),
