@@ -92,3 +92,11 @@ export interface DeleteMessageCommand {
   message_id: UUID;
   expected_revision: number;
 }
+
+
+export interface MessageRevisionResult {
+  message_id: UUID;
+  revision: number;
+  op_seq: number;
+  status: "ACTIVE" | "DELETED";
+}
