@@ -9,11 +9,9 @@ import type {
 import type {
   TranslationExecutionRecord,
   TranslationExecutionService,
-} from "../../translation-service/src/index.js";
-import type {
   TranslationFanoutPlan,
   TranslationRecipientDevice,
-} from "../../persistence-postgres/src/translation.js";
+} from "../../translation-service/src/index.js";
 
 export interface TranslationWorkerClock {
   now(): string;
