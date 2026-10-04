@@ -5,6 +5,7 @@ import {
   ContextStateConflictError,
   applyContextDerivation,
   completedTailRefs,
+  createDegradedContextStateFromFloor,
   createInitialContextState,
   decideDurableCorrection,
   processingGapRefs,
@@ -352,4 +353,46 @@ test("restricted textual correction requires stronger confirmation before durabl
     action: "NEEDS_CONFIRMATION",
     durableClaim: null,
   });
+});
+
+
+test("cold recovery starts at an explicit causal floor and stays degraded", () => {
+  let state = createDegradedContextStateFromFloor({
+    tenantId: "tenant-1",
+    conversationId: "conversation-1",
+    causalFloorOpSeq: 250,
+    membershipEpoch: 4,
+    erasureEpoch: 2,
+    policyVersion: 7,
+    strategyVersion: "context-v1",
+    now: "2026-10-04T19:00:00.000Z",
+  });
+
+  assert.equal(state.causalFloorOpSeq, 250);
+  assert.equal(state.processedPrefixOpSeq, 250);
+  assert.equal(state.recoveryMode, "DEGRADED_BASELINE");
+  assert.equal(state.status, "DEGRADED");
+
+  state = registerContextOperation(
+    state,
+    operation(251, "op-251", {
+      registeredAt: "2026-10-04T19:00:01.000Z",
+    }),
+  );
+  state = applyContextDerivation(
+    state,
+    result(state, 251, "op-251", {
+      membershipEpoch: 4,
+      erasureEpoch: 2,
+      policyVersion: 7,
+      completedAt: "2026-10-04T19:00:02.000Z",
+    }),
+  );
+
+  assert.equal(state.processedPrefixOpSeq, 251);
+  assert.equal(
+    state.status,
+    "DEGRADED",
+    "new traffic cannot pretend missing pre-floor history was recovered",
+  );
 });
