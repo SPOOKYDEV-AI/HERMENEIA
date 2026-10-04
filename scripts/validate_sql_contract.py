@@ -18,6 +18,7 @@ COMMAND_MIGRATION = ROOT / "db/migrations/0004_command_fingerprint.sql"
 TENANT_SYNC_MIGRATION = ROOT / "db/migrations/0005_tenant_device_sync_state.sql"
 OUTBOX_LIFECYCLE_MIGRATION = ROOT / "db/migrations/0006_outbox_superseded.sql"
 OUTBOX_LEASE_MIGRATION = ROOT / "db/migrations/0007_outbox_lease_shape.sql"
+TRANSLATION_MIGRATION = ROOT / "db/migrations/0008_translation_execution.sql"
 
 REQUIRED_TABLES = {
     "users",
@@ -73,6 +74,7 @@ def main() -> int:
     tenant_sync_sql = TENANT_SYNC_MIGRATION.read_text(encoding="utf-8")
     outbox_lifecycle_sql = OUTBOX_LIFECYCLE_MIGRATION.read_text(encoding="utf-8")
     outbox_lease_sql = OUTBOX_LEASE_MIGRATION.read_text(encoding="utf-8")
+    translation_sql = TRANSLATION_MIGRATION.read_text(encoding="utf-8")
     upper = sql.upper()
 
     if not upper.lstrip().startswith("BEGIN;"):
@@ -209,6 +211,40 @@ def main() -> int:
         fail("outbox lease migration must begin with BEGIN")
     if not outbox_lease_sql.rstrip().endswith("COMMIT;"):
         fail("outbox lease migration must end with COMMIT")
+
+    translation_required = [
+        "CREATE TABLE translation_executions",
+        "CREATE TABLE provider_executions",
+        "translation_executions_logical_idx",
+        "delivery_envelopes_translation_fk",
+        "'SOURCE_REQUIRED'",
+        "'SUPERSEDED'",
+        "'CANCELLED_LOGICALLY'",
+        "UNIQUE (tenant_id, translation_id, attempt_no)",
+    ]
+    for snippet in translation_required:
+        if snippet not in translation_sql:
+            fail(f"translation migration missing invariant: {snippet}")
+
+    if not translation_sql.lstrip().startswith("BEGIN;"):
+        fail("translation migration must begin with BEGIN")
+    if not translation_sql.rstrip().endswith("COMMIT;"):
+        fail("translation migration must end with COMMIT")
+
+    translation_lower = translation_sql.lower()
+    for forbidden in (
+        "source_text",
+        "translated_text",
+        "translation_text",
+        "prompt_text",
+        "conversation_history",
+        "raw_history",
+        "plaintext",
+        "bearer_token",
+        "access_token",
+    ):
+        if forbidden in translation_lower:
+            fail(f"translation migration contains forbidden token: {forbidden}")
 
     command_lower = command_sql.lower()
     for forbidden in (
