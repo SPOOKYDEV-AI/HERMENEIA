@@ -30,7 +30,7 @@ The persistent messaging runtime is composed by `apps/api/persistent-send-runtim
 - persistent Bearer-session authentication;
 - the canonical PersistentMessagingService.
 
-Envelope protection remains a required injected dependency because the cryptographic construction has not yet completed its dedicated security review. There is intentionally no insecure production fallback.
+The persistent server now defaults to the built-in HPKE P-256 envelope implementation. The application layer still receives envelope protection through an explicit port, so a reviewed local module can replace the default without coupling cryptography to messaging. There is no insecure plaintext or TEST_ONLY production fallback, and external cryptographic review remains an open production gate.
 
 ## 2. Transaction rule
 
@@ -181,7 +181,7 @@ When available:
     HERMENEIA_TEST_DATABASE_URL=...
     python scripts/postgres_integration.py
 
-must apply migrations 0001 -> ... -> 0010 and the declared smoke tests successfully before production persistence is considered validated.
+must apply migrations 0001 -> ... -> 0011 and the declared smoke tests successfully before production persistence is considered validated.
 
 ## 12. Sandbox evidence
 
