@@ -310,6 +310,26 @@ export async function createPersistentSendRuntime({
         })
       : null;
 
+    const readinessService = {
+      async check() {
+        let connection;
+        try {
+          connection = await sqlPool.connect();
+          const result = await connection.query(
+            "SELECT 1 AS hermeneia_ready",
+          );
+          return (
+            result.rowCount === 1 &&
+            result.rows[0]?.hermeneia_ready === 1
+          );
+        } catch {
+          return false;
+        } finally {
+          connection?.release();
+        }
+      },
+    };
+
     const authenticate = createBearerAuthenticator({
       sessionRegistry: {
         authenticateCredential(reference) {
@@ -331,6 +351,7 @@ export async function createPersistentSendRuntime({
       translationService,
       translationRecoveryService,
       translationWorker,
+      readinessService,
       authenticate,
       repository,
       outboxRepository,
