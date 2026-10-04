@@ -162,3 +162,57 @@ test("worker runner config supports embedded or external mode only", () => {
     /must be embedded or external/,
   );
 });
+
+
+test("runner health records errors without leaking error messages and resets after recovery", async () => {
+  let fail = true;
+  const observed = [];
+
+  const runner = createTranslationWorkerRunner({
+    worker: {
+      async runFanoutOnce() {
+        if (fail) {
+          throw new TypeError("private provider detail must not enter status");
+        }
+        return "NO_WORK";
+      },
+      async runExecuteOnce() {
+        return "NO_WORK";
+      },
+    },
+    onError(error, status) {
+      observed.push({
+        name: error.name,
+        status,
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => runner.runOnce(),
+    /private provider detail/,
+  );
+
+  const failed = runner.status();
+  assert.equal(failed.processedTotal, 0);
+  assert.equal(failed.consecutiveErrors, 1);
+  assert.equal(failed.lastErrorName, "TypeError");
+  assert.equal(
+    JSON.stringify(failed).includes("private provider detail"),
+    false,
+  );
+  assert.equal(observed.length, 1);
+
+  fail = false;
+  assert.deepEqual(await runner.runOnce(), {
+    processed: 0,
+    fanoutResult: "NO_WORK",
+    executeResult: "NO_WORK",
+  });
+
+  const recovered = runner.status();
+  assert.equal(recovered.consecutiveErrors, 0);
+  assert.equal(recovered.lastErrorName, null);
+  assert.ok(recovered.lastSuccessAt);
+  assert.ok(recovered.lastErrorAt);
+});
