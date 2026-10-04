@@ -489,6 +489,13 @@ test("translation recovery lock is actor-scoped and returns blocked target state
   assert.match(executionSql.text, /actor_cm\.user_id = \$3/);
   assert.match(executionSql.text, /actor_device\.device_id = \$4/);
   assert.match(executionSql.text, /actor_device\.status = 'ACTIVE'/);
+  assert.match(executionSql.text, /mm\.author_user_id = \$3/);
+  assert.match(executionSql.text, /mm\.author_device_id = \$4/);
+  assert.match(executionSql.text, /EXISTS \(/);
+  assert.match(executionSql.text, /FROM delivery_envelopes source_de/);
+  assert.match(executionSql.text, /source_de\.recipient_user_id = \$3/);
+  assert.match(executionSql.text, /source_de\.recipient_device_id = \$4/);
+  assert.match(executionSql.text, /source_de\.rendition_type = 'ORIGINAL'/);
   assert.match(executionSql.text, /FOR UPDATE OF te, mm/);
   assert.match(executionSql.text, /FOR SHARE OF actor_cm, actor_tm, actor_device/);
   assert.deepEqual(executionSql.params, [
