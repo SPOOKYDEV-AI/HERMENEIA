@@ -31,6 +31,9 @@ def main() -> int:
     outbox_lifecycle_migration = ROOT / "db/migrations/0006_outbox_superseded.sql"
     outbox_lease_migration = ROOT / "db/migrations/0007_outbox_lease_shape.sql"
     translation_migration = ROOT / "db/migrations/0008_translation_execution.sql"
+    source_required_event_migration = (
+        ROOT / "db/migrations/0009_translation_source_required_event.sql"
+    )
     smoke = ROOT / "db/tests/0001_core_messaging_smoke.sql"
     runtime_smoke = ROOT / "db/tests/0003_runtime_alignment_smoke.sql"
     down = ROOT / "db/migrations/0001_core_messaging.down.sql"
@@ -45,6 +48,7 @@ def main() -> int:
         outbox_lifecycle_migration,
         outbox_lease_migration,
         translation_migration,
+        source_required_event_migration,
         smoke,
         runtime_smoke,
     ):
