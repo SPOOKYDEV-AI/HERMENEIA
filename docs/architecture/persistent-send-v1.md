@@ -250,12 +250,23 @@ HERMENEIA_TEST_DATABASE_URL
 
 Until that gate passes, this slice must not be described as live-PostgreSQL validated.
 
-## 12. Known next integration step
+## 12. Runtime composition status
 
-The repository currently defines the PostgreSQL repository against the internal `SqlPool`/`SqlExecutor` contract.
+The repository now contains:
 
-A production composition root still needs a reviewed concrete PostgreSQL driver/pool, configuration/secrets wiring, migration startup policy and lifecycle handling.
+- a pinned `pg` runtime dependency;
+- `apps/api/postgres-pool.mjs` adapting node-postgres to the internal SQL ports;
+- `apps/api/persistent-send-runtime.mjs` composing PostgreSQL repositories, transient source storage, versioned HMAC source fingerprints, session authentication and the canonical persistent Send service;
+- explicit HTTP injection of that Send service.
+
+The runtime fails closed when the reviewed envelope-protection dependency is absent. No test-only or plaintext envelope protection is enabled as a production fallback.
+
+Still required before a production claim:
+
+- execute the actual external `pg` dependency against a live PostgreSQL instance;
+- apply migrations/smoke tests through `scripts/postgres_integration.py`;
+- complete the dedicated envelope cryptography review and provide that implementation;
+- wire persistent sync/edit/delete/ACK paths so a production API profile never mixes persistent Send with the in-memory Core;
+- define migration/startup and graceful-shutdown policy for the final service process.
 
 Do not silently fall back to the in-memory Core in a production profile.
-
-The HTTP boundary is now able to receive the persistent Send service explicitly so that composition can be added without changing the public Send route.
