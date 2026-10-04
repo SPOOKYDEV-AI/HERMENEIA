@@ -25,6 +25,9 @@ import {
   createPostgresTranslationWorker,
 } from "../../.build/packages/runtime/src/persistent-translation-worker.js";
 import {
+  createPostgresTranslationRecoveryService,
+} from "../../.build/packages/runtime/src/persistent-translation-recovery.js";
+import {
   InMemoryTransientSourceStore,
 } from "../../.build/packages/transient-source/src/index.js";
 import { createBearerAuthenticator } from "./session-auth.mjs";
@@ -273,6 +276,18 @@ export async function createPersistentSendRuntime({
         clock,
       });
 
+    const translationRecoveryService =
+      createPostgresTranslationRecoveryService({
+        messagingRepository: repository,
+        outboxRepository,
+        translationRepository,
+        transientSources,
+        fingerprinter,
+        clock,
+        transientSourceTtlSeconds:
+          config.transientSource.ttlSeconds,
+      });
+
     const translationWorker = hasTranslationProvider
       ? createPostgresTranslationWorker({
           messagingRepository: repository,
@@ -314,6 +329,7 @@ export async function createPersistentSendRuntime({
       deliveryService,
       outboxService,
       translationService,
+      translationRecoveryService,
       translationWorker,
       authenticate,
       repository,
