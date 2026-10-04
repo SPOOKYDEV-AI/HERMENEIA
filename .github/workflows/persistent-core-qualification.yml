@@ -96,8 +96,14 @@ jobs:
           set -euo pipefail
           node --input-type=module -e "import { randomBytes } from 'node:crypto'; process.stdout.write('SOURCE_FINGERPRINT_HMAC_KEY_BASE64=' + randomBytes(32).toString('base64') + '\\n')" >> "$GITHUB_ENV"
 
-      - name: Run full local CI against live PostgreSQL
-        run: python scripts/local_ci.py
+      - name: Foundation + PostgreSQL migration gate
+        run: python scripts/local_ci.py --stage foundation
+
+      - name: TypeScript + Node regression gate
+        run: python scripts/local_ci.py --stage node
+
+      - name: Persistent process + pg runtime gate
+        run: python scripts/local_ci.py --stage runtime
 
       - name: Upload generated npm lockfile
         if: steps.lock_state.outputs.missing == 'true'
