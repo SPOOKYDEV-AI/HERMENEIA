@@ -72,8 +72,8 @@ Response after durable commit:
 
 Idempotency:
 
-- same `client_message_id` + same source fingerprint => return original result;
-- same key + different source => `409 IDEMPOTENCY_CONFLICT`.
+- same `client_message_id` is replayable only when the original logical Send still matches: conversation, revision-1 source fingerprint, reply target and client-authored instant;
+- same logical key with different semantics => `409 IDEMPOTENCY_CONFLICT`.
 
 Provider translation never gates this response.
 
@@ -116,7 +116,7 @@ Request contains bounded list of:
 
 The client sends ACK only after the envelope/rendition is committed to local durable storage.
 
-ACK is idempotent.
+ACK is idempotent. Server purge-watermark advancement is tenant/device scoped and may advance only across a contiguous prefix of terminal envelope states; an ACK arriving out of order cannot skip an earlier pending delivery.
 
 ### 4.6 Read cursor
 
@@ -140,7 +140,7 @@ Request:
     source.text
     source.language_hint?
 
-Success creates a new immutable source revision and `op_seq`.
+Success creates a new immutable source revision and `op_seq`, revokes stale pending delivery envelopes and supersedes stale translation work before publishing the fresh revision.
 
 A stale revision returns `REVISION_CONFLICT`.
 
@@ -153,7 +153,7 @@ Request:
     command_id
     expected_revision
 
-Success creates a tombstone mutation and invalidates publication of stale derived work.
+Success creates a content-free tombstone mutation, revokes stale pending delivery envelopes and invalidates publication of stale derived work.
 
 ### 4.9 Translation feedback
 
