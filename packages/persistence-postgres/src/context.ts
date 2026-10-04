@@ -194,6 +194,128 @@ export class PostgresContextSnapshotRepository {
   }
 }
 
+
+export interface PostgresContextPlanningFrame {
+  currentSequence: number;
+  erasureEpoch: number;
+  recentMessages: Array<{
+    messageId: UUID;
+    sourceRevision: number;
+    sequence: number;
+    acceptedAt: string;
+  }>;
+}
+
+export class PostgresContextPlanningRepository {
+  constructor(
+    private readonly transactions: SqlTransactionManager,
+  ) {}
+
+  withTransaction<T>(
+    work: (tx: SqlExecutor) => Promise<T>,
+  ): Promise<T> {
+    return this.transactions.withTransaction(work);
+  }
+
+  async loadPlanningFrame(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+      sourceMessageId: UUID;
+      sourceRevision: number;
+      recipientUserId: UUID;
+    },
+    recentMessageLimit: number,
+  ): Promise<PostgresContextPlanningFrame> {
+    if (
+      !Number.isInteger(recentMessageLimit) ||
+      recentMessageLimit < 1
+    ) {
+      throw new TypeError(
+        "recentMessageLimit must be a positive integer",
+      );
+    }
+
+    const current = await tx.query<{
+      message_seq: number;
+      erasure_epoch: number;
+    }>(
+      `SELECT mm.message_seq,
+              c.erasure_epoch
+         FROM message_metadata mm
+         JOIN conversations c
+           ON c.tenant_id = mm.tenant_id
+          AND c.conversation_id = mm.conversation_id
+          AND c.status = 'ACTIVE'
+         JOIN conversation_members cm
+           ON cm.tenant_id = mm.tenant_id
+          AND cm.conversation_id = mm.conversation_id
+          AND cm.user_id = $5
+          AND cm.status = 'ACTIVE'
+         JOIN tenant_memberships tm
+           ON tm.tenant_id = mm.tenant_id
+          AND tm.user_id = $5
+          AND tm.status = 'ACTIVE'
+        WHERE mm.tenant_id = $1
+          AND mm.conversation_id = $2
+          AND mm.message_id = $3
+          AND mm.current_revision = $4
+          AND mm.status = 'ACTIVE'`,
+      [
+        input.tenantId,
+        input.conversationId,
+        input.sourceMessageId,
+        input.sourceRevision,
+        input.recipientUserId,
+      ],
+    );
+
+    const currentRow = current.rows[0];
+    if (!currentRow) {
+      throw new Error(
+        "Context planning source message is not current or recipient is not active",
+      );
+    }
+
+    const recent = await tx.query<{
+      message_id: UUID;
+      current_revision: number;
+      message_seq: number;
+      accepted_at: string;
+    }>(
+      `SELECT message_id,
+              current_revision,
+              message_seq,
+              accepted_at::text AS accepted_at
+         FROM message_metadata
+        WHERE tenant_id = $1
+          AND conversation_id = $2
+          AND status = 'ACTIVE'
+          AND message_seq < $3
+        ORDER BY message_seq DESC
+        LIMIT $4`,
+      [
+        input.tenantId,
+        input.conversationId,
+        Number(currentRow.message_seq),
+        recentMessageLimit,
+      ],
+    );
+
+    return {
+      currentSequence: Number(currentRow.message_seq),
+      erasureEpoch: Number(currentRow.erasure_epoch),
+      recentMessages: recent.rows.map((row) => ({
+        messageId: row.message_id,
+        sourceRevision: Number(row.current_revision),
+        sequence: Number(row.message_seq),
+        acceptedAt: row.accepted_at,
+      })),
+    };
+  }
+}
+
 function parseStringArray(
   value: unknown,
   field: string,
