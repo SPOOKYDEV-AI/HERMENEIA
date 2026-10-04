@@ -427,3 +427,94 @@ test("translation control device query includes active devices without requiring
   assert.match(sql.text, /d\.status = 'ACTIVE'/);
   assert.doesNotMatch(sql.text, /public_material_ref/);
 });
+
+
+test("translation recovery lock is actor-scoped and returns blocked target state explicitly", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{
+        ...row({ status: "SOURCE_REQUIRED" }),
+        expected_source_hash: "hmac-sha256:k1:" + "a".repeat(64),
+        message_current_revision: 1,
+        message_status: "ACTIVE",
+      }],
+      rowCount: 1,
+    },
+    {
+      rows: [{
+        status: "BLOCKED",
+        membership_version: 3,
+        target_language_tag: "es-CO",
+      }],
+      rowCount: 1,
+    },
+  ]);
+  const repository = new PostgresTranslationRepository(
+    new SqlTransactionManager(new Pool(connection)),
+  );
+
+  const recovery = await repository.withTransaction((tx) =>
+    repository.lockTranslationForRecovery(
+      tx,
+      {
+        tenantId: "tenant-1",
+        userId: "user-a",
+        deviceId: "device-a1",
+      },
+      "translation-1",
+    ),
+  );
+
+  assert.equal(recovery.targetMembershipStatus, "BLOCKED");
+  assert.equal(recovery.currentTargetProfileVersion, 3);
+  assert.equal(recovery.currentTargetLanguageTag, "es-CO");
+  assert.equal(
+    recovery.expectedSourceHash,
+    "hmac-sha256:k1:" + "a".repeat(64),
+  );
+
+  const executionSql = connection.queries[1];
+  assert.match(executionSql.text, /actor_cm\.user_id = \$3/);
+  assert.match(executionSql.text, /actor_device\.device_id = \$4/);
+  assert.match(executionSql.text, /actor_device\.status = 'ACTIVE'/);
+  assert.match(executionSql.text, /FOR UPDATE OF te, mm/);
+  assert.match(executionSql.text, /FOR SHARE OF actor_cm, actor_tm, actor_device/);
+  assert.deepEqual(executionSql.params, [
+    "tenant-1",
+    "translation-1",
+    "user-a",
+    "device-a1",
+  ]);
+});
+
+test("translation recovery resumes SOURCE_REQUIRED and FAILED only from their exact states", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 1 },
+    { rows: [], rowCount: 1 },
+  ]);
+  const repository = new PostgresTranslationRepository(
+    new SqlTransactionManager(new Pool(connection)),
+  );
+
+  await repository.withTransaction(async (tx) => {
+    assert.equal(
+      await repository.resumeSourceRequired(tx, {
+        tenantId: "tenant-1",
+        translationId: "translation-1",
+      }),
+      true,
+    );
+    assert.equal(
+      await repository.resumeFailed(tx, {
+        tenantId: "tenant-1",
+        translationId: "translation-2",
+      }),
+      true,
+    );
+  });
+
+  assert.match(connection.queries[1].text, /status = 'SOURCE_REQUIRED'/);
+  assert.match(connection.queries[1].text, /SET status = 'PENDING'/);
+  assert.match(connection.queries[2].text, /status = 'FAILED'/);
+  assert.match(connection.queries[2].text, /SET status = 'PENDING'/);
+});
