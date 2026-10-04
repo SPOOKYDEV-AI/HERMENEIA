@@ -26,6 +26,19 @@ class FakeSnapshotStore {
     }
   }
 
+  async getContextSnapshot(
+    _tx,
+    tenantId,
+    snapshotId,
+  ) {
+    const value = this.snapshots.get(
+      `${tenantId}:${snapshotId}`,
+    );
+    return value
+      ? structuredClone(value)
+      : undefined;
+  }
+
   async insertContextSnapshot(
     _tx,
     tenantId,
@@ -369,5 +382,123 @@ test("context payload key collision never overwrites admitted context", () => {
       snapshotId: "snapshot-1",
     }).selected[0].content,
     "first",
+  );
+});
+
+
+test("context resolver returns durable snapshot plus matching transient payload", async () => {
+  const { service } = fixture();
+  const prepared = await service.prepare(
+    prepareInput(),
+  );
+
+  const resolved = await service.resolveForProvider({
+    tenantId: "tenant-1",
+    snapshotId: prepared.snapshot.snapshotId,
+  });
+
+  assert.equal(resolved.status, "READY");
+  assert.deepEqual(
+    resolved.snapshot,
+    prepared.snapshot,
+  );
+  assert.equal(
+    resolved.selected[0].content,
+    "private previous message",
+  );
+});
+
+test("T0 snapshot resolves READY without transient payload", async () => {
+  const { service } = fixture();
+  const prepared = await service.prepare(
+    prepareInput({
+      strategy: "T0",
+    }),
+  );
+
+  const resolved = await service.resolveForProvider({
+    tenantId: "tenant-1",
+    snapshotId: prepared.snapshot.snapshotId,
+  });
+
+  assert.equal(resolved.status, "READY");
+  assert.deepEqual(resolved.selected, []);
+});
+
+test("expired context payload never silently resolves as empty context", async () => {
+  const { service, setNow } = fixture();
+  const prepared = await service.prepare(
+    prepareInput(),
+  );
+
+  setNow("2026-10-04T20:01:00.000Z");
+
+  const resolved = await service.resolveForProvider({
+    tenantId: "tenant-1",
+    snapshotId: prepared.snapshot.snapshotId,
+  });
+
+  assert.equal(
+    resolved.status,
+    "PAYLOAD_UNAVAILABLE",
+  );
+});
+
+test("context resolver detects transient payload integrity mismatch", async () => {
+  const { clock } = clockFixture();
+  const store = new FakeSnapshotStore();
+  const preparedPayloads =
+    new InMemoryContextPayloadStore({
+      clock,
+    });
+
+  const service = new ContextPreparationService({
+    engine: new ContextEngine(),
+    store,
+    payloads: preparedPayloads,
+    ids: ids(),
+    clock,
+    payloadTtlSeconds: 60,
+  });
+
+  const prepared = await service.prepare(
+    prepareInput(),
+  );
+
+  const wrongPayloads = {
+    put() {
+      return true;
+    },
+    get() {
+      return {
+        tenantId: "tenant-1",
+        snapshotId: prepared.snapshot.snapshotId,
+        selected: [{
+          ...prepared.selected[0],
+          candidateId: "wrong-candidate",
+        }],
+        createdAt: "2026-10-04T20:00:00.000Z",
+        expiresAt: "2026-10-04T20:01:00.000Z",
+      };
+    },
+    remove() {},
+  };
+
+  const resolver = new ContextPreparationService({
+    engine: new ContextEngine(),
+    store,
+    payloads: wrongPayloads,
+    ids: ids(),
+    clock,
+  });
+
+  const resolved = await resolver.resolveForProvider({
+    tenantId: "tenant-1",
+    snapshotId: prepared.snapshot.snapshotId,
+  });
+
+  assert.equal(
+    resolved.status,
+    "PAYLOAD_INTEGRITY_MISMATCH",
   );
 });
