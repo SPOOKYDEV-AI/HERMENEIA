@@ -193,6 +193,37 @@ class TransactionalFakeStore {
     return clone(this.targets);
   }
 
+  async listMessageEditDeliveryTargets(_tx, _receivedActor, messageId) {
+    this.maybeFail("listMessageEditDeliveryTargets");
+
+    const exposedDeviceIds = new Set(
+      this.state.events
+        .filter(
+          (event) =>
+            event.messageId === messageId &&
+            (
+              event.eventType === "message.available" ||
+              event.eventType === "message.edited"
+            ),
+        )
+        .map((event) => event.deviceId),
+    );
+
+    const grouped = new Map();
+    for (const target of this.targets) {
+      for (const device of target.devices) {
+        if (!exposedDeviceIds.has(device.deviceId)) continue;
+        const current = grouped.get(target.userId) ?? {
+          userId: target.userId,
+          devices: [],
+        };
+        current.devices.push(clone(device));
+        grouped.set(target.userId, current);
+      }
+    }
+    return [...grouped.values()];
+  }
+
   async lockMessageForAuthorMutation(_tx, receivedActor, messageId) {
     this.maybeFail("lockMessageForAuthorMutation");
     const message = this.state.messages.find(
@@ -1256,5 +1287,89 @@ test("persistent delete reaches historical recipient devices even after current 
   assert.deepEqual(
     deleteEvents.map((row) => row.deviceId).sort(),
     ["device-a2", "device-b-historical"],
+  );
+});
+
+
+test("persistent edit never backfills message content to a device added after original delivery", async () => {
+  const store = new TransactionalFakeStore();
+  const { service } = createService(store);
+
+  const accepted = await service.sendMessage(actor, sendCommand());
+
+  store.targets = store.targets.map((target) =>
+    target.userId === "user-b"
+      ? {
+          ...target,
+          devices: [
+            ...target.devices,
+            {
+              userId: "user-b",
+              deviceId: "device-b-new",
+              credentialVersion: 99,
+              publicMaterialRef: "pub:b-new",
+            },
+          ],
+        }
+      : target,
+  );
+
+  await service.editMessage(actor, {
+    protocol_version: 1,
+    command_id: "edit-no-history-backfill",
+    message_id: accepted.message_id,
+    expected_revision: 1,
+    source: {
+      text: "edited without history leak",
+      language_hint: "en-US",
+    },
+  });
+
+  const editEvents = store.state.events.filter(
+    (event) => event.eventType === "message.edited",
+  );
+  assert.equal(
+    editEvents.some((event) => event.deviceId === "device-b-new"),
+    false,
+  );
+
+  const editedEnvelopes = store.state.envelopes.filter(
+    (envelope) => envelope.sourceRevision === 2,
+  );
+  assert.equal(
+    editedEnvelopes.some(
+      (envelope) => envelope.recipientDeviceId === "device-b-new",
+    ),
+    false,
+  );
+});
+
+test("persistent edit can succeed after a historically exposed recipient device is revoked", async () => {
+  const store = new TransactionalFakeStore();
+  const { service } = createService(store);
+
+  const accepted = await service.sendMessage(actor, sendCommand());
+
+  store.targets = store.targets.map((target) =>
+    target.userId === "user-b"
+      ? { ...target, devices: [] }
+      : target,
+  );
+
+  const edited = await service.editMessage(actor, {
+    protocol_version: 1,
+    command_id: "edit-after-recipient-device-revoked",
+    message_id: accepted.message_id,
+    expected_revision: 1,
+    source: { text: "edited while recipient has no active device" },
+  });
+
+  assert.equal(edited.status, "ACTIVE");
+  assert.equal(store.state.messages[0].currentRevision, 2);
+  assert.equal(
+    store.state.events.filter(
+      (event) => event.eventType === "message.edited",
+    ).length,
+    1,
   );
 });
