@@ -375,31 +375,30 @@ export class PostgresMessagingRepository {
     return [...targets.values()];
   }
 
-  async listConversationEventDevices(
+  async listMessageDeletionEventDevices(
     tx: SqlExecutor,
     actor: ActorContext,
-    conversationId: UUID,
+    messageId: UUID,
   ): Promise<Array<{ userId: UUID; deviceId: UUID }>> {
     const result = await tx.query<{
       user_id: UUID;
       device_id: UUID;
     }>(
-      `SELECT cm.user_id,
-              d.device_id
-         FROM conversation_members cm
-         JOIN tenant_memberships tm
-           ON tm.tenant_id = cm.tenant_id
-          AND tm.user_id = cm.user_id
-          AND tm.status = 'ACTIVE'
+      `SELECT DISTINCT d.user_id,
+                       die.device_id
+         FROM device_inbox_events die
          JOIN devices d
-           ON d.user_id = cm.user_id
+           ON d.device_id = die.device_id
           AND d.status = 'ACTIVE'
-          AND d.device_id <> $3
-        WHERE cm.tenant_id = $1
-          AND cm.conversation_id = $2
-          AND cm.status = 'ACTIVE'
-        ORDER BY cm.user_id, d.device_id`,
-      [actor.tenantId, conversationId, actor.deviceId],
+        WHERE die.tenant_id = $1
+          AND die.message_id = $2
+          AND die.device_id <> $3
+          AND die.event_type IN (
+            'message.available',
+            'message.edited'
+          )
+        ORDER BY d.user_id, die.device_id`,
+      [actor.tenantId, messageId, actor.deviceId],
     );
 
     return result.rows.map((row) => ({
