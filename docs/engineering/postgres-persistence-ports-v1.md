@@ -1,6 +1,6 @@
 # PostgreSQL Persistence Ports — V1
 
-**Status:** Executable repository boundary, live PostgreSQL gate pending
+**Status:** Executable repository boundary + node-postgres runtime adapter; live PostgreSQL gate pending
 
 This slice introduces transaction and SQL repository ports without coupling the domain to a particular Node PostgreSQL client library.
 
@@ -18,7 +18,19 @@ The generic package defines:
 
 The PostgreSQL package implements messaging/session queries against the canonical schema.
 
-A future runtime adapter may wrap `pg`, another mature PostgreSQL driver, or an equivalent serverless driver as long as it satisfies these ports.
+The current Node runtime adapter is `apps/api/postgres-pool.mjs`, backed by the pinned `pg` dependency. It adapts `pg.Pool` to the internal ports without leaking driver concepts into domain/application packages.
+
+The persistent Send composition root is `apps/api/persistent-send-runtime.mjs`. It wires:
+
+- node-postgres pool;
+- transaction manager;
+- PostgreSQL messaging/session repositories;
+- bounded transient source store;
+- versioned HMAC source fingerprinting;
+- persistent Bearer-session authentication;
+- the canonical PersistentMessagingService.
+
+Envelope protection remains a required injected dependency because the cryptographic construction has not yet completed its dedicated security review. There is intentionally no insecure production fallback.
 
 ## 2. Transaction rule
 
@@ -121,20 +133,22 @@ A future persistent sync service must apply this rule before querying old events
 
 ## 9. No live PostgreSQL claim yet
 
-The current sandbox has:
+The current repository now declares a pinned `pg` runtime dependency and contains the concrete pool adapter/composition root.
 
-- Node/TypeScript;
-- no `pg` package;
+The current execution sandbox still has:
+
 - no `psql` binary;
-- no reachable package mirror for installing PostgreSQL.
+- no configured live PostgreSQL test URL;
+- no installed external `pg` package in the isolated local test runtime.
 
 Therefore:
 
 - TypeScript repository logic is sandbox-tested;
+- the node-postgres adapter/composition logic is tested with an injected driver-compatible fake;
 - SQL query ordering/parameters are sandbox-tested with a scripted driver;
 - migrations are statically checked;
 - the live PostgreSQL integration runner is prepared;
-- **live PostgreSQL execution is not claimed yet**.
+- the actual external `pg` package + live PostgreSQL server path is **not claimed as executed yet**.
 
 When available:
 
