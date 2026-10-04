@@ -92,6 +92,10 @@ export class InMemoryTransientSourceStore implements TransientSourceStore {
     this.approxBytes -= stored.approxBytes;
   }
 
+  purgeExpired(): number {
+    return this.pruneExpired();
+  }
+
   get size(): number {
     this.pruneExpired();
     return this.records.size;
@@ -102,14 +106,17 @@ export class InMemoryTransientSourceStore implements TransientSourceStore {
     return this.approxBytes;
   }
 
-  private pruneExpired(): void {
+  private pruneExpired(): number {
     const now = Date.parse(this.options.clock.now());
+    let purged = 0;
     for (const [key, stored] of this.records.entries()) {
       if (Date.parse(stored.record.expiresAt) <= now) {
         this.records.delete(key);
         this.approxBytes -= stored.approxBytes;
+        purged += 1;
       }
     }
+    return purged;
   }
 }
 
