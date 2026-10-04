@@ -131,6 +131,8 @@ export interface TranslationWorkerStore<Tx> {
     input: {
       tenantId: UUID;
       recipientUserId: UUID;
+      sourceMessageId: UUID;
+      sourceRevision: number;
     },
   ): Promise<TranslationRecipientDevice[]>;
 
@@ -649,6 +651,8 @@ export class TranslationWorkerService<Tx> {
           {
             tenantId: execution.tenantId,
             recipientUserId: execution.recipientUserId,
+            sourceMessageId: execution.sourceMessageId,
+            sourceRevision: execution.sourceRevision,
           },
         );
 
