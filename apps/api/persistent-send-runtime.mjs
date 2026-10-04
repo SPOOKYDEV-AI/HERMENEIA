@@ -4,6 +4,7 @@ import {
   PostgresMessagingRepository,
   PostgresOutboxRepository,
   PostgresSessionRepository,
+  PostgresTranslationRepository,
 } from "../../.build/packages/persistence-postgres/src/index.js";
 import {
   SqlTransactionManager,
@@ -17,6 +18,9 @@ import {
 import {
   createPostgresOutboxService,
 } from "../../.build/packages/runtime/src/persistent-outbox.js";
+import {
+  createPostgresTranslationExecutionService,
+} from "../../.build/packages/runtime/src/persistent-translation.js";
 import {
   InMemoryTransientSourceStore,
 } from "../../.build/packages/transient-source/src/index.js";
@@ -201,6 +205,8 @@ export async function createPersistentSendRuntime({
     const repository = new PostgresMessagingRepository(transactions);
     const outboxRepository = new PostgresOutboxRepository(transactions);
     const sessionRepository = new PostgresSessionRepository(transactions);
+    const translationRepository =
+      new PostgresTranslationRepository(transactions);
 
     const transientSources = new InMemoryTransientSourceStore({
       clock,
@@ -230,6 +236,13 @@ export async function createPersistentSendRuntime({
       leaseSeconds: config.outboxLeaseSeconds,
     });
 
+    const translationService =
+      createPostgresTranslationExecutionService({
+        repository: translationRepository,
+        ids,
+        clock,
+      });
+
     const authenticate = createBearerAuthenticator({
       sessionRegistry: {
         authenticateCredential(reference) {
@@ -248,9 +261,11 @@ export async function createPersistentSendRuntime({
       mutationService: sendService,
       deliveryService,
       outboxService,
+      translationService,
       authenticate,
       repository,
       outboxRepository,
+      translationRepository,
       sessionRepository,
       transientSources,
       sqlPool,
