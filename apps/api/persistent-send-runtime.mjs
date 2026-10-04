@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   PostgresMessagingRepository,
+  PostgresOutboxRepository,
   PostgresSessionRepository,
 } from "../../.build/packages/persistence-postgres/src/index.js";
 import {
@@ -13,6 +14,9 @@ import {
 import {
   createPostgresDeliveryService,
 } from "../../.build/packages/runtime/src/persistent-delivery.js";
+import {
+  createPostgresOutboxService,
+} from "../../.build/packages/runtime/src/persistent-outbox.js";
 import {
   InMemoryTransientSourceStore,
 } from "../../.build/packages/transient-source/src/index.js";
@@ -148,6 +152,11 @@ export function persistentSendConfigFromEnv(env = process.env) {
       7 * 24 * 60 * 60,
       "DELIVERY_ENVELOPE_TTL_SECONDS",
     ),
+    outboxLeaseSeconds: positiveInteger(
+      env.OUTBOX_LEASE_SECONDS,
+      30,
+      "OUTBOX_LEASE_SECONDS",
+    ),
   };
 }
 
@@ -190,6 +199,7 @@ export async function createPersistentSendRuntime({
   try {
     const transactions = new SqlTransactionManager(sqlPool);
     const repository = new PostgresMessagingRepository(transactions);
+    const outboxRepository = new PostgresOutboxRepository(transactions);
     const sessionRepository = new PostgresSessionRepository(transactions);
 
     const transientSources = new InMemoryTransientSourceStore({
@@ -214,6 +224,12 @@ export async function createPersistentSendRuntime({
       clock,
     });
 
+    const outboxService = createPostgresOutboxService({
+      repository: outboxRepository,
+      clock,
+      leaseSeconds: config.outboxLeaseSeconds,
+    });
+
     const authenticate = createBearerAuthenticator({
       sessionRegistry: {
         authenticateCredential(reference) {
@@ -231,8 +247,10 @@ export async function createPersistentSendRuntime({
       commandService: sendService,
       mutationService: sendService,
       deliveryService,
+      outboxService,
       authenticate,
       repository,
+      outboxRepository,
       sessionRepository,
       transientSources,
       sqlPool,
