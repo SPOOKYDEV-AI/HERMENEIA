@@ -116,6 +116,12 @@ export interface PersistentMessagingStore<Tx> {
     conversationId: UUID,
   ): Promise<PersistentRecipientTarget[]>;
 
+  listMessageEditDeliveryTargets(
+    tx: Tx,
+    actor: ActorContext,
+    messageId: UUID,
+  ): Promise<PersistentRecipientTarget[]>;
+
   listMessageDeletionEventDevices(
     tx: Tx,
     actor: ActorContext,
@@ -924,25 +930,11 @@ export class PersistentMessagingService<Tx> {
         }
 
         const targets =
-          await this.deps.store.listRecipientDeliveryTargets(
+          await this.deps.store.listMessageEditDeliveryTargets(
             tx,
             actor,
-            message.conversationId,
+            command.message_id,
           );
-        const externalRecipients = targets.filter(
-          (target) => target.userId !== actor.userId,
-        );
-        if (
-          externalRecipients.length === 0 ||
-          externalRecipients.some(
-            (target) => target.devices.length === 0,
-          )
-        ) {
-          throw new DomainError(
-            "RECIPIENT_UNAVAILABLE",
-            "At least one active recipient has no deliverable device",
-          );
-        }
 
         const previousRevision = message.currentRevision;
         const newRevision = previousRevision + 1;
