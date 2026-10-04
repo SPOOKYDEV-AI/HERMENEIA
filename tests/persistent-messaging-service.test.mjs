@@ -191,6 +191,83 @@ class TransactionalFakeStore {
     return clone(this.targets);
   }
 
+  async lockMessageForAuthorMutation(_tx, receivedActor, messageId) {
+    this.maybeFail("lockMessageForAuthorMutation");
+    const message = this.state.messages.find(
+      (row) =>
+        row.tenantId === receivedActor.tenantId &&
+        row.messageId === messageId &&
+        row.authorUserId === receivedActor.userId,
+    );
+    if (!message) return undefined;
+    return {
+      conversationId: message.conversationId,
+      messageSeq: message.messageSeq,
+      currentRevision: message.currentRevision,
+      status: message.status,
+    };
+  }
+
+  async allocateOperationSequence() {
+    this.maybeFail("allocateOperationSequence");
+    if (!this.authorized) return undefined;
+    const opSeq = this.state.nextOpSeq;
+    this.state.nextOpSeq += 1;
+    return opSeq;
+  }
+
+  async updateMessageRevisionPointer(_tx, input) {
+    this.maybeFail("updateMessageRevisionPointer");
+    const message = this.state.messages.find(
+      (row) =>
+        row.tenantId === input.tenantId &&
+        row.messageId === input.messageId,
+    );
+    if (!message || message.currentRevision !== input.expectedRevision) {
+      throw new Error("Message revision pointer changed despite mutation lock");
+    }
+    message.currentRevision = input.newRevision;
+    message.status = input.status;
+    message.deletedAt = input.deletedAt ?? null;
+  }
+
+  async revokePendingMessageEnvelopes(_tx, input) {
+    this.maybeFail("revokePendingMessageEnvelopes");
+    let count = 0;
+    for (const envelope of this.state.envelopes) {
+      if (
+        envelope.tenantId === input.tenantId &&
+        envelope.messageId === input.messageId &&
+        envelope.sourceRevision <= input.throughRevision &&
+        envelope.status === "PENDING"
+      ) {
+        envelope.status = "REVOKED";
+        envelope.protectedPayload = "";
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  async supersedeTranslationJobs(_tx, input) {
+    this.maybeFail("supersedeTranslationJobs");
+    let count = 0;
+    for (const job of this.state.jobs) {
+      if (
+        job.tenantId === input.tenantId &&
+        job.jobType === "translation.request" &&
+        job.payloadRef.message_id === input.messageId &&
+        Number(job.payloadRef.source_revision) <= input.throughRevision &&
+        (job.status === "AVAILABLE" || job.status === "LEASED")
+      ) {
+        job.status = "SUPERSEDED";
+        job.completedAt = input.now;
+        count += 1;
+      }
+    }
+    return count;
+  }
+
   async replyTargetExists(_tx, _tenantId, _conversationId, messageId) {
     this.maybeFail("replyTargetExists");
     return this.replyTargets.has(messageId);
@@ -198,7 +275,12 @@ class TransactionalFakeStore {
 
   async insertMessageMetadata(_tx, input) {
     this.maybeFail("insertMessageMetadata");
-    this.state.messages.push(clone(input));
+    this.state.messages.push({
+      ...clone(input),
+      currentRevision: 1,
+      status: "ACTIVE",
+      deletedAt: null,
+    });
   }
 
   async insertMessageRevision(_tx, input) {
@@ -228,7 +310,10 @@ class TransactionalFakeStore {
 
   async insertDeliveryEnvelope(_tx, input) {
     this.maybeFail("insertDeliveryEnvelope");
-    this.state.envelopes.push(clone(input));
+    this.state.envelopes.push({
+      ...clone(input),
+      status: "PENDING",
+    });
   }
 
   async allocateDeviceInboxOffset(_tx, _tenantId, deviceId) {
@@ -245,7 +330,11 @@ class TransactionalFakeStore {
 
   async insertOutboxJob(_tx, input) {
     this.maybeFail("insertOutboxJob");
-    this.state.jobs.push(clone(input));
+    this.state.jobs.push({
+      ...clone(input),
+      status: "AVAILABLE",
+      completedAt: null,
+    });
   }
 
   async markCommandSucceeded(_tx, input) {
@@ -831,4 +920,245 @@ test("persistent command recovery hides foreign actor receipts and reports unkno
     command_id: "cmd-1",
     status: "UNKNOWN",
   });
+});
+
+
+test("persistent edit creates revision, revokes old envelopes and supersedes old translation work", async () => {
+  const store = new TransactionalFakeStore();
+  const { service, transientSources } = createService(store);
+
+  const accepted = await service.sendMessage(actor, sendCommand());
+  const edited = await service.editMessage(actor, {
+    protocol_version: 1,
+    command_id: "edit-1",
+    message_id: accepted.message_id,
+    expected_revision: 1,
+    source: {
+      text: "Bonjour version two",
+      language_hint: "fr-FR",
+    },
+  });
+
+  assert.deepEqual(edited, {
+    message_id: accepted.message_id,
+    revision: 2,
+    op_seq: 2,
+    status: "ACTIVE",
+  });
+
+  const metadata = store.state.messages[0];
+  assert.equal(metadata.currentRevision, 2);
+  assert.equal(metadata.status, "ACTIVE");
+
+  const oldEnvelopes = store.state.envelopes.filter(
+    (row) => row.sourceRevision === 1,
+  );
+  const newEnvelopes = store.state.envelopes.filter(
+    (row) => row.sourceRevision === 2,
+  );
+  assert.equal(oldEnvelopes.length, 3);
+  assert.equal(newEnvelopes.length, 3);
+  assert.equal(
+    oldEnvelopes.every(
+      (row) => row.status === "REVOKED" && row.protectedPayload === "",
+    ),
+    true,
+  );
+  assert.equal(
+    newEnvelopes.every((row) => row.status === "PENDING"),
+    true,
+  );
+
+  assert.equal(store.state.jobs[0].status, "SUPERSEDED");
+  assert.equal(store.state.jobs[1].status, "AVAILABLE");
+  assert.equal(
+    store.state.events.filter((row) => row.eventType === "message.edited").length,
+    3,
+  );
+
+  assert.equal(
+    transientSources.get({
+      tenantId: actor.tenantId,
+      messageId: accepted.message_id,
+      sourceRevision: 1,
+    }),
+    undefined,
+  );
+  assert.equal(
+    transientSources.get({
+      tenantId: actor.tenantId,
+      messageId: accepted.message_id,
+      sourceRevision: 2,
+    }).source.text,
+    "Bonjour version two",
+  );
+});
+
+test("persistent edit retry is idempotent and stale new command is rejected", async () => {
+  const store = new TransactionalFakeStore();
+  const { service } = createService(store);
+  const accepted = await service.sendMessage(actor, sendCommand());
+
+  const command = {
+    protocol_version: 1,
+    command_id: "edit-retry",
+    message_id: accepted.message_id,
+    expected_revision: 1,
+    source: { text: "edited", language_hint: "en-US" },
+  };
+  const first = await service.editMessage(actor, command);
+  const retry = await service.editMessage(actor, command);
+  assert.deepEqual(retry, first);
+
+  await assert.rejects(
+    () =>
+      service.editMessage(actor, {
+        ...command,
+        command_id: "edit-stale-new-command",
+      }),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "REVISION_CONFLICT",
+  );
+
+  assert.equal(
+    store.state.revisions.filter((row) => row.mutationType === "EDITED").length,
+    1,
+  );
+});
+
+test("persistent edit rollback removes the new transient revision", async () => {
+  const store = new TransactionalFakeStore();
+  const fixture = createService(store);
+  const accepted = await fixture.service.sendMessage(actor, sendCommand());
+
+  store.failAt = "insertDeliveryEnvelope";
+  await assert.rejects(
+    () =>
+      fixture.service.editMessage(actor, {
+        protocol_version: 1,
+        command_id: "edit-fail",
+        message_id: accepted.message_id,
+        expected_revision: 1,
+        source: { text: "will rollback" },
+      }),
+    /forced store failure/,
+  );
+
+  assert.equal(store.state.messages[0].currentRevision, 1);
+  assert.equal(
+    fixture.transientSources.get({
+      tenantId: actor.tenantId,
+      messageId: accepted.message_id,
+      sourceRevision: 2,
+    }),
+    undefined,
+  );
+  assert.ok(
+    fixture.transientSources.get({
+      tenantId: actor.tenantId,
+      messageId: accepted.message_id,
+      sourceRevision: 1,
+    }),
+  );
+});
+
+test("persistent delete creates tombstone, purges pending delivery and transient source", async () => {
+  const store = new TransactionalFakeStore();
+  const { service, transientSources } = createService(store);
+  const accepted = await service.sendMessage(actor, sendCommand());
+
+  const deleted = await service.deleteMessage(actor, {
+    protocol_version: 1,
+    command_id: "delete-1",
+    message_id: accepted.message_id,
+    expected_revision: 1,
+  });
+
+  assert.deepEqual(deleted, {
+    message_id: accepted.message_id,
+    revision: 2,
+    op_seq: 2,
+    status: "DELETED",
+  });
+
+  assert.equal(store.state.messages[0].currentRevision, 2);
+  assert.equal(store.state.messages[0].status, "DELETED");
+  assert.equal(
+    store.state.envelopes.every(
+      (row) => row.status === "REVOKED" && row.protectedPayload === "",
+    ),
+    true,
+  );
+  assert.equal(store.state.jobs[0].status, "SUPERSEDED");
+
+  const deleteEvents = store.state.events.filter(
+    (row) => row.eventType === "message.deleted",
+  );
+  assert.equal(deleteEvents.length, 3);
+  assert.equal(
+    deleteEvents.every((row) => row.envelopeId === null),
+    true,
+  );
+  assert.equal(
+    transientSources.get({
+      tenantId: actor.tenantId,
+      messageId: accepted.message_id,
+      sourceRevision: 1,
+    }),
+    undefined,
+  );
+});
+
+test("persistent delete retry is idempotent and a new stale delete conflicts", async () => {
+  const store = new TransactionalFakeStore();
+  const { service } = createService(store);
+  const accepted = await service.sendMessage(actor, sendCommand());
+
+  const command = {
+    protocol_version: 1,
+    command_id: "delete-retry",
+    message_id: accepted.message_id,
+    expected_revision: 1,
+  };
+  const first = await service.deleteMessage(actor, command);
+  const retry = await service.deleteMessage(actor, command);
+  assert.deepEqual(retry, first);
+
+  await assert.rejects(
+    () =>
+      service.deleteMessage(actor, {
+        ...command,
+        command_id: "delete-stale-new-command",
+      }),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "REVISION_CONFLICT",
+  );
+
+  assert.equal(
+    store.state.revisions.filter((row) => row.mutationType === "DELETED").length,
+    1,
+  );
+});
+
+test("delete is allowed even when an external recipient currently has no device", async () => {
+  const store = new TransactionalFakeStore();
+  const { service } = createService(store);
+  const accepted = await service.sendMessage(actor, sendCommand());
+
+  store.targets = [
+    { userId: "user-a", devices: [] },
+    { userId: "user-b", devices: [] },
+  ];
+
+  const deleted = await service.deleteMessage(actor, {
+    protocol_version: 1,
+    command_id: "delete-offline-recipient",
+    message_id: accepted.message_id,
+    expected_revision: 1,
+  });
+
+  assert.equal(deleted.status, "DELETED");
+  assert.equal(store.state.messages[0].status, "DELETED");
 });
