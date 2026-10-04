@@ -106,6 +106,7 @@ function prepareInput(overrides = {}) {
     targetLanguageTag: "fr-FR",
     targetProfileVersion: 3,
     currentSequence: 8,
+    erasureEpoch: 1,
     strategy: "T2_ADAPTIVE_V1",
     state: {
       conversationId: "conversation-1",
