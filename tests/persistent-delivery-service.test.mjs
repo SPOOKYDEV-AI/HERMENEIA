@@ -63,6 +63,14 @@ class FakeDeliveryStore {
     return this.state ? structuredClone(this.state) : undefined;
   }
 
+  async expirePendingDeviceEnvelopes(_tx, input) {
+    this.calls.push({
+      method: "expirePendingDeviceEnvelopes",
+      input: structuredClone(input),
+    });
+    return 0;
+  }
+
   async listInboxEvents(_tx, input) {
     this.calls.push({
       method: "listInboxEvents",
@@ -525,4 +533,52 @@ test("ACK racing with edit/delete revocation is terminal and idempotent", async 
     (call) => call.method === "acknowledgeEnvelope",
   );
   assert.equal(ackCalls.length, 1);
+});
+
+
+test("sync opportunistically purges expired payloads before inbox replay", async () => {
+  const store = new FakeDeliveryStore({
+    events: [contentEvent({
+      envelopeStatus: "EXPIRED",
+      protectedPayload: null,
+      renditionType: null,
+      expiresAt: null,
+    })],
+  });
+
+  const result = await service(
+    store,
+    "2026-10-04T09:45:00.000Z",
+  ).sync(actor, {
+    cursor: "4:8",
+  });
+
+  const expireCall = store.calls.find(
+    (call) => call.method === "expirePendingDeviceEnvelopes",
+  );
+  const listCall = store.calls.find(
+    (call) => call.method === "listInboxEvents",
+  );
+
+  assert.deepEqual(expireCall.input, {
+    tenantId: "tenant-1",
+    deviceId: "device-1",
+    now: "2026-10-04T09:45:00.000Z",
+  });
+  assert.ok(
+    store.calls.indexOf(expireCall) <
+      store.calls.indexOf(listCall),
+  );
+  assert.equal(result.kind, "RESET");
+});
+
+test("invalid sync clock is rejected before opening persistence work", async () => {
+  const store = new FakeDeliveryStore();
+
+  await assert.rejects(
+    () => service(store, "not-a-date").sync(actor),
+    /Clock returned an invalid timestamp/,
+  );
+
+  assert.equal(store.transactions, 0);
 });
