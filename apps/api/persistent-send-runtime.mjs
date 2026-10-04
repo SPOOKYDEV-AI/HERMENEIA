@@ -228,6 +228,7 @@ export async function createPersistentSendRuntime({
 
     return {
       sendService,
+      commandService: sendService,
       deliveryService,
       authenticate,
       repository,
