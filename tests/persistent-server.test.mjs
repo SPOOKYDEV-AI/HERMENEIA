@@ -25,9 +25,16 @@ class FakeClient {
   async query(text, params = []) {
     this.pool.queries.push({ text, params: [...params] });
 
-    if (text === "SELECT 1 AS hermeneia_ready") {
+    if (/has_message_metadata/.test(text)) {
       return {
-        rows: [{ hermeneia_ready: 1 }],
+        rows: [{
+          has_message_metadata: true,
+          has_tenant_sync: true,
+          has_translation_executions: true,
+          has_provider_executions: true,
+          has_command_fingerprint: true,
+          has_source_required_constraint: true,
+        }],
         rowCount: 1,
       };
     }
