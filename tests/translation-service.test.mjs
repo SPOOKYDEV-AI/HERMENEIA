@@ -855,3 +855,35 @@ test("translation retry returns READY or SUPERSEDED without resurrecting work", 
     );
   }
 });
+
+
+test("successful source re-supply cannot be replayed with altered plaintext under the same command_id", async () => {
+  const f = recoveryFixture();
+  const command = sourceResupplyCommand();
+
+  const first = await f.recovery.resupplySource(
+    recoveryActor,
+    command,
+  );
+  assert.equal(first.status, "PENDING");
+
+  await assert.rejects(
+    () =>
+      f.recovery.resupplySource(
+        recoveryActor,
+        {
+          ...command,
+          source: {
+            text: "plaintext altered after successful receipt",
+            language_hint: "fr-FR",
+          },
+        },
+      ),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "SOURCE_REVISION_MISMATCH",
+  );
+
+  assert.equal(f.store.receipts.size, 1);
+  assert.equal(f.store.recovery.execution.status, "PENDING");
+});
