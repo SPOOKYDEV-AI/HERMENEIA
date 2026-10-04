@@ -1373,3 +1373,53 @@ test("persistent edit can succeed after a historically exposed recipient device 
     1,
   );
 });
+
+
+test("persistent edit retry remains idempotent across HMAC key rotation", async () => {
+  const store = new TransactionalFakeStore();
+  const oldKey = "old-edit-key-0123456789abcdef0123456789abcd";
+  const newKey = "new-edit-key-0123456789abcdef0123456789abcd";
+
+  const oldService = createService(store, {
+    fingerprinter: createHmacSourceFingerprinter({
+      key: oldKey,
+      keyVersion: "edit-k1",
+    }),
+  }).service;
+
+  const accepted = await oldService.sendMessage(actor, sendCommand());
+  const command = {
+    protocol_version: 1,
+    command_id: "edit-across-key-rotation",
+    message_id: accepted.message_id,
+    expected_revision: 1,
+    source: {
+      text: "edited across fingerprint rotation",
+      language_hint: "en-US",
+    },
+  };
+
+  const first = await oldService.editMessage(actor, command);
+
+  const rotatedService = createService(store, {
+    fingerprinter: createHmacSourceFingerprinter({
+      key: newKey,
+      keyVersion: "edit-k2",
+      verificationKeys: [
+        {
+          key: oldKey,
+          keyVersion: "edit-k1",
+        },
+      ],
+    }),
+  }).service;
+
+  const retry = await rotatedService.editMessage(actor, command);
+  assert.deepEqual(retry, first);
+  assert.equal(
+    store.state.revisions.filter(
+      (row) => row.mutationType === "EDITED",
+    ).length,
+    1,
+  );
+});
