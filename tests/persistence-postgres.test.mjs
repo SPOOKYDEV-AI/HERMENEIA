@@ -1244,3 +1244,36 @@ test("translated delivery envelope persists ciphertext with TRANSLATION renditio
     "2026-10-11T12:00:00.000Z",
   ]);
 });
+
+
+test("message mutation logically cancels started provider attempts for superseded revisions", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 2 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const count = await repository.withTransaction((tx) =>
+    repository.cancelStartedProviderAttempts(tx, {
+      tenantId: "tenant-1",
+      messageId: "message-1",
+      throughRevision: 2,
+      now: "2026-10-04T12:00:00.000Z",
+    }),
+  );
+
+  assert.equal(count, 2);
+  const query = connection.queries[1];
+  assert.match(query.text, /UPDATE provider_executions pe/);
+  assert.match(query.text, /status = 'CANCELLED_LOGICALLY'/);
+  assert.match(query.text, /pe\.status = 'STARTED'/);
+  assert.match(query.text, /te\.source_message_id = \$2/);
+  assert.match(query.text, /te\.source_revision <= \$3/);
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "message-1",
+    2,
+    "2026-10-04T12:00:00.000Z",
+  ]);
+});
