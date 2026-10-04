@@ -9,7 +9,8 @@ import type {
   SqlTransactionManager,
 } from "../../persistence/src/index.js";
 
-interface ContextSnapshotRow {
+interface ContextSnapshotRow
+  extends Record<string, unknown> {
   snapshot_id: UUID;
   conversation_id: UUID;
   message_id: UUID;
