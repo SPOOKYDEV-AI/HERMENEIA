@@ -470,3 +470,51 @@ test("revoked current actor cannot administer devices", async () => {
   );
   assert.equal(store.receipts.size, 0);
 });
+
+
+test("device enrollment rejects unsupported delivery material before persistence", async () => {
+  const store = new FakeDeviceStore();
+  let transactionCalls = 0;
+  const originalWithTransaction = store.withTransaction.bind(store);
+  store.withTransaction = async (work) => {
+    transactionCalls += 1;
+    return originalWithTransaction(work);
+  };
+
+  const service = new PersistentDeviceService({
+    store,
+    clock: {
+      now() {
+        return "2026-10-04T17:00:00.000Z";
+      },
+    },
+    materialFingerprinter: {
+      fingerprint(value) {
+        return `sha256:${value}`;
+      },
+    },
+    materialValidator: {
+      validate(value) {
+        if (!value.startsWith("hpke-p256-v1:")) {
+          throw new TypeError("unsupported");
+        }
+      },
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      service.enrollDevice(actor, {
+        ...enroll(),
+        command_id: "enroll-invalid-material",
+        device_id: "device-invalid",
+        public_material_ref: "legacy-material",
+      }),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "INVALID_COMMAND",
+  );
+
+  assert.equal(transactionCalls, 0);
+  assert.equal(store.devices.has("device-invalid"), false);
+});
