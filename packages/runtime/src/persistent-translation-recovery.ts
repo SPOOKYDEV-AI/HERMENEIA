@@ -8,7 +8,7 @@ import type {
 } from "../../persistence-postgres/src/translation.js";
 import {
   TranslationRecoveryService,
-  type TranslationRecoveryClock,
+  type TranslationExecutionClock,
   type TranslationRecoveryFingerprinter,
 } from "../../translation-service/src/index.js";
 import type {
@@ -21,7 +21,7 @@ export interface PostgresTranslationRecoveryDependencies {
   translationRepository: PostgresTranslationRepository;
   transientSources: TransientSourceStore;
   fingerprinter: TranslationRecoveryFingerprinter;
-  clock: TranslationRecoveryClock;
+  clock: TranslationExecutionClock;
   transientSourceTtlSeconds?: number;
 }
 
