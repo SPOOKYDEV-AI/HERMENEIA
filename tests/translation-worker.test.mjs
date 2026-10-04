@@ -251,6 +251,12 @@ class FakeWorkerStore {
       : undefined;
   }
 
+  async listRecipientControlDevices() {
+    return this.current
+      ? this.devices.map((device) => device.deviceId)
+      : [];
+  }
+
   async listRecipientDevicesForPublish() {
     return this.current ? clone(this.devices) : [];
   }
@@ -550,6 +556,46 @@ test("missing transient source marks execution SOURCE_REQUIRED without provider 
   );
   assert.equal(currentExecution(f).status, "SOURCE_REQUIRED");
   assert.equal(child.status, "DONE");
+  assert.equal(f.providerCalls(), 0);
+
+  const controlEvents = f.store.state.events.filter(
+    (event) => event.eventType === "translation.source_required",
+  );
+  assert.equal(controlEvents.length, 1);
+  assert.deepEqual(controlEvents[0], {
+    deviceId: "device-b1",
+    inboxEpoch: 1,
+    offset: 1,
+    eventId: "evt-4",
+    eventType: "translation.source_required",
+    tenantId: "tenant-1",
+    conversationId: "conversation-1",
+    messageId: "message-1",
+    envelopeId: null,
+    sourceRevision: 1,
+    translationId: currentExecution(f).translationId,
+    sourceRef: "source-hash-1",
+    createdAt: "2026-10-04T12:00:00.000Z",
+  });
+});
+
+test("source becoming stale while handling missing plaintext supersedes instead of requesting re-supply", async () => {
+  const f = fixture();
+  const child = await fanoutOne(f);
+  f.store.current = false;
+
+  assert.equal(
+    await f.worker.runExecuteOnce(),
+    "SUPERSEDED",
+  );
+  assert.equal(currentExecution(f).status, "SUPERSEDED");
+  assert.equal(child.status, "DONE");
+  assert.equal(
+    f.store.state.events.some(
+      (event) => event.eventType === "translation.source_required",
+    ),
+    false,
+  );
   assert.equal(f.providerCalls(), 0);
 });
 
