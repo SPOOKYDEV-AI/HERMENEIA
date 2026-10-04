@@ -80,9 +80,11 @@ export class PostgresTranslationRepository {
     const source = await tx.query<{
       conversation_id: UUID;
       declared_source_language: string | null;
+      source_hash: string;
     }>(
       `SELECT mm.conversation_id,
-              mr.declared_source_language
+              mr.declared_source_language,
+              mr.source_hash
          FROM message_metadata mm
          JOIN message_revisions mr
            ON mr.tenant_id = mm.tenant_id
@@ -91,7 +93,8 @@ export class PostgresTranslationRepository {
         WHERE mm.tenant_id = $1
           AND mm.message_id = $2
           AND mm.current_revision = $3
-          AND mm.status = 'ACTIVE'`,
+          AND mm.status = 'ACTIVE'
+          AND mr.source_hash IS NOT NULL`,
       [
         input.tenantId,
         input.sourceMessageId,
@@ -137,6 +140,7 @@ export class PostgresTranslationRepository {
     return {
       conversationId: sourceRow.conversation_id,
       sourceLanguageTag: sourceRow.declared_source_language,
+      sourceHash: sourceRow.source_hash,
       targets: targets.rows.map((row) => ({
         recipientUserId: row.user_id,
         targetLanguageTag: row.target_language_tag,
