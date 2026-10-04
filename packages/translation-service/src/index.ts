@@ -527,6 +527,21 @@ export class TranslationRecoveryService<Tx> {
     const now = this.deps.clock.now();
     assertTimestamp(now, "Clock");
 
+    // Bind the submitted plaintext to source_ref before command-receipt
+    // idempotency. Otherwise the same command_id/source_ref could be replayed
+    // with a different plaintext and incorrectly inherit a prior success.
+    if (
+      !this.deps.fingerprinter.matches(
+        command.source,
+        command.source_ref,
+      )
+    ) {
+      throw new DomainError(
+        "SOURCE_REVISION_MISMATCH",
+        "Re-supplied source does not match source_ref",
+      );
+    }
+
     const commandFingerprint = JSON.stringify({
       v: 1,
       type: "translation.source_resupply",
