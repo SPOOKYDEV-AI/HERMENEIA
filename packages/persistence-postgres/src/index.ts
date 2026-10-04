@@ -1167,16 +1167,30 @@ export class PostgresMessagingRepository {
       expiresAt: string;
     },
   ): Promise<void> {
-    await tx.query(
+    const result = await tx.query(
       `INSERT INTO delivery_envelopes(
          tenant_id, envelope_id, conversation_id, message_id,
          source_revision, recipient_user_id, recipient_device_id,
          recipient_credential_version, rendition_type,
          protected_payload, status, created_at, expires_at
-       ) VALUES (
+       )
+       SELECT
          $1,$2,$3,$4,$5,$6,$7,$8,'ORIGINAL',
          decode($9,'base64'),'PENDING',$10,$11
-       )`,
+         FROM devices d
+         JOIN conversation_members cm
+           ON cm.tenant_id = $1
+          AND cm.conversation_id = $3
+          AND cm.user_id = $6
+          AND cm.status = 'ACTIVE'
+         JOIN tenant_memberships tm
+           ON tm.tenant_id = $1
+          AND tm.user_id = $6
+          AND tm.status = 'ACTIVE'
+        WHERE d.device_id = $7
+          AND d.user_id = $6
+          AND d.status = 'ACTIVE'
+          AND d.credential_version = $8`,
       [
         input.tenantId,
         input.envelopeId,
@@ -1191,6 +1205,12 @@ export class PostgresMessagingRepository {
         input.expiresAt,
       ],
     );
+
+    if (result.rowCount !== 1) {
+      throw new Error(
+        "Delivery target changed before ORIGINAL envelope persistence",
+      );
+    }
   }
 
   async insertTranslationDeliveryEnvelope(
@@ -1210,17 +1230,22 @@ export class PostgresMessagingRepository {
       expiresAt: string;
     },
   ): Promise<void> {
-    await tx.query(
+    const result = await tx.query(
       `INSERT INTO delivery_envelopes(
          tenant_id, envelope_id, conversation_id, message_id,
          source_revision, translation_id,
          recipient_user_id, recipient_device_id,
          recipient_credential_version, rendition_type,
          protected_payload, status, created_at, expires_at
-       ) VALUES (
+       )
+       SELECT
          $1,$2,$3,$4,$5,$6,$7,$8,$9,'TRANSLATION',
          decode($10,'base64'),'PENDING',$11,$12
-       )`,
+         FROM devices d
+        WHERE d.device_id = $8
+          AND d.user_id = $7
+          AND d.status = 'ACTIVE'
+          AND d.credential_version = $9`,
       [
         input.tenantId,
         input.envelopeId,
@@ -1236,6 +1261,12 @@ export class PostgresMessagingRepository {
         input.expiresAt,
       ],
     );
+
+    if (result.rowCount !== 1) {
+      throw new Error(
+        "Delivery target changed before TRANSLATION envelope persistence",
+      );
+    }
   }
 
   async allocateDeviceInboxOffset(
