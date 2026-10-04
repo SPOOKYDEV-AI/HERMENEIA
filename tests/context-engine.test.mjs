@@ -594,3 +594,21 @@ test("correction memory requires a causal frontier in addition to a trigger", ()
     /Correction memory requires causalThroughSequence/,
   );
 });
+
+
+test("ContextState rejects processing gaps at or behind the processed prefix", () => {
+  const engine = new ContextEngine();
+
+  assert.throws(
+    () =>
+      engine.build(input({
+        currentSequence: 10,
+        messageId: "message-10",
+        state: state({
+          processedPrefixSequence: 7,
+          processingGaps: [7, 8],
+        }),
+      })),
+    /processingGaps must be strictly after the processed prefix/,
+  );
+});
