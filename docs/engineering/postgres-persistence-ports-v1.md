@@ -137,9 +137,19 @@ The purge/replay watermark is stored in `tenant_device_sync_states`; global devi
 
 Migration `0006_outbox_superseded.sql` adds the explicit `SUPERSEDED` lifecycle for translation outbox jobs. Edit/delete mark AVAILABLE or LEASED jobs from stale source revisions as superseded and purge pending protected delivery payloads in the same transaction.
 
-A running worker must still fence publication against current source revision/message status; changing the job row alone cannot cancel provider work already executing outside PostgreSQL.
+A running worker also fences publication against current source revision/message status, and provider-attempt completion is conditional on the attempt still being STARTED. Edit/delete logically cancel started provider attempts, supersede stale translation executions, and make stale leases unable to complete/retry/dead-letter successfully.
 
-## 10. No live PostgreSQL claim yet
+## 10. Historical edit/delete fanout
+
+Mutation fanout is derived from retained `delivery_envelopes` metadata rather than the replay journal.
+
+- edit targets only active devices with prior ORIGINAL-envelope exposure and current active membership;
+- delete targets active devices with prior ORIGINAL-envelope exposure even if current membership has ended, because deletion reduces retained client exposure;
+- raw protected payload is not required for this lookup.
+
+This avoids coupling mutation correctness to future inbox-event compaction.
+
+## 11. No live PostgreSQL claim yet
 
 The current repository now declares a pinned `pg` runtime dependency and contains the concrete pool adapter/composition root.
 
@@ -163,9 +173,9 @@ When available:
     HERMENEIA_TEST_DATABASE_URL=...
     python scripts/postgres_integration.py
 
-must apply migrations 0001 -> 0002 -> 0003 -> 0004 -> 0005 -> 0006 and smoke tests successfully before production persistence is considered validated.
+must apply migrations 0001 -> ... -> 0010 and the declared smoke tests successfully before production persistence is considered validated.
 
-## 11. Sandbox evidence
+## 12. Sandbox evidence
 
 Executed:
 
