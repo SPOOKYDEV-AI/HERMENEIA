@@ -47,6 +47,8 @@ class FakeClient {
           has_provider_executions: true,
           has_command_fingerprint: true,
           has_source_required_constraint: true,
+          has_device_platform: true,
+          has_device_material_constraint: true,
         }],
         rowCount: 1,
       };
@@ -365,6 +367,8 @@ test("persistent readiness rejects reachable but incomplete schema", async () =>
             has_provider_executions: false,
             has_command_fingerprint: true,
             has_source_required_constraint: false,
+            has_device_platform: false,
+            has_device_material_constraint: false,
           }],
           rowCount: 1,
         };
