@@ -214,7 +214,9 @@ Edit:
 - allocates only a new conversation `op_seq`;
 - creates an immutable `EDITED` source revision;
 - revokes and payload-purges pending envelopes for older revisions;
-- marks pending/leased translation jobs `SUPERSEDED`;
+- marks pending/leased translation request/execute jobs `SUPERSEDED`;
+- marks older translation executions `SUPERSEDED`;
+- marks already-started provider attempts `CANCELLED_LOGICALLY`;
 - creates fresh protected envelopes and `message.edited` events per deliverable device;
 - admits the new source to transient memory best-effort and removes the previous transient revision after commit.
 
@@ -223,9 +225,10 @@ Delete:
 - creates an immutable content-free `DELETED` tombstone revision;
 - marks MessageMetadata deleted;
 - revokes/purges old pending envelopes;
-- supersedes old translation jobs;
-- emits content-free `message.deleted` events to currently deliverable devices;
-- is not blocked merely because a recipient currently has no active device.
+- supersedes old translation request/execute jobs and translation executions;
+- marks already-started provider attempts `CANCELLED_LOGICALLY`;
+- emits content-free `message.deleted` control events to active conversation devices without requiring delivery-key material;
+- is not blocked merely because a recipient currently has no active encryption-capable device.
 
 Sync state uses a globally monotonic device inbox offset but a **tenant + device** purge/replay watermark. This prevents a multi-tenant session from using another tenant's ACK state. ACK watermark advancement is restricted to the contiguous terminal envelope prefix, so an out-of-order ACK cannot skip an earlier PENDING envelope.
 
@@ -247,6 +250,8 @@ translation_status = SOURCE_REQUIRED
 
 Provider availability never gates original Send acceptance.
 
+If an edit/delete supersedes a source revision while a provider call is already in flight, the provider attempt becomes `CANCELLED_LOGICALLY`. Provider completion is fenced on `status = 'STARTED'`; a late response therefore becomes `STALE_ATTEMPT`, and the worker returns `SUPERSEDED` immediately without publishing, retrying or reviving the old revision.
+
 ## 12. Current verification gates
 
 Verified in the local sandbox for this slice:
@@ -264,8 +269,19 @@ Verified in the local sandbox for this slice:
 - HTTP Send, command recovery, edit/delete and sync/ACK routing to persistent services;
 - tenant-isolated sync state and out-of-order ACK protection;
 - persistent mutation rollback, stale-revision rejection and command replay;
-- static SQL migration contract;
+- static SQL migration contract through migrations 0001..0009;
+- provider late-response fencing after concurrent edit/delete;
+- pure persistent HTTP composition including translation source recovery;
 - no durable plaintext token/column in the SQL contract.
+
+Latest focused regression gates after mutation/provider hardening:
+
+- persistent messaging + repository mutation focus: **13/13 PASS**;
+- stale provider completion focus: **1/1 PASS**;
+- strict worker typecheck/build after explicit transaction result typing: **PASS**;
+- exact remote migration invariant scan 0001..0009: **PASS**;
+- Python migration scripts compile: **PASS**;
+- live PostgreSQL runner: **SKIP** in the current sandbox because `psql` and the test DB URL are absent.
 
 The live PostgreSQL smoke test is intentionally separate.
 
@@ -292,7 +308,7 @@ The runtime fails closed when the reviewed envelope-protection dependency is abs
 Still required before a production claim:
 
 - execute the actual external `pg` dependency against a live PostgreSQL instance;
-- apply migrations/smoke tests through `scripts/postgres_integration.py`;
+- apply rollback 0009→0001, migrations 0001→0009 and smoke tests through `scripts/postgres_integration.py`;
 - complete the dedicated envelope cryptography review and provide that implementation;
 - execute and validate the translation outbox worker/provider/publication path with causal fencing;
 - complete the remaining device-enrollment/read-cursor/operational lifecycle surfaces required by Core V1.
