@@ -101,6 +101,10 @@ function prepareInput(overrides = {}) {
     tenantId: "tenant-1",
     conversationId: "conversation-1",
     messageId: "message-8",
+    sourceRevision: 1,
+    recipientUserId: "user-b",
+    targetLanguageTag: "fr-FR",
+    targetProfileVersion: 3,
     currentSequence: 8,
     strategy: "T2_ADAPTIVE_V1",
     state: {
