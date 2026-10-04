@@ -181,7 +181,7 @@ export interface DeviceMaterialFingerprinter {
 }
 
 export interface DeviceMaterialValidator {
-  validate(publicMaterialRef: string): void;
+  validate(publicMaterialRef: string): void | Promise<void>;
 }
 
 export interface PersistentDeviceServiceDependencies<Tx> {
@@ -238,7 +238,7 @@ export class PersistentDeviceService<Tx> {
   ): Promise<DeviceResult> {
     validateCommandIdentity(command.command_id, command.device_id);
     validateMaterial(command.public_material_ref);
-    this.validateMaterialFormat(command.public_material_ref);
+    await this.validateMaterialFormat(command.public_material_ref);
     const platform = command.platform ?? "OTHER";
     validatePlatform(platform);
 
@@ -349,7 +349,7 @@ export class PersistentDeviceService<Tx> {
   ): Promise<DeviceResult> {
     validateCommandIdentity(command.command_id, command.device_id);
     validateMaterial(command.public_material_ref);
-    this.validateMaterialFormat(command.public_material_ref);
+    await this.validateMaterialFormat(command.public_material_ref);
     if (
       !Number.isInteger(command.expected_credential_version) ||
       command.expected_credential_version < 1
@@ -571,9 +571,9 @@ export class PersistentDeviceService<Tx> {
     });
   }
 
-  private validateMaterialFormat(value: string): void {
+  private async validateMaterialFormat(value: string): Promise<void> {
     try {
-      this.deps.materialValidator.validate(value);
+      await this.deps.materialValidator.validate(value);
     } catch {
       throw new DomainError(
         "INVALID_COMMAND",

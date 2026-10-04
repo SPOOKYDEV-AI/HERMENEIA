@@ -8,6 +8,8 @@ import {
   createHpkeP256OriginalEnvelopeProtector,
   createHpkeP256TranslationEnvelopeProtector,
   generateHpkeP256DeviceKeyPair,
+  validateHpkeP256PublicMaterial,
+  validateHpkeP256PublicMaterialSyntax,
 } from "../.build/packages/envelope-crypto/src/index.js";
 
 const IDS = {
@@ -244,6 +246,21 @@ test("malformed public material and binding are rejected before encryption", asy
         originalBinding({ envelopeId: "not-a-uuid" }),
       ),
     /canonical UUID/,
+  );
+});
+
+test("syntax-valid off-curve P-256 public material is rejected cryptographically", async () => {
+  const raw = Buffer.alloc(65);
+  raw[0] = 0x04;
+  const publicMaterialRef =
+    `hpke-p256-v1:${raw.toString("base64url")}`;
+
+  assert.doesNotThrow(() =>
+    validateHpkeP256PublicMaterialSyntax(publicMaterialRef),
+  );
+
+  await assert.rejects(() =>
+    validateHpkeP256PublicMaterial(publicMaterialRef),
   );
 });
 

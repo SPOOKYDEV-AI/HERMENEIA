@@ -40,7 +40,7 @@ import {
   createHmacSourceFingerprinter,
 } from "./source-fingerprint.mjs";
 import {
-  validateHpkeP256PublicMaterialSyntax,
+  validateHpkeP256PublicMaterial,
 } from "../../.build/packages/envelope-crypto/src/index.js";
 import {
   createNodePostgresPool,
@@ -275,7 +275,7 @@ export async function createPersistentSendRuntime({
       clock,
       materialFingerprinter: createDeviceMaterialFingerprinter(),
       materialValidator: {
-        validate: validateHpkeP256PublicMaterialSyntax,
+        validate: validateHpkeP256PublicMaterial,
       },
     });
 

@@ -475,6 +475,50 @@ test("revoked current actor cannot administer devices", async () => {
 });
 
 
+test("device enrollment awaits cryptographic material validation before persistence", async () => {
+  const store = new FakeDeviceStore();
+  let transactionCalls = 0;
+  const originalWithTransaction = store.withTransaction.bind(store);
+  store.withTransaction = async (work) => {
+    transactionCalls += 1;
+    return originalWithTransaction(work);
+  };
+
+  const service = new PersistentDeviceService({
+    store,
+    clock: {
+      now() {
+        return "2026-10-04T17:00:00.000Z";
+      },
+    },
+    materialFingerprinter: {
+      fingerprint(value) {
+        return `sha256:${value}`;
+      },
+    },
+    materialValidator: {
+      async validate() {
+        await Promise.resolve();
+        throw new TypeError("invalid P-256 point");
+      },
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      service.enrollDevice(actor, {
+        ...enroll(),
+        command_id: "enroll-invalid-curve",
+      }),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "INVALID_COMMAND",
+  );
+
+  assert.equal(transactionCalls, 0);
+  assert.equal(store.devices.has("device-new"), false);
+});
+
 test("device enrollment rejects unsupported delivery material before persistence", async () => {
   const store = new FakeDeviceStore();
   let transactionCalls = 0;

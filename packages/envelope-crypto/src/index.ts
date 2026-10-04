@@ -310,6 +310,12 @@ export async function decodeHpkeP256PublicMaterial(
   return createSuite().kem.deserializePublicKey(raw);
 }
 
+export async function validateHpkeP256PublicMaterial(
+  value: string,
+): Promise<void> {
+  await decodeHpkeP256PublicMaterial(value);
+}
+
 export async function generateHpkeP256DeviceKeyPair(): Promise<{
   keyPair: CryptoKeyPair;
   publicMaterialRef: string;
