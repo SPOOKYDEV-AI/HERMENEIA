@@ -25,6 +25,13 @@ class FakeClient {
   async query(text, params = []) {
     this.pool.queries.push({ text, params: [...params] });
 
+    if (text === "SELECT 1 AS hermeneia_ready") {
+      return {
+        rows: [{ hermeneia_ready: 1 }],
+        rowCount: 1,
+      };
+    }
+
     if (/SELECT s\.tenant_id/.test(text)) {
       return {
         rows: [{
@@ -98,6 +105,10 @@ test("pure persistent HTTP runtime starts without an in-memory Core", async () =
   const health = await fetch(`${base}/healthz`);
   assert.equal(health.status, 200);
   assert.deepEqual(await health.json(), { status: "ok" });
+
+  const ready = await fetch(`${base}/readyz`);
+  assert.equal(ready.status, 200);
+  assert.deepEqual(await ready.json(), { status: "ready" });
 
   const command = await fetch(`${base}/v1/commands/unknown-command`, {
     headers: {
