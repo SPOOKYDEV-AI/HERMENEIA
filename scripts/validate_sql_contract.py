@@ -326,6 +326,10 @@ def main() -> int:
     context_snapshot_required = [
         "CREATE TABLE context_snapshots",
         "PRIMARY KEY (tenant_id, snapshot_id)",
+        "source_revision integer NOT NULL",
+        "recipient_user_id uuid NOT NULL",
+        "target_language_tag text NOT NULL",
+        "target_profile_version bigint NOT NULL",
         "selected_candidate_ids jsonb NOT NULL",
         "selected_source_revision_refs jsonb NOT NULL",
         "selected_claim_refs jsonb NOT NULL",
@@ -333,7 +337,12 @@ def main() -> int:
         "recovery_mode text NOT NULL",
         "REFERENCES message_metadata(tenant_id, conversation_id, message_id)",
         "translation_executions_context_snapshot_fk",
-        "REFERENCES context_snapshots(tenant_id, snapshot_id)",
+        "source_message_id",
+        "source_revision",
+        "recipient_user_id",
+        "target_language_tag",
+        "target_profile_version",
+        "REFERENCES context_snapshots(",
     ]
     for snippet in context_snapshot_required:
         if snippet not in context_snapshot_sql:
