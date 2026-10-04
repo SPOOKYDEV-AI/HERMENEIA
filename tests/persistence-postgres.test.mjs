@@ -1160,3 +1160,53 @@ test("message mutation supersedes pending translation executions", async () => {
     "2026-10-04T12:30:00.000Z",
   ]);
 });
+
+
+test("translated delivery envelope persists ciphertext with TRANSLATION rendition and execution reference", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 1 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  await repository.withTransaction((tx) =>
+    repository.insertTranslationDeliveryEnvelope(tx, {
+      tenantId: "tenant-1",
+      envelopeId: "envelope-tr-1",
+      conversationId: "conversation-1",
+      messageId: "message-1",
+      sourceRevision: 2,
+      translationId: "translation-1",
+      recipientUserId: "user-b",
+      recipientDeviceId: "device-b1",
+      credentialVersion: 4,
+      protectedPayload: "YWJj",
+      createdAt: "2026-10-04T12:00:00.000Z",
+      expiresAt: "2026-10-11T12:00:00.000Z",
+    }),
+  );
+
+  const query = connection.queries[1];
+  assert.match(query.text, /'TRANSLATION'/);
+  assert.match(query.text, /translation_id/);
+  assert.match(query.text, /decode\(\$10,'base64'\)/);
+  assert.doesNotMatch(
+    query.text,
+    /translated_text|source_text|prompt_text/,
+  );
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "envelope-tr-1",
+    "conversation-1",
+    "message-1",
+    2,
+    "translation-1",
+    "user-b",
+    "device-b1",
+    4,
+    "YWJj",
+    "2026-10-04T12:00:00.000Z",
+    "2026-10-11T12:00:00.000Z",
+  ]);
+});
