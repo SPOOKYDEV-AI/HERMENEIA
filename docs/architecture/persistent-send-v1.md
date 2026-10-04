@@ -217,7 +217,7 @@ Edit:
 - marks pending/leased translation request/execute jobs `SUPERSEDED`;
 - marks older translation executions `SUPERSEDED`;
 - marks already-started provider attempts `CANCELLED_LOGICALLY`;
-- creates fresh protected envelopes and `message.edited` events per deliverable device;
+- creates fresh protected envelopes and `message.edited` events only for active devices that were already historically targeted by an ORIGINAL envelope for this message and whose user remains an active member;
 - admits the new source to transient memory best-effort and removes the previous transient revision after commit.
 
 Delete:
@@ -227,7 +227,7 @@ Delete:
 - revokes/purges old pending envelopes;
 - supersedes old translation request/execute jobs and translation executions;
 - marks already-started provider attempts `CANCELLED_LOGICALLY`;
-- emits content-free `message.deleted` control events to active conversation devices without requiring delivery-key material;
+- emits content-free `message.deleted` control events to active devices with retained ORIGINAL-envelope exposure metadata, without requiring current conversation membership or delivery-key material;
 - is not blocked merely because a recipient currently has no active encryption-capable device.
 
 Sync state uses a globally monotonic device inbox offset but a **tenant + device** purge/replay watermark. This prevents a multi-tenant session from using another tenant's ACK state. ACK watermark advancement is restricted to the contiguous terminal envelope prefix, so an out-of-order ACK cannot skip an earlier PENDING envelope.
@@ -269,7 +269,7 @@ Verified in the local sandbox for this slice:
 - HTTP Send, command recovery, edit/delete and sync/ACK routing to persistent services;
 - tenant-isolated sync state and out-of-order ACK protection;
 - persistent mutation rollback, stale-revision rejection and command replay;
-- static SQL migration contract through migrations 0001..0009;
+- static SQL migration contract through migrations 0001..0010;
 - provider late-response fencing after concurrent edit/delete;
 - pure persistent HTTP composition including translation source recovery;
 - no durable plaintext token/column in the SQL contract.
@@ -279,7 +279,7 @@ Latest focused regression gates after mutation/provider hardening:
 - persistent messaging + repository mutation focus: **13/13 PASS**;
 - stale provider completion focus: **1/1 PASS**;
 - strict worker typecheck/build after explicit transaction result typing: **PASS**;
-- exact remote migration invariant scan 0001..0009: **PASS**;
+- exact remote migration invariant scan 0001..0010: **PASS**;
 - Python migration scripts compile: **PASS**;
 - live PostgreSQL runner: **SKIP** in the current sandbox because `psql` and the test DB URL are absent.
 
@@ -305,12 +305,15 @@ The repository now contains:
 
 The runtime fails closed when the reviewed envelope-protection dependency is absent. No test-only or plaintext envelope protection is enabled as a production fallback.
 
+`apps/api/start-persistent-server.mjs` is the executable process entrypoint. It requires a local `HERMENEIA_SECURITY_MODULE`, starts the persistent HTTP server, supports an embedded/external translation worker mode, and performs idempotent graceful shutdown.
+
 Still required before a production claim:
 
 - execute the actual external `pg` dependency against a live PostgreSQL instance;
-- apply rollback 0009→0001, migrations 0001→0009 and smoke tests through `scripts/postgres_integration.py`;
+- apply rollback 0010→0001, migrations 0001→0010 and smoke tests through `scripts/postgres_integration.py`;
 - complete the dedicated envelope cryptography review and provide that implementation;
-- execute and validate the translation outbox worker/provider/publication path with causal fencing;
-- complete the remaining device-enrollment/read-cursor/operational lifecycle surfaces required by Core V1.
+- execute the actual external `pg` package against a live PostgreSQL instance;
+- validate the full translation provider/publication path against a real provider adapter;
+- run the persistent process entrypoint under its target deployment/runtime and verify graceful SIGTERM/SIGINT shutdown.
 
 Do not silently fall back to the in-memory Core in a production profile.
