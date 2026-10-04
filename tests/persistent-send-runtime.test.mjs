@@ -219,6 +219,34 @@ test("persistent Send runtime refuses to start without reviewed envelope protect
   assert.equal(FakePool.instances.length, 0);
 });
 
+
+test("duplicate fingerprint key versions fail before opening PostgreSQL", async () => {
+  FakePool.instances.length = 0;
+
+  await assert.rejects(
+    () =>
+      createPersistentSendRuntime({
+        env: env({
+          SOURCE_FINGERPRINT_VERIFICATION_KEYS_JSON: JSON.stringify([
+            {
+              key_version: "k2",
+              key_base64: keyBase64(1),
+            },
+          ]),
+        }),
+        pgModule: { Pool: FakePool },
+        envelopeProtector: {
+          protect() {
+            return "unused";
+          },
+        },
+      }),
+    /Duplicate HMAC source fingerprint keyVersion/,
+  );
+
+  assert.equal(FakePool.instances.length, 0);
+});
+
 test("persistent Send runtime composes PostgreSQL service and persistent bearer auth", async () => {
   FakePool.instances.length = 0;
 
