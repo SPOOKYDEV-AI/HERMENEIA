@@ -415,7 +415,7 @@ test("inbox event replay is filtered by authenticated tenant and device", async 
 test("sync cursor reset is required for wrong epoch or purged history", () => {
   assert.deepEqual(
     evaluateSyncCursor(
-      { inboxEpoch: 4, lastAckedOffset: 20 },
+      { inboxEpoch: 4, nextOffset: 31, lastAckedOffset: 20 },
       { inboxEpoch: 3, afterOffset: 20 },
     ),
     {
@@ -426,7 +426,7 @@ test("sync cursor reset is required for wrong epoch or purged history", () => {
 
   assert.deepEqual(
     evaluateSyncCursor(
-      { inboxEpoch: 4, lastAckedOffset: 20 },
+      { inboxEpoch: 4, nextOffset: 31, lastAckedOffset: 20 },
       { inboxEpoch: 4, afterOffset: 19 },
     ),
     {
@@ -437,12 +437,23 @@ test("sync cursor reset is required for wrong epoch or purged history", () => {
 
   assert.deepEqual(
     evaluateSyncCursor(
-      { inboxEpoch: 4, lastAckedOffset: 20 },
+      { inboxEpoch: 4, nextOffset: 31, lastAckedOffset: 20 },
       { inboxEpoch: 4, afterOffset: 20 },
     ),
     {
       kind: "CONTINUE",
       afterOffset: 20,
+    },
+  );
+
+  assert.deepEqual(
+    evaluateSyncCursor(
+      { inboxEpoch: 4, nextOffset: 31, lastAckedOffset: 20 },
+      { inboxEpoch: 4, afterOffset: 31 },
+    ),
+    {
+      kind: "RESET_AHEAD",
+      maximumIssuedOffset: 30,
     },
   );
 });
