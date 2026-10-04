@@ -316,11 +316,39 @@ export async function createPersistentSendRuntime({
         try {
           connection = await sqlPool.connect();
           const result = await connection.query(
-            "SELECT 1 AS hermeneia_ready",
+            `SELECT
+               to_regclass('public.message_metadata') IS NOT NULL
+                 AS has_message_metadata,
+               to_regclass('public.tenant_device_sync_states') IS NOT NULL
+                 AS has_tenant_sync,
+               to_regclass('public.translation_executions') IS NOT NULL
+                 AS has_translation_executions,
+               to_regclass('public.provider_executions') IS NOT NULL
+                 AS has_provider_executions,
+               EXISTS (
+                 SELECT 1
+                   FROM information_schema.columns
+                  WHERE table_schema = 'public'
+                    AND table_name = 'command_receipts'
+                    AND column_name = 'command_fingerprint'
+               ) AS has_command_fingerprint,
+               EXISTS (
+                 SELECT 1
+                   FROM pg_constraint
+                  WHERE conname =
+                    'device_inbox_events_translation_source_required_check'
+               ) AS has_source_required_constraint`,
           );
-          return (
+
+          const row = result.rows[0];
+          return Boolean(
             result.rowCount === 1 &&
-            result.rows[0]?.hermeneia_ready === 1
+            row?.has_message_metadata &&
+            row?.has_tenant_sync &&
+            row?.has_translation_executions &&
+            row?.has_provider_executions &&
+            row?.has_command_fingerprint &&
+            row?.has_source_required_constraint
           );
         } catch {
           return false;
