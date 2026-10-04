@@ -5,6 +5,9 @@ import type {
 } from "../../domain/src/index.js";
 import { DomainError } from "../../domain/src/index.js";
 import type {
+  DeleteMessageCommand,
+  EditMessageCommand,
+  MessageRevisionResult,
   SendMessageCommand,
   SourceContent,
 } from "../../protocol/src/index.js";
@@ -100,6 +103,54 @@ export interface PersistentMessagingStore<Tx> {
     actor: ActorContext,
     conversationId: UUID,
   ): Promise<PersistentRecipientTarget[]>;
+
+  lockMessageForAuthorMutation(
+    tx: Tx,
+    actor: ActorContext,
+    messageId: UUID,
+  ): Promise<{
+    conversationId: UUID;
+    messageSeq: number;
+    currentRevision: number;
+    status: "ACTIVE" | "DELETED";
+  } | undefined>;
+
+  allocateOperationSequence(
+    tx: Tx,
+    actor: ActorContext,
+    conversationId: UUID,
+  ): Promise<number | undefined>;
+
+  updateMessageRevisionPointer(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      messageId: UUID;
+      expectedRevision: number;
+      newRevision: number;
+      status: "ACTIVE" | "DELETED";
+      deletedAt?: string | null;
+    },
+  ): Promise<void>;
+
+  revokePendingMessageEnvelopes(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      messageId: UUID;
+      throughRevision: number;
+    },
+  ): Promise<number>;
+
+  supersedeTranslationJobs(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      messageId: UUID;
+      throughRevision: number;
+      now: string;
+    },
+  ): Promise<number>;
 
   replyTargetExists(
     tx: Tx,
@@ -267,6 +318,21 @@ interface SendCommandFingerprintV1 {
   source_fingerprint: string;
   reply_to_message_id: UUID | null;
   client_authored_at: string | null;
+}
+
+interface EditCommandFingerprintV1 {
+  v: 1;
+  type: "message.edit";
+  message_id: UUID;
+  expected_revision: number;
+  source_fingerprint: string;
+}
+
+interface DeleteCommandFingerprintV1 {
+  v: 1;
+  type: "message.delete";
+  message_id: UUID;
+  expected_revision: number;
 }
 
 export class PersistentMessagingService<Tx> {
@@ -698,6 +764,538 @@ export class PersistentMessagingService<Tx> {
     }
   }
 
+  async editMessage(
+    actor: ActorContext,
+    command: EditMessageCommand,
+  ): Promise<MessageRevisionResult> {
+    if (!command.source.text) {
+      throw new DomainError(
+        "INVALID_COMMAND",
+        "Source text is required",
+      );
+    }
+    if (
+      !Number.isInteger(command.expected_revision) ||
+      command.expected_revision < 1
+    ) {
+      throw new DomainError(
+        "INVALID_COMMAND",
+        "expected_revision must be a positive integer",
+      );
+    }
+
+    const now = this.deps.clock.now();
+    const sourceFingerprint =
+      this.deps.fingerprinter.fingerprint(command.source);
+    if (
+      !sourceFingerprint ||
+      sourceFingerprint === command.source.text
+    ) {
+      throw new Error(
+        "Source fingerprinter must return an opaque fingerprint",
+      );
+    }
+
+    const commandFingerprint = JSON.stringify({
+      v: 1,
+      type: "message.edit",
+      message_id: command.message_id,
+      expected_revision: command.expected_revision,
+      source_fingerprint: sourceFingerprint,
+    } satisfies EditCommandFingerprintV1);
+
+    let preparedTransientKey: TransientSourceKey | undefined;
+    let previousTransientKey: TransientSourceKey | undefined;
+    let committed = false;
+
+    try {
+      const result = await this.deps.store.withTransaction(async (tx) => {
+        const claim = await this.deps.store.claimCommand(tx, {
+          actor,
+          commandId: command.command_id,
+          commandType: "message.edit",
+          commandFingerprint,
+          now,
+        });
+
+        if (!claim.claimed) {
+          const existing = claim.existing;
+          if (
+            existing.actorUserId !== actor.userId ||
+            existing.actorDeviceId !== actor.deviceId
+          ) {
+            throw new DomainError(
+              "NOT_AUTHORIZED",
+              "Command identifier is not available to actor",
+            );
+          }
+          if (
+            existing.commandType !== "message.edit" ||
+            !editFingerprintMatches(
+              existing.commandFingerprint,
+              command,
+              this.deps.fingerprinter,
+            )
+          ) {
+            throw new DomainError(
+              "IDEMPOTENCY_CONFLICT",
+              "command_id was already used for a different operation",
+            );
+          }
+          if (existing.status !== "SUCCEEDED") {
+            throw new Error(
+              "Persistent command receipt is not terminal",
+            );
+          }
+          return mutationResultFromResult(existing.result);
+        }
+
+        const message =
+          await this.deps.store.lockMessageForAuthorMutation(
+            tx,
+            actor,
+            command.message_id,
+          );
+        if (!message) {
+          throw new DomainError(
+            "NOT_AUTHORIZED",
+            "Message is not available for mutation",
+          );
+        }
+        if (
+          message.status !== "ACTIVE" ||
+          message.currentRevision !== command.expected_revision
+        ) {
+          throw new DomainError(
+            "REVISION_CONFLICT",
+            "Message revision is stale",
+          );
+        }
+
+        const opSeq = await this.deps.store.allocateOperationSequence(
+          tx,
+          actor,
+          message.conversationId,
+        );
+        if (!opSeq) {
+          throw new DomainError(
+            "NOT_AUTHORIZED",
+            "Conversation is not available to actor",
+          );
+        }
+
+        const targets =
+          await this.deps.store.listRecipientDeliveryTargets(
+            tx,
+            actor,
+            message.conversationId,
+          );
+        const externalRecipients = targets.filter(
+          (target) => target.userId !== actor.userId,
+        );
+        if (
+          externalRecipients.length === 0 ||
+          externalRecipients.some(
+            (target) => target.devices.length === 0,
+          )
+        ) {
+          throw new DomainError(
+            "RECIPIENT_UNAVAILABLE",
+            "At least one active recipient has no deliverable device",
+          );
+        }
+
+        const previousRevision = message.currentRevision;
+        const newRevision = previousRevision + 1;
+
+        const transientBuffered =
+          await this.bestEffortBufferSource(
+            actor.tenantId,
+            command.message_id,
+            newRevision,
+            sourceFingerprint,
+            now,
+            command.source,
+          );
+        if (transientBuffered) {
+          preparedTransientKey = {
+            tenantId: actor.tenantId,
+            messageId: command.message_id,
+            sourceRevision: newRevision,
+          };
+        }
+        previousTransientKey = {
+          tenantId: actor.tenantId,
+          messageId: command.message_id,
+          sourceRevision: previousRevision,
+        };
+
+        await this.deps.store.insertMessageRevision(tx, {
+          tenantId: actor.tenantId,
+          conversationId: message.conversationId,
+          messageId: command.message_id,
+          revision: newRevision,
+          opSeq,
+          mutationType: "EDITED",
+          actorUserId: actor.userId,
+          sourceHash: sourceFingerprint,
+          sourceLanguage: command.source.language_hint ?? null,
+          createdAt: now,
+        });
+
+        await this.deps.store.updateMessageRevisionPointer(tx, {
+          tenantId: actor.tenantId,
+          messageId: command.message_id,
+          expectedRevision: previousRevision,
+          newRevision,
+          status: "ACTIVE",
+          deletedAt: null,
+        });
+
+        await this.deps.store.revokePendingMessageEnvelopes(tx, {
+          tenantId: actor.tenantId,
+          messageId: command.message_id,
+          throughRevision: previousRevision,
+        });
+
+        await this.deps.store.supersedeTranslationJobs(tx, {
+          tenantId: actor.tenantId,
+          messageId: command.message_id,
+          throughRevision: previousRevision,
+          now,
+        });
+
+        const expiresAt = addSeconds(
+          now,
+          this.envelopeTtlSeconds,
+        );
+
+        for (const target of targets) {
+          for (const device of target.devices) {
+            const envelopeId = this.deps.ids.next("env");
+            const protectedPayload =
+              await this.deps.envelopeProtector.protect({
+                tenantId: actor.tenantId,
+                conversationId: message.conversationId,
+                messageId: command.message_id,
+                sourceRevision: newRevision,
+                recipientUserId: target.userId,
+                recipientDeviceId: device.deviceId,
+                recipientCredentialVersion:
+                  device.credentialVersion,
+                recipientPublicMaterialRef:
+                  device.publicMaterialRef,
+                source: command.source,
+              });
+            if (!protectedPayload) {
+              throw new Error(
+                "Envelope protector returned an empty payload",
+              );
+            }
+
+            await this.deps.store.insertDeliveryEnvelope(tx, {
+              tenantId: actor.tenantId,
+              envelopeId,
+              conversationId: message.conversationId,
+              messageId: command.message_id,
+              sourceRevision: newRevision,
+              recipientUserId: target.userId,
+              recipientDeviceId: device.deviceId,
+              credentialVersion: device.credentialVersion,
+              protectedPayload,
+              createdAt: now,
+              expiresAt,
+            });
+
+            const inbox =
+              await this.deps.store.allocateDeviceInboxOffset(
+                tx,
+                actor.tenantId,
+                device.deviceId,
+              );
+            await this.deps.store.insertInboxEvent(tx, {
+              deviceId: device.deviceId,
+              inboxEpoch: inbox.inboxEpoch,
+              offset: inbox.offset,
+              eventId: this.deps.ids.next("evt"),
+              eventType: "message.edited",
+              tenantId: actor.tenantId,
+              conversationId: message.conversationId,
+              messageId: command.message_id,
+              envelopeId,
+              sourceRevision: newRevision,
+              createdAt: now,
+            });
+          }
+        }
+
+        await this.deps.store.insertOutboxJob(tx, {
+          jobId: this.deps.ids.next("job"),
+          tenantId: actor.tenantId,
+          jobType: "translation.request",
+          businessKey: `${command.message_id}:${newRevision}`,
+          payloadRef: {
+            message_id: command.message_id,
+            source_revision: newRevision,
+            source_hash: sourceFingerprint,
+            source_buffer_key:
+              `${actor.tenantId}:${command.message_id}:${newRevision}`,
+          },
+          priority: 10,
+          availableAt: now,
+        });
+
+        const mutationResult: MessageRevisionResult = {
+          message_id: command.message_id,
+          revision: newRevision,
+          op_seq: opSeq,
+          status: "ACTIVE",
+        };
+
+        await this.deps.store.markCommandSucceeded(tx, {
+          tenantId: actor.tenantId,
+          commandId: command.command_id,
+          actorUserId: actor.userId,
+          actorDeviceId: actor.deviceId,
+          commandType: "message.edit",
+          commandFingerprint,
+          result: mutationResult as unknown as Record<string, unknown>,
+          now,
+        });
+
+        return mutationResult;
+      });
+
+      committed = true;
+      if (previousTransientKey) {
+        try {
+          await this.deps.transientSources?.remove(
+            previousTransientKey,
+          );
+        } catch {
+          // TTL remains the privacy fallback if post-commit cleanup fails.
+        }
+      }
+      return result;
+    } catch (error) {
+      if (preparedTransientKey && !committed) {
+        try {
+          await this.deps.transientSources?.remove(
+            preparedTransientKey,
+          );
+        } catch {
+          // Cleanup failure must not mask the transaction error.
+        }
+      }
+      throw error;
+    }
+  }
+
+  async deleteMessage(
+    actor: ActorContext,
+    command: DeleteMessageCommand,
+  ): Promise<MessageRevisionResult> {
+    if (
+      !Number.isInteger(command.expected_revision) ||
+      command.expected_revision < 1
+    ) {
+      throw new DomainError(
+        "INVALID_COMMAND",
+        "expected_revision must be a positive integer",
+      );
+    }
+
+    const now = this.deps.clock.now();
+    const commandFingerprint = JSON.stringify({
+      v: 1,
+      type: "message.delete",
+      message_id: command.message_id,
+      expected_revision: command.expected_revision,
+    } satisfies DeleteCommandFingerprintV1);
+
+    let previousTransientKey: TransientSourceKey | undefined;
+
+    const result = await this.deps.store.withTransaction(async (tx) => {
+      const claim = await this.deps.store.claimCommand(tx, {
+        actor,
+        commandId: command.command_id,
+        commandType: "message.delete",
+        commandFingerprint,
+        now,
+      });
+
+      if (!claim.claimed) {
+        const existing = claim.existing;
+        if (
+          existing.actorUserId !== actor.userId ||
+          existing.actorDeviceId !== actor.deviceId
+        ) {
+          throw new DomainError(
+            "NOT_AUTHORIZED",
+            "Command identifier is not available to actor",
+          );
+        }
+        if (
+          existing.commandType !== "message.delete" ||
+          !deleteFingerprintMatches(
+            existing.commandFingerprint,
+            command,
+          )
+        ) {
+          throw new DomainError(
+            "IDEMPOTENCY_CONFLICT",
+            "command_id was already used for a different operation",
+          );
+        }
+        if (existing.status !== "SUCCEEDED") {
+          throw new Error(
+            "Persistent command receipt is not terminal",
+          );
+        }
+        return mutationResultFromResult(existing.result);
+      }
+
+      const message =
+        await this.deps.store.lockMessageForAuthorMutation(
+          tx,
+          actor,
+          command.message_id,
+        );
+      if (!message) {
+        throw new DomainError(
+          "NOT_AUTHORIZED",
+          "Message is not available for mutation",
+        );
+      }
+      if (
+        message.status !== "ACTIVE" ||
+        message.currentRevision !== command.expected_revision
+      ) {
+        throw new DomainError(
+          "REVISION_CONFLICT",
+          "Message revision is stale",
+        );
+      }
+
+      const opSeq = await this.deps.store.allocateOperationSequence(
+        tx,
+        actor,
+        message.conversationId,
+      );
+      if (!opSeq) {
+        throw new DomainError(
+          "NOT_AUTHORIZED",
+          "Conversation is not available to actor",
+        );
+      }
+
+      const previousRevision = message.currentRevision;
+      const newRevision = previousRevision + 1;
+      previousTransientKey = {
+        tenantId: actor.tenantId,
+        messageId: command.message_id,
+        sourceRevision: previousRevision,
+      };
+
+      await this.deps.store.insertMessageRevision(tx, {
+        tenantId: actor.tenantId,
+        conversationId: message.conversationId,
+        messageId: command.message_id,
+        revision: newRevision,
+        opSeq,
+        mutationType: "DELETED",
+        actorUserId: actor.userId,
+        sourceHash: null,
+        sourceLanguage: null,
+        createdAt: now,
+      });
+
+      await this.deps.store.updateMessageRevisionPointer(tx, {
+        tenantId: actor.tenantId,
+        messageId: command.message_id,
+        expectedRevision: previousRevision,
+        newRevision,
+        status: "DELETED",
+        deletedAt: now,
+      });
+
+      await this.deps.store.revokePendingMessageEnvelopes(tx, {
+        tenantId: actor.tenantId,
+        messageId: command.message_id,
+        throughRevision: previousRevision,
+      });
+
+      await this.deps.store.supersedeTranslationJobs(tx, {
+        tenantId: actor.tenantId,
+        messageId: command.message_id,
+        throughRevision: previousRevision,
+        now,
+      });
+
+      const targets =
+        await this.deps.store.listRecipientDeliveryTargets(
+          tx,
+          actor,
+          message.conversationId,
+        );
+
+      for (const target of targets) {
+        for (const device of target.devices) {
+          const inbox =
+            await this.deps.store.allocateDeviceInboxOffset(
+              tx,
+              actor.tenantId,
+              device.deviceId,
+            );
+          await this.deps.store.insertInboxEvent(tx, {
+            deviceId: device.deviceId,
+            inboxEpoch: inbox.inboxEpoch,
+            offset: inbox.offset,
+            eventId: this.deps.ids.next("evt"),
+            eventType: "message.deleted",
+            tenantId: actor.tenantId,
+            conversationId: message.conversationId,
+            messageId: command.message_id,
+            envelopeId: null,
+            sourceRevision: newRevision,
+            createdAt: now,
+          });
+        }
+      }
+
+      const mutationResult: MessageRevisionResult = {
+        message_id: command.message_id,
+        revision: newRevision,
+        op_seq: opSeq,
+        status: "DELETED",
+      };
+
+      await this.deps.store.markCommandSucceeded(tx, {
+        tenantId: actor.tenantId,
+        commandId: command.command_id,
+        actorUserId: actor.userId,
+        actorDeviceId: actor.deviceId,
+        commandType: "message.delete",
+        commandFingerprint,
+        result: mutationResult as unknown as Record<string, unknown>,
+        now,
+      });
+
+      return mutationResult;
+    });
+
+    if (previousTransientKey) {
+      try {
+        await this.deps.transientSources?.remove(
+          previousTransientKey,
+        );
+      } catch {
+        // TTL remains the privacy fallback if post-commit cleanup fails.
+      }
+    }
+    return result;
+  }
+
   private async bestEffortBufferSource(
     tenantId: UUID,
     messageId: UUID,
@@ -794,6 +1392,97 @@ function commandFingerprintMatches(
       parsed.source_fingerprint,
     )
   );
+}
+
+function parseEditCommandFingerprint(
+  value: string | null,
+): EditCommandFingerprintV1 | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    if (
+      parsed.v !== 1 ||
+      parsed.type !== "message.edit" ||
+      typeof parsed.message_id !== "string" ||
+      typeof parsed.expected_revision !== "number" ||
+      typeof parsed.source_fingerprint !== "string"
+    ) {
+      return undefined;
+    }
+    return parsed as unknown as EditCommandFingerprintV1;
+  } catch {
+    return undefined;
+  }
+}
+
+function editFingerprintMatches(
+  stored: string | null,
+  command: EditMessageCommand,
+  fingerprinter: PersistentSourceFingerprinter,
+): boolean {
+  const parsed = parseEditCommandFingerprint(stored);
+  return Boolean(
+    parsed &&
+    parsed.message_id === command.message_id &&
+    parsed.expected_revision === command.expected_revision &&
+    fingerprinter.matches(
+      command.source,
+      parsed.source_fingerprint,
+    ),
+  );
+}
+
+function parseDeleteCommandFingerprint(
+  value: string | null,
+): DeleteCommandFingerprintV1 | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    if (
+      parsed.v !== 1 ||
+      parsed.type !== "message.delete" ||
+      typeof parsed.message_id !== "string" ||
+      typeof parsed.expected_revision !== "number"
+    ) {
+      return undefined;
+    }
+    return parsed as unknown as DeleteCommandFingerprintV1;
+  } catch {
+    return undefined;
+  }
+}
+
+function deleteFingerprintMatches(
+  stored: string | null,
+  command: DeleteMessageCommand,
+): boolean {
+  const parsed = parseDeleteCommandFingerprint(stored);
+  return Boolean(
+    parsed &&
+    parsed.message_id === command.message_id &&
+    parsed.expected_revision === command.expected_revision,
+  );
+}
+
+function mutationResultFromResult(
+  result: Record<string, unknown>,
+): MessageRevisionResult {
+  if (
+    typeof result.message_id !== "string" ||
+    typeof result.revision !== "number" ||
+    typeof result.op_seq !== "number" ||
+    (result.status !== "ACTIVE" && result.status !== "DELETED")
+  ) {
+    throw new Error(
+      "Invariant violation: invalid persistent mutation command result",
+    );
+  }
+  return {
+    message_id: result.message_id,
+    revision: result.revision,
+    op_seq: result.op_seq,
+    status: result.status,
+  };
 }
 
 function acceptedFromResult(
