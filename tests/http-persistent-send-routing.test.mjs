@@ -119,3 +119,54 @@ test("HTTP server rejects an invalid explicit send service", () => {
     /sendService\.sendMessage is required/,
   );
 });
+
+
+test("HTTP command status is routed to the injected persistent command service", async (t) => {
+  const calls = [];
+  const core = {
+    sendMessage() { throw new Error("unused"); },
+    getCommandStatus() {
+      throw new Error("persistent command recovery must bypass in-memory core");
+    },
+    getDeviceSyncPosition() { return { inboxEpoch: 1, nextOffset: 1 }; },
+    syncDevice() { return []; },
+    acknowledgeEnvelope() {},
+    editMessage() { throw new Error("unused"); },
+    deleteMessage() { throw new Error("unused"); },
+    getEnvelopeForDevice() { return undefined; },
+  };
+
+  const commandService = {
+    async getCommandStatus(receivedActor, commandId) {
+      calls.push({ actor: receivedActor, commandId });
+      return {
+        command_id: commandId,
+        status: "SUCCEEDED",
+        result: { message_id: "message-1", status: "ACCEPTED" },
+      };
+    },
+  };
+
+  const server = createHermeneiaHttpServer({
+    core,
+    commandService,
+    authenticate() {
+      return actor;
+    },
+  });
+  t.after(() => server.close());
+
+  const base = await listen(server);
+  const response = await fetch(`${base}/v1/commands/command-1`);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    command_id: "command-1",
+    status: "SUCCEEDED",
+    result: { message_id: "message-1", status: "ACCEPTED" },
+  });
+  assert.deepEqual(calls, [{
+    actor,
+    commandId: "command-1",
+  }]);
+});
