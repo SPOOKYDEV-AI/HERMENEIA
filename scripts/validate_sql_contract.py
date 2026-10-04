@@ -168,6 +168,10 @@ def main() -> int:
         "last_acked_offset bigint NOT NULL DEFAULT 0",
         "FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id)",
         "FOREIGN KEY (device_id) REFERENCES devices(device_id)",
+        "first_blocking_offset",
+        "de.status = 'PENDING'",
+        "first_blocking_offset - 1",
+        "next_offset - 1",
     ]
     for snippet in tenant_sync_required:
         if snippet not in tenant_sync_sql:
