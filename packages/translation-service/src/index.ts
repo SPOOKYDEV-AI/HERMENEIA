@@ -50,6 +50,7 @@ export interface TranslationFanoutTarget {
 export interface TranslationFanoutPlan {
   conversationId: UUID;
   sourceLanguageTag: string | null;
+  sourceHash: string;
   targets: TranslationFanoutTarget[];
 }
 
