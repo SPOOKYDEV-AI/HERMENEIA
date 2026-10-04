@@ -24,6 +24,12 @@ export interface ContextSnapshotStore<Tx> {
     tenantId: UUID,
     snapshot: ContextSnapshot,
   ): Promise<boolean>;
+
+  getContextSnapshot(
+    tx: Tx,
+    tenantId: UUID,
+    snapshotId: UUID,
+  ): Promise<ContextSnapshot | undefined>;
 }
 
 export interface ContextPayloadRecord {
@@ -64,6 +70,24 @@ export interface ContextPreparationResult
   effectiveStrategy: ContextStrategy;
   degradedReason: ContextDegradedReason | null;
 }
+
+export type ContextResolutionResult =
+  | {
+      status: "READY";
+      snapshot: ContextSnapshot;
+      selected: SelectedContextItem[];
+    }
+  | {
+      status: "MISSING_SNAPSHOT";
+    }
+  | {
+      status: "PAYLOAD_UNAVAILABLE";
+      snapshot: ContextSnapshot;
+    }
+  | {
+      status: "PAYLOAD_INTEGRITY_MISMATCH";
+      snapshot: ContextSnapshot;
+    };
 
 export interface ContextPreparationDependencies<Tx> {
   engine: ContextEngine;
@@ -184,6 +208,77 @@ export class ContextPreparationService<Tx> {
       requestedStrategy,
       effectiveStrategy: built.snapshot.strategy,
       degradedReason,
+    };
+  }
+
+  async resolveForProvider(input: {
+    tenantId: UUID;
+    snapshotId: UUID;
+  }): Promise<ContextResolutionResult> {
+    const snapshot =
+      await this.deps.store.withTransaction((tx) =>
+        this.deps.store.getContextSnapshot(
+          tx,
+          input.tenantId,
+          input.snapshotId,
+        ),
+      );
+
+    if (!snapshot) {
+      return {
+        status: "MISSING_SNAPSHOT",
+      };
+    }
+
+    if (snapshot.selectedCandidateIds.length === 0) {
+      return {
+        status: "READY",
+        snapshot,
+        selected: [],
+      };
+    }
+
+    let payload: ContextPayloadRecord | undefined;
+    try {
+      payload = await this.deps.payloads.get(input);
+    } catch {
+      payload = undefined;
+    }
+
+    if (!payload) {
+      return {
+        status: "PAYLOAD_UNAVAILABLE",
+        snapshot,
+      };
+    }
+
+    const payloadIds = payload.selected.map(
+      (item) => item.candidateId,
+    );
+    const payloadTokens = payload.selected.reduce(
+      (sum, item) => sum + item.tokenEstimate,
+      0,
+    );
+
+    if (
+      !sameOrderedStrings(
+        payloadIds,
+        snapshot.selectedCandidateIds,
+      ) ||
+      payloadTokens !== snapshot.tokenEstimate
+    ) {
+      return {
+        status: "PAYLOAD_INTEGRITY_MISMATCH",
+        snapshot,
+      };
+    }
+
+    return {
+      status: "READY",
+      snapshot,
+      selected: payload.selected.map((item) => ({
+        ...item,
+      })),
     };
   }
 
@@ -370,4 +465,17 @@ function addSeconds(
   return new Date(
     millis + seconds * 1_000,
   ).toISOString();
+}
+
+
+function sameOrderedStrings(
+  left: string[],
+  right: string[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (value, index) => value === right[index],
+    )
+  );
 }
