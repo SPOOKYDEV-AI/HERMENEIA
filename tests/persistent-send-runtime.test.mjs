@@ -38,6 +38,13 @@ class FakeClient {
   async query(text, params = []) {
     this.owner.queries.push({ text, params: [...params] });
 
+    if (text === "SELECT 1 AS hermeneia_ready") {
+      return {
+        rows: [{ hermeneia_ready: 1 }],
+        rowCount: 1,
+      };
+    }
+
     if (/SELECT s\.tenant_id/.test(text)) {
       return {
         rows: [{
@@ -267,6 +274,7 @@ test("persistent Send runtime composes PostgreSQL service and persistent bearer 
     },
   });
 
+  assert.equal(await runtime.readinessService.check(), true);
   assert.equal(typeof runtime.sendService.sendMessage, "function");
   assert.equal(typeof runtime.commandService.getCommandStatus, "function");
   assert.equal(typeof runtime.mutationService.editMessage, "function");
@@ -309,4 +317,27 @@ test("persistent Send runtime composes PostgreSQL service and persistent bearer 
 
   await runtime.close();
   assert.equal(raw.ended, true);
+});
+
+
+test("persistent readiness returns false when PostgreSQL connect fails", async () => {
+  class FailingPool {
+    async connect() {
+      throw new Error("database unavailable");
+    }
+    async end() {}
+  }
+
+  const runtime = await createPersistentSendRuntime({
+    env: env(),
+    pgModule: { Pool: FailingPool },
+    envelopeProtector: {
+      protect() {
+        return "unused";
+      },
+    },
+  });
+
+  assert.equal(await runtime.readinessService.check(), false);
+  await runtime.close();
 });
