@@ -116,10 +116,10 @@ export interface PersistentMessagingStore<Tx> {
     conversationId: UUID,
   ): Promise<PersistentRecipientTarget[]>;
 
-  listConversationEventDevices(
+  listMessageDeletionEventDevices(
     tx: Tx,
     actor: ActorContext,
-    conversationId: UUID,
+    messageId: UUID,
   ): Promise<PersistentConversationEventDevice[]>;
 
   lockMessageForAuthorMutation(
@@ -1304,10 +1304,10 @@ export class PersistentMessagingService<Tx> {
       });
 
       const eventDevices =
-        await this.deps.store.listConversationEventDevices(
+        await this.deps.store.listMessageDeletionEventDevices(
           tx,
           actor,
-          message.conversationId,
+          command.message_id,
         );
 
       for (const device of eventDevices) {
