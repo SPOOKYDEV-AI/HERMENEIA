@@ -312,7 +312,6 @@ Still required before a production claim:
 - execute the actual external `pg` dependency against a live PostgreSQL instance;
 - apply rollback 0010→0001, migrations 0001→0010 and smoke tests through `scripts/postgres_integration.py`;
 - complete the dedicated envelope cryptography review and provide that implementation;
-- execute the actual external `pg` package against a live PostgreSQL instance;
 - validate the full translation provider/publication path against a real provider adapter;
 - run the persistent process entrypoint under its target deployment/runtime and verify graceful SIGTERM/SIGINT shutdown.
 
