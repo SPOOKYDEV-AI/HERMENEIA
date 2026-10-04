@@ -2,6 +2,10 @@ import { createHermeneiaHttpServer } from "./server.mjs";
 import {
   createPersistentSendRuntime,
 } from "./persistent-send-runtime.mjs";
+import {
+  createTranslationWorkerRunner,
+  translationWorkerRunnerConfigFromEnv,
+} from "./translation-worker-runner.mjs";
 
 function closeHttpServer(server) {
   if (!server.listening) {
@@ -21,6 +25,15 @@ function closeHttpServer(server) {
 
 export async function createPersistentHermeneiaHttpRuntime(options = {}) {
   const runtime = await createPersistentSendRuntime(options);
+  const workerConfig = translationWorkerRunnerConfigFromEnv(
+    options.env ?? process.env,
+  );
+  const translationWorkerRunner = runtime.translationWorker
+    ? createTranslationWorkerRunner({
+        worker: runtime.translationWorker,
+        config: workerConfig,
+      })
+    : null;
 
   try {
     const server = createHermeneiaHttpServer({
@@ -34,11 +47,19 @@ export async function createPersistentHermeneiaHttpRuntime(options = {}) {
       readinessService: runtime.readinessService,
     });
 
+    if (
+      translationWorkerRunner &&
+      workerConfig.mode === "embedded"
+    ) {
+      translationWorkerRunner.start();
+    }
+
     let closed = false;
 
     return {
       server,
       runtime,
+      translationWorkerRunner,
       async close() {
         if (closed) return;
         closed = true;
@@ -48,6 +69,14 @@ export async function createPersistentHermeneiaHttpRuntime(options = {}) {
           await closeHttpServer(server);
         } catch (error) {
           serverError = error;
+        }
+
+        try {
+          await translationWorkerRunner?.stop();
+        } catch (workerError) {
+          if (!serverError) {
+            serverError = workerError;
+          }
         }
 
         try {
@@ -64,6 +93,7 @@ export async function createPersistentHermeneiaHttpRuntime(options = {}) {
       },
     };
   } catch (error) {
+    await translationWorkerRunner?.stop();
     await runtime.close();
     throw error;
   }
