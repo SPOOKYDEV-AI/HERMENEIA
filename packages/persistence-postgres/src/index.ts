@@ -590,10 +590,38 @@ export class PostgresMessagingRepository {
               lease_until = NULL,
               fencing_token = fencing_token + 1
         WHERE tenant_id = $1
-          AND job_type = 'translation.request'
+          AND job_type IN ('translation.request','translation.execute')
           AND payload_ref->>'message_id' = $2
           AND (payload_ref->>'source_revision')::integer <= $3
           AND status IN ('AVAILABLE','LEASED')`,
+      [
+        input.tenantId,
+        input.messageId,
+        input.throughRevision,
+        input.now,
+      ],
+    );
+    return result.rowCount;
+  }
+
+  async supersedeTranslationExecutions(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      messageId: UUID;
+      throughRevision: number;
+      now: string;
+    },
+  ): Promise<number> {
+    const result = await tx.query(
+      `UPDATE translation_executions
+          SET status = 'SUPERSEDED',
+              next_attempt_at = NULL,
+              superseded_at = $4
+        WHERE tenant_id = $1
+          AND source_message_id = $2
+          AND source_revision <= $3
+          AND status IN ('PENDING','SOURCE_REQUIRED')`,
       [
         input.tenantId,
         input.messageId,
