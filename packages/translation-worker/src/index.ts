@@ -435,6 +435,48 @@ export class TranslationWorkerService<Tx> {
       );
     }
 
+    const preflight = await this.deps.store.withTransaction(
+      async (tx) => {
+        const current =
+          await this.deps.store.lockCurrentTranslationForPublish(
+            tx,
+            execution.tenantId,
+            execution.translationId,
+          );
+        if (!current) {
+          return { current: false, hasDevices: false };
+        }
+
+        const devices =
+          await this.deps.store.listRecipientDevicesForPublish(
+            tx,
+            {
+              tenantId: execution.tenantId,
+              recipientUserId: execution.recipientUserId,
+            },
+          );
+
+        return {
+          current: true,
+          hasDevices: devices.length > 0,
+        };
+      },
+    );
+
+    if (!preflight.current) {
+      return this.supersedeAndComplete(
+        lease,
+        execution,
+      );
+    }
+
+    if (!preflight.hasDevices) {
+      return this.scheduleExecutionRetry(
+        lease,
+        execution,
+      );
+    }
+
     const attempt =
       await this.deps.executions.startProviderAttempt({
         tenantId: execution.tenantId,
@@ -690,6 +732,36 @@ export class TranslationWorkerService<Tx> {
 
       return "EXECUTION_DONE";
     });
+  }
+
+  private async supersedeAndComplete(
+    lease: OutboxJobLease,
+    execution: TranslationExecutionRecord,
+  ): Promise<TranslationWorkerResult> {
+    try {
+      return await this.deps.store.withTransaction(async (tx) => {
+        const now = this.deps.clock.now();
+        await this.deps.store.markSuperseded(tx, {
+          tenantId: execution.tenantId,
+          translationId: execution.translationId,
+          supersededAt: now,
+        });
+
+        const completed = await this.deps.store.completeJob(tx, {
+          tenantId: lease.tenantId,
+          jobId: lease.jobId,
+          fencingToken: lease.fencingToken,
+          now,
+        });
+        if (!completed) throw new StaleLeaseError();
+
+        return "SUPERSEDED";
+      });
+    } catch (error) {
+      return error instanceof StaleLeaseError
+        ? "STALE_LEASE"
+        : "FAILED";
+    }
   }
 
   private async markSourceRequiredAndComplete(
