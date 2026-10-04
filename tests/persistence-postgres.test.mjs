@@ -812,7 +812,12 @@ test("message mutation lock is author device and tenant scoped", async () => {
 test("mutation allocates only conversation op_seq under active actor membership", async () => {
   const connection = new ScriptedConnection([
     {
-      rows: [{ op_seq: 12 }],
+      rows: [{
+        op_seq: 12,
+        membership_epoch: 5,
+        erasure_epoch: 6,
+        policy_version: 7,
+      }],
       rowCount: 1,
     },
   ]);
@@ -828,9 +833,17 @@ test("mutation allocates only conversation op_seq under active actor membership"
     ),
   );
 
-  assert.equal(opSeq, 12);
+  assert.deepEqual(opSeq, {
+    opSeq: 12,
+    membershipEpoch: 5,
+    erasureEpoch: 6,
+    policyVersion: 7,
+  });
   const query = connection.queries[1];
   assert.match(query.text, /next_op_seq = c\.next_op_seq \+ 1/);
+  assert.match(query.text, /c\.membership_epoch/);
+  assert.match(query.text, /c\.erasure_epoch/);
+  assert.match(query.text, /c\.policy_version/);
   assert.doesNotMatch(query.text, /next_message_seq/);
   assert.match(query.text, /actor_device\.status = 'ACTIVE'/);
   assert.deepEqual(query.params, [
