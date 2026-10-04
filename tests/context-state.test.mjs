@@ -75,6 +75,11 @@ test("out-of-order completion never advances the causal prefix through a gap", (
     completedTailRefs(state).map((item) => item.opSeq),
     [12],
   );
+  assert.deepEqual(
+    state.entityHandles,
+    [],
+    "future op12 patch must stay invisible while op11 is unresolved",
+  );
 
   state = applyContextDerivation(
     state,
