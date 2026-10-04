@@ -291,8 +291,8 @@ class TransactionalFakeStore {
     return 0;
   }
 
-  async listConversationEventDevices() {
-    this.maybeFail("listConversationEventDevices");
+  async listMessageDeletionEventDevices() {
+    this.maybeFail("listMessageDeletionEventDevices");
     if (this.eventDevices) {
       return clone(this.eventDevices);
     }
@@ -1226,7 +1226,7 @@ test("delete is allowed even when an external recipient currently has no device"
 });
 
 
-test("persistent delete reaches active event devices even when encrypted delivery is unavailable", async () => {
+test("persistent delete reaches historical recipient devices even after current delivery membership disappears", async () => {
   const store = new TransactionalFakeStore();
   const { service } = createService(store);
   const accepted = await service.sendMessage(actor, sendCommand());
@@ -1235,9 +1235,11 @@ test("persistent delete reaches active event devices even when encrypted deliver
     { userId: "user-a", devices: [] },
     { userId: "user-b", devices: [] },
   ];
+  // Historical delivery recipients are retained independently from current
+  // conversation delivery targets/membership.
   store.eventDevices = [
     { userId: "user-a", deviceId: "device-a2" },
-    { userId: "user-b", deviceId: "device-b-no-key" },
+    { userId: "user-b", deviceId: "device-b-historical" },
   ];
 
   const deleted = await service.deleteMessage(actor, {
@@ -1253,6 +1255,6 @@ test("persistent delete reaches active event devices even when encrypted deliver
   );
   assert.deepEqual(
     deleteEvents.map((row) => row.deviceId).sort(),
-    ["device-a2", "device-b-no-key"],
+    ["device-a2", "device-b-historical"],
   );
 });
