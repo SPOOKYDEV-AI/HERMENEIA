@@ -6,6 +6,7 @@ import path from "node:path";
 
 import {
   loadSecurityRuntimeModule,
+  loadTranslationProviderModule,
   persistentServerProcessConfigFromEnv,
   startPersistentServerProcess,
 } from "../apps/api/start-persistent-server.mjs";
@@ -89,11 +90,13 @@ test("persistent process env parser keeps production PORT strict", () => {
       HOST: "127.0.0.1",
       PORT: "4010",
       HERMENEIA_SECURITY_MODULE: "./security.mjs",
+      HERMENEIA_TRANSLATION_PROVIDER_MODULE: "./provider.mjs",
     }),
     {
       host: "127.0.0.1",
       port: 4010,
       securityModulePath: "./security.mjs",
+      translationProviderModulePath: "./provider.mjs",
     },
   );
 
@@ -136,8 +139,8 @@ test("security module loader accepts only a local module exporting reviewed enve
   );
 });
 
-test("security module requires translation provider and protector as one reviewed pair", async (t) => {
-  const dir = await mkdtemp(path.join(tmpdir(), "hermeneia-security-pair-"));
+test("security override cannot smuggle a translation provider into the crypto boundary", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "hermeneia-security-provider-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
 
   await writeFile(
@@ -160,7 +163,42 @@ test("security module requires translation provider and protector as one reviewe
         modulePath: "./bad-security.mjs",
         cwd: dir,
       }),
-    /must be exported together/,
+    /HERMENEIA_TRANSLATION_PROVIDER_MODULE/,
+  );
+});
+
+test("translation provider loader accepts only a local validated provider module", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "hermeneia-provider-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  await writeFile(
+    path.join(dir, "provider.mjs"),
+    `export const translationProvider = {
+      providerId: "provider-a",
+      modelId: "model-a",
+      providerRegion: "eu-west",
+      async translate() { return { ok: true, text: "hola" }; }
+    };
+    `,
+    "utf8",
+  );
+
+  const provider = await loadTranslationProviderModule({
+    modulePath: "./provider.mjs",
+    cwd: dir,
+  });
+
+  assert.equal(provider.providerId, "provider-a");
+  assert.equal(provider.modelId, "model-a");
+  assert.equal(typeof provider.translate, "function");
+
+  await assert.rejects(
+    () =>
+      loadTranslationProviderModule({
+        modulePath: "https://example.com/provider.mjs",
+        cwd: dir,
+      }),
+    /local filesystem path/,
   );
 });
 
@@ -208,4 +246,26 @@ test("persistent process starts real HTTP listener and shuts down pool cleanly",
 
   await processRuntime.close();
   assert.equal(rawPool.ended, true);
+});
+
+
+test("persistent process starts with built-in HPKE when no security module is configured", async (t) => {
+  FakePool.instances.length = 0;
+
+  const processRuntime = await startPersistentServerProcess({
+    env: runtimeEnv({
+      HERMENEIA_SECURITY_MODULE: undefined,
+      HERMENEIA_TRANSLATION_PROVIDER_MODULE: undefined,
+    }),
+    pgModule: { Pool: FakePool },
+    host: "127.0.0.1",
+    port: 0,
+  });
+  t.after(() => processRuntime.close());
+
+  assert.equal(processRuntime.server.listening, true);
+  assert.equal(processRuntime.runtime.translationWorker, null);
+
+  await processRuntime.close();
+  assert.equal(FakePool.instances[0].ended, true);
 });
