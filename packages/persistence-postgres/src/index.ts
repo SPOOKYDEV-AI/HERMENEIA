@@ -1493,6 +1493,31 @@ export class PostgresMessagingRepository {
       : undefined;
   }
 
+  async expirePendingDeviceEnvelopes(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      deviceId: UUID;
+      now: string;
+    },
+  ): Promise<number> {
+    const result = await tx.query(
+      `UPDATE delivery_envelopes
+          SET status = 'EXPIRED',
+              protected_payload = decode('', 'hex')
+        WHERE tenant_id = $1
+          AND recipient_device_id = $2
+          AND status = 'PENDING'
+          AND expires_at <= $3`,
+      [
+        input.tenantId,
+        input.deviceId,
+        input.now,
+      ],
+    );
+    return result.rowCount;
+  }
+
   async listInboxEvents(
     tx: SqlExecutor,
     input: {
@@ -1616,10 +1641,12 @@ export class PostgresMessagingRepository {
       status: "PENDING" | "ACKED" | "EXPIRED" | "REVOKED";
       inbox_epoch: number;
       offset_value: number;
+      expires_at: string;
     }>(
       `SELECT de.status,
               die.inbox_epoch,
-              die.offset_value
+              die.offset_value,
+              de.expires_at::text AS expires_at
          FROM delivery_envelopes de
          JOIN device_inbox_events die
            ON die.tenant_id = de.tenant_id
@@ -1636,6 +1663,20 @@ export class PostgresMessagingRepository {
     if (row.status === "ACKED") return "ALREADY_ACKED";
     if (row.status === "EXPIRED") return "EXPIRED";
     if (row.status === "REVOKED") return "REVOKED";
+
+    if (Date.parse(row.expires_at) <= Date.parse(input.ackedAt)) {
+      await tx.query(
+        `UPDATE delivery_envelopes
+            SET status = 'EXPIRED',
+                protected_payload = decode('', 'hex')
+          WHERE tenant_id = $1
+            AND envelope_id = $2
+            AND recipient_device_id = $3
+            AND status = 'PENDING'`,
+        [input.tenantId, input.envelopeId, input.deviceId],
+      );
+      return "EXPIRED";
+    }
 
     await tx.query(
       `UPDATE delivery_envelopes
