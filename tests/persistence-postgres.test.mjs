@@ -995,7 +995,7 @@ test("content-free conversation events include active devices without public del
   );
 
   const devices = await repository.withTransaction((tx) =>
-    repository.listConversationEventDevices(
+    repository.listMessageDeletionEventDevices(
       tx,
       actor(),
       "conversation-1",
