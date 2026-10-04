@@ -64,6 +64,7 @@ export interface ConversationContextState {
   tenantId: UUID;
   conversationId: UUID;
   stateVersion: number;
+  causalFloorOpSeq: number;
   processedPrefixOpSeq: number;
   pendingOperations: ContextOperationRef[];
   membershipEpoch: number;
@@ -71,6 +72,7 @@ export interface ConversationContextState {
   policyVersion: number;
   strategyVersion: string;
   stateSchemaVersion: 1;
+  recoveryMode: "FULL" | "DEGRADED_BASELINE";
   status: "ACTIVE" | "DEGRADED";
   activeEpisode?: ActiveEpisodeState;
   terminologyClaimRefs: UUID[];
@@ -128,14 +130,26 @@ export class ContextStateConflictError extends Error {
 export function createInitialContextState(input: {
   tenantId: UUID;
   conversationId: UUID;
+  causalFloorOpSeq?: number;
   processedPrefixOpSeq?: number;
+  recoveryMode?: "FULL" | "DEGRADED_BASELINE";
   membershipEpoch: number;
   erasureEpoch: number;
   policyVersion: number;
   strategyVersion: string;
   now: string;
 }): ConversationContextState {
-  requireSafeInteger(input.processedPrefixOpSeq ?? 0, "processedPrefixOpSeq", 0);
+  const causalFloorOpSeq = input.causalFloorOpSeq ?? 0;
+  const processedPrefixOpSeq =
+    input.processedPrefixOpSeq ?? causalFloorOpSeq;
+  requireSafeInteger(causalFloorOpSeq, "causalFloorOpSeq", 0);
+  requireSafeInteger(processedPrefixOpSeq, "processedPrefixOpSeq", 0);
+  if (processedPrefixOpSeq < causalFloorOpSeq) {
+    throw new ContextStateConflictError(
+      "INVALID_STATE",
+      "processedPrefixOpSeq cannot be behind causalFloorOpSeq",
+    );
+  }
   requireSafeInteger(input.membershipEpoch, "membershipEpoch", 1);
   requireSafeInteger(input.erasureEpoch, "erasureEpoch", 1);
   requireSafeInteger(input.policyVersion, "policyVersion", 1);
@@ -148,14 +162,19 @@ export function createInitialContextState(input: {
     tenantId: input.tenantId,
     conversationId: input.conversationId,
     stateVersion: 1,
-    processedPrefixOpSeq: input.processedPrefixOpSeq ?? 0,
+    causalFloorOpSeq,
+    processedPrefixOpSeq,
     pendingOperations: [],
     membershipEpoch: input.membershipEpoch,
     erasureEpoch: input.erasureEpoch,
     policyVersion: input.policyVersion,
     strategyVersion: input.strategyVersion,
     stateSchemaVersion: 1,
-    status: "ACTIVE",
+    recoveryMode: input.recoveryMode ?? "FULL",
+    status:
+      (input.recoveryMode ?? "FULL") === "FULL"
+        ? "ACTIVE"
+        : "DEGRADED",
     terminologyClaimRefs: [],
     lexicalClaimRefs: [],
     correctionClaimRefs: [],
@@ -165,6 +184,23 @@ export function createInitialContextState(input: {
     pragmaticState: {},
     updatedAt: input.now,
   };
+}
+
+export function createDegradedContextStateFromFloor(input: {
+  tenantId: UUID;
+  conversationId: UUID;
+  causalFloorOpSeq: number;
+  membershipEpoch: number;
+  erasureEpoch: number;
+  policyVersion: number;
+  strategyVersion: string;
+  now: string;
+}): ConversationContextState {
+  return createInitialContextState({
+    ...input,
+    processedPrefixOpSeq: input.causalFloorOpSeq,
+    recoveryMode: "DEGRADED_BASELINE",
+  });
 }
 
 export function registerContextOperation(
@@ -280,11 +316,13 @@ export function applyContextDerivation(
   }
 
   advanceContiguousPrefix(next);
-  next.status = next.pendingOperations.some(
-    (operation) => operation.status === "SOURCE_REQUIRED",
-  )
-    ? "DEGRADED"
-    : "ACTIVE";
+  next.status =
+    next.recoveryMode === "DEGRADED_BASELINE" ||
+    next.pendingOperations.some(
+      (operation) => operation.status === "SOURCE_REQUIRED",
+    )
+      ? "DEGRADED"
+      : "ACTIVE";
   next.stateVersion += 1;
   next.updatedAt = result.completedAt;
   validateState(next);
@@ -586,10 +624,30 @@ function validateState(state: ConversationContextState): void {
   requireOpaqueIdentifier(state.conversationId, "conversationId");
   requireSafeInteger(state.stateVersion, "stateVersion", 1);
   requireSafeInteger(
+    state.causalFloorOpSeq,
+    "causalFloorOpSeq",
+    0,
+  );
+  requireSafeInteger(
     state.processedPrefixOpSeq,
     "processedPrefixOpSeq",
     0,
   );
+  if (state.processedPrefixOpSeq < state.causalFloorOpSeq) {
+    throw new ContextStateConflictError(
+      "INVALID_STATE",
+      "processed prefix cannot be behind causal floor",
+    );
+  }
+  if (
+    state.recoveryMode !== "FULL" &&
+    state.recoveryMode !== "DEGRADED_BASELINE"
+  ) {
+    throw new ContextStateConflictError(
+      "INVALID_STATE",
+      "Unknown context recovery mode",
+    );
+  }
   requireSafeInteger(state.membershipEpoch, "membershipEpoch", 1);
   requireSafeInteger(state.erasureEpoch, "erasureEpoch", 1);
   requireSafeInteger(state.policyVersion, "policyVersion", 1);
@@ -686,6 +744,7 @@ function createPatchValidationProbe(): ConversationContextState {
     tenantId: "validation:tenant",
     conversationId: "validation:conversation",
     stateVersion: 1,
+    causalFloorOpSeq: 0,
     processedPrefixOpSeq: 0,
     pendingOperations: [],
     membershipEpoch: 1,
@@ -693,6 +752,7 @@ function createPatchValidationProbe(): ConversationContextState {
     policyVersion: 1,
     strategyVersion: "validation-v1",
     stateSchemaVersion: 1,
+    recoveryMode: "FULL",
     status: "ACTIVE",
     terminologyClaimRefs: [],
     lexicalClaimRefs: [],
