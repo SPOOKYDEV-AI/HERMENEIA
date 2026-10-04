@@ -610,6 +610,40 @@ export class PostgresMessagingRepository {
     return result.rowCount;
   }
 
+  async cancelStartedProviderAttempts(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      messageId: UUID;
+      throughRevision: number;
+      now: string;
+    },
+  ): Promise<number> {
+    const result = await tx.query(
+      `UPDATE provider_executions pe
+          SET status = 'CANCELLED_LOGICALLY',
+              completed_at = $4,
+              error_class = COALESCE(
+                pe.error_class,
+                'SOURCE_REVISION_SUPERSEDED'
+              )
+         FROM translation_executions te
+        WHERE pe.tenant_id = te.tenant_id
+          AND pe.translation_id = te.translation_id
+          AND te.tenant_id = $1
+          AND te.source_message_id = $2
+          AND te.source_revision <= $3
+          AND pe.status = 'STARTED'`,
+      [
+        input.tenantId,
+        input.messageId,
+        input.throughRevision,
+        input.now,
+      ],
+    );
+    return result.rowCount;
+  }
+
   async supersedeTranslationExecutions(
     tx: SqlExecutor,
     input: {
