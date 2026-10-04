@@ -612,3 +612,68 @@ test("ContextState rejects processing gaps at or behind the processed prefix", (
     /processingGaps must be strictly after the processed prefix/,
   );
 });
+
+
+test("correction and checkpoint candidates share one soft memory reserve", () => {
+  const engine = new ContextEngine({
+    minAdaptiveUtility: 0,
+  });
+
+  const result = engine.build(input({
+    budget: {
+      ...budget,
+      totalTokens: 104,
+      systemReserveTokens: 32,
+      currentMessageTokens: 24,
+      safetyReserveTokens: 16,
+      immediateReserveTokens: 0,
+      activeEpisodeReserveTokens: 0,
+      memoryReserveTokens: 12,
+    },
+    candidates: [
+      candidate({
+        candidateId: "correction-first",
+        candidateType: "CORRECTION_MEMORY",
+        sourceSequence: null,
+        causalThroughSequence: 7,
+        content: "corrected term",
+        privacyScope: "CORRECTION",
+        correctionTrigger: "EXPLICIT_REPAIR",
+        tokenEstimate: 10,
+        semanticScore: 1,
+        temporalScore: 1,
+        confidence: 1,
+        importance: 1,
+      }),
+      candidate({
+        candidateId: "checkpoint-second",
+        candidateType: "RECOVERY_CHECKPOINT",
+        sourceSequence: null,
+        causalThroughSequence: 7,
+        content: "checkpoint state",
+        privacyScope: "CHECKPOINT",
+        tokenEstimate: 10,
+        semanticScore: 0.7,
+        temporalScore: 0.7,
+        confidence: 0.8,
+        importance: 0.6,
+      }),
+    ],
+  }));
+
+  const reasons = Object.fromEntries(
+    result.selected.map((item) => [
+      item.candidateId,
+      item.selectionReason,
+    ]),
+  );
+
+  assert.equal(
+    reasons["correction-first"],
+    "CORRECTION_OR_POLICY",
+  );
+  assert.equal(
+    reasons["checkpoint-second"],
+    "ADAPTIVE_UTILITY",
+  );
+});
