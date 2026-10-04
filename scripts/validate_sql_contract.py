@@ -19,6 +19,7 @@ TENANT_SYNC_MIGRATION = ROOT / "db/migrations/0005_tenant_device_sync_state.sql"
 OUTBOX_LIFECYCLE_MIGRATION = ROOT / "db/migrations/0006_outbox_superseded.sql"
 OUTBOX_LEASE_MIGRATION = ROOT / "db/migrations/0007_outbox_lease_shape.sql"
 TRANSLATION_MIGRATION = ROOT / "db/migrations/0008_translation_execution.sql"
+SOURCE_REQUIRED_EVENT_MIGRATION = ROOT / "db/migrations/0009_translation_source_required_event.sql"
 
 REQUIRED_TABLES = {
     "users",
@@ -75,6 +76,9 @@ def main() -> int:
     outbox_lifecycle_sql = OUTBOX_LIFECYCLE_MIGRATION.read_text(encoding="utf-8")
     outbox_lease_sql = OUTBOX_LEASE_MIGRATION.read_text(encoding="utf-8")
     translation_sql = TRANSLATION_MIGRATION.read_text(encoding="utf-8")
+    source_required_event_sql = SOURCE_REQUIRED_EVENT_MIGRATION.read_text(
+        encoding="utf-8"
+    )
     upper = sql.upper()
 
     if not upper.lstrip().startswith("BEGIN;"):
@@ -188,7 +192,7 @@ def main() -> int:
         "outbox_jobs_message_revision_idx",
         "payload_ref->>'message_id'",
         "payload_ref->>'source_revision'",
-        "WHERE job_type = 'translation.request'",
+        "WHERE job_type IN ('translation.request','translation.execute')",
     ]
     for snippet in outbox_required:
         if snippet not in outbox_lifecycle_sql:
