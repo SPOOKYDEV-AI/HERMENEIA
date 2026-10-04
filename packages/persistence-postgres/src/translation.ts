@@ -388,6 +388,22 @@ export class PostgresTranslationRepository {
         WHERE te.tenant_id = $1
           AND te.translation_id = $2
           AND mr.source_hash IS NOT NULL
+          AND (
+            (
+              mm.author_user_id = $3
+              AND mm.author_device_id = $4
+            )
+            OR EXISTS (
+              SELECT 1
+                FROM delivery_envelopes source_de
+               WHERE source_de.tenant_id = te.tenant_id
+                 AND source_de.message_id = te.source_message_id
+                 AND source_de.source_revision = te.source_revision
+                 AND source_de.recipient_user_id = $3
+                 AND source_de.recipient_device_id = $4
+                 AND source_de.rendition_type = 'ORIGINAL'
+            )
+          )
         FOR UPDATE OF te, mm
         FOR SHARE OF actor_cm, actor_tm, actor_device`,
       [
