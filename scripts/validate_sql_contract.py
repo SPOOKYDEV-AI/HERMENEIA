@@ -17,6 +17,7 @@ RUNTIME_MIGRATION = ROOT / "db/migrations/0003_runtime_alignment.sql"
 COMMAND_MIGRATION = ROOT / "db/migrations/0004_command_fingerprint.sql"
 TENANT_SYNC_MIGRATION = ROOT / "db/migrations/0005_tenant_device_sync_state.sql"
 OUTBOX_LIFECYCLE_MIGRATION = ROOT / "db/migrations/0006_outbox_superseded.sql"
+TRANSLATION_MIGRATION = ROOT / "db/migrations/0007_translation_execution.sql"
 
 REQUIRED_TABLES = {
     "users",
@@ -71,6 +72,7 @@ def main() -> int:
     command_sql = COMMAND_MIGRATION.read_text(encoding="utf-8")
     tenant_sync_sql = TENANT_SYNC_MIGRATION.read_text(encoding="utf-8")
     outbox_lifecycle_sql = OUTBOX_LIFECYCLE_MIGRATION.read_text(encoding="utf-8")
+    translation_sql = TRANSLATION_MIGRATION.read_text(encoding="utf-8")
     upper = sql.upper()
 
     if not upper.lstrip().startswith("BEGIN;"):
@@ -190,6 +192,38 @@ def main() -> int:
         fail("outbox lifecycle migration must begin with BEGIN")
     if not outbox_lifecycle_sql.rstrip().endswith("COMMIT;"):
         fail("outbox lifecycle migration must end with COMMIT")
+
+    translation_required = [
+        "CREATE TABLE translation_executions",
+        "CREATE TABLE provider_executions",
+        "target_profile_version bigint",
+        "translation_executions_logical_uidx",
+        "delivery_envelopes_translation_fk",
+        "delivery_translation_per_device_idx",
+        "'translation.ready'",
+        "'translation.source_required'",
+        "'translation.failed'",
+    ]
+    for snippet in translation_required:
+        if snippet not in translation_sql:
+            fail(f"translation execution migration missing invariant: {snippet}")
+
+    if not translation_sql.lstrip().startswith("BEGIN;"):
+        fail("translation execution migration must begin with BEGIN")
+    if not translation_sql.rstrip().endswith("COMMIT;"):
+        fail("translation execution migration must end with COMMIT")
+
+    translation_lower = translation_sql.lower()
+    for forbidden in (
+        "source_text",
+        "translated_text",
+        "prompt_text",
+        "prompt_body",
+        "output_text",
+        "plaintext",
+    ):
+        if forbidden in translation_lower:
+            fail(f"translation execution migration contains forbidden token: {forbidden}")
 
     command_lower = command_sql.lower()
     for forbidden in (
