@@ -20,6 +20,7 @@ export interface ContextOperationRef {
   messageId?: UUID;
   sourceRevision?: number;
   status: ContextOperationStatus;
+  completedPatch?: ContextStatePatch;
   registeredAt: string;
 }
 
@@ -168,7 +169,7 @@ export function createInitialContextState(input: {
 
 export function registerContextOperation(
   state: ConversationContextState,
-  operation: Omit<ContextOperationRef, "status">,
+  operation: Omit<ContextOperationRef, "status" | "completedPatch">,
 ): ConversationContextState {
   validateState(state);
   validateOperation(operation);
@@ -271,7 +272,10 @@ export function applyContextDerivation(
   } else {
     pending.status = "PROCESSED";
     if (result.patch) {
-      applySafePatch(next, result.patch);
+      validateSafePatch(next, result.patch);
+      pending.completedPatch = structuredClone(result.patch);
+    } else {
+      delete pending.completedPatch;
     }
   }
 
@@ -316,9 +320,20 @@ function advanceContiguousPrefix(state: ConversationContextState): void {
     const operation = state.pendingOperations[index];
     if (operation.status !== "PROCESSED") return;
 
+    if (operation.completedPatch) {
+      applySafePatch(state, operation.completedPatch);
+    }
     state.processedPrefixOpSeq = operation.opSeq;
     state.pendingOperations.splice(index, 1);
   }
+}
+
+function validateSafePatch(
+  state: ConversationContextState,
+  patch: ContextStatePatch,
+): void {
+  const probe = structuredClone(state);
+  applySafePatch(probe, patch);
 }
 
 function applySafePatch(
@@ -631,7 +646,9 @@ function validateState(state: ConversationContextState): void {
 }
 
 function validateOperation(
-  operation: Omit<ContextOperationRef, "status"> | ContextOperationRef,
+  operation:
+    | Omit<ContextOperationRef, "status" | "completedPatch">
+    | ContextOperationRef,
 ): void {
   requireSafeInteger(operation.opSeq, "opSeq", 1);
   requireOpaqueIdentifier(operation.operationId, "operationId");
@@ -646,6 +663,46 @@ function validateOperation(
       1,
     );
   }
+
+  if ("status" in operation) {
+    if (
+      operation.status !== "PROCESSED" &&
+      operation.completedPatch !== undefined
+    ) {
+      throw new ContextStateConflictError(
+        "INVALID_STATE",
+        "Only processed operations may retain a completed patch",
+      );
+    }
+    if (operation.completedPatch) {
+      const probe = createPatchValidationProbe();
+      applySafePatch(probe, operation.completedPatch);
+    }
+  }
+}
+
+function createPatchValidationProbe(): ConversationContextState {
+  return {
+    tenantId: "validation:tenant",
+    conversationId: "validation:conversation",
+    stateVersion: 1,
+    processedPrefixOpSeq: 0,
+    pendingOperations: [],
+    membershipEpoch: 1,
+    erasureEpoch: 1,
+    policyVersion: 1,
+    strategyVersion: "validation-v1",
+    stateSchemaVersion: 1,
+    status: "ACTIVE",
+    terminologyClaimRefs: [],
+    lexicalClaimRefs: [],
+    correctionClaimRefs: [],
+    entityHandles: [],
+    unresolvedReferenceHandles: [],
+    styleState: {},
+    pragmaticState: {},
+    updatedAt: "1970-01-01T00:00:00.000Z",
+  };
 }
 
 function validateDerivationResult(
