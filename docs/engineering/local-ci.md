@@ -20,7 +20,11 @@ Current checks:
 - client outbox/restart/sync tests pass locally, including lost Send response and lost ACK recovery;
 - edit/delete/command-recovery tests pass locally, including stale revisions, mutation retry idempotence and client replacement/removal;
 - Bearer session tests pass locally, including expiry, revocation and spoofed identity rejection;
-- PostgreSQL repository-port tests pass locally, including transaction rollback, SQL parameterisation, ACK payload purge, cursor purge reset and exact tenant session binding.
+- PostgreSQL repository-port tests pass locally, including transaction rollback, SQL parameterisation, ACK payload purge, tenant/device cursor isolation and exact tenant session binding;
+- persistent Send/command/edit/delete regression tests cover stale revision fencing, transient rollback, translation supersession and logical provider cancellation;
+- translation worker tests cover late provider responses after a concurrent mutation;
+- SQL migration validation covers migrations 0001..0009;
+- live PostgreSQL integration replays down migrations 0009→0001, then up migrations 0001→0009, then schema smoke tests when `psql` and `HERMENEIA_TEST_DATABASE_URL` are available.
 
 This does **not** mean GitHub-hosted CI is permanently forbidden.
 
