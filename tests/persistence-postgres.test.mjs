@@ -926,3 +926,43 @@ test("message mutation supersedes available or leased translation jobs", async (
     "2026-10-04T10:00:00.000Z",
   ]);
 });
+
+
+test("content-free conversation events include active devices without public delivery material", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [
+        { user_id: "user-a", device_id: "device-a2" },
+        { user_id: "user-b", device_id: "device-b-no-key" },
+      ],
+      rowCount: 2,
+    },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const devices = await repository.withTransaction((tx) =>
+    repository.listConversationEventDevices(
+      tx,
+      actor(),
+      "conversation-1",
+    ),
+  );
+
+  assert.deepEqual(devices, [
+    { userId: "user-a", deviceId: "device-a2" },
+    { userId: "user-b", deviceId: "device-b-no-key" },
+  ]);
+
+  const sql = connection.queries[1];
+  assert.match(sql.text, /JOIN devices d/);
+  assert.match(sql.text, /d\.status = 'ACTIVE'/);
+  assert.match(sql.text, /d\.device_id <> \$3/);
+  assert.doesNotMatch(sql.text, /public_material_ref/);
+  assert.deepEqual(sql.params, [
+    "tenant-1",
+    "conversation-1",
+    "device-1",
+  ]);
+});
