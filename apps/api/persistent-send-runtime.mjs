@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  PersistentDeliveryService,
+} from "../../.build/packages/delivery-service/src/index.js";
+import {
   PostgresMessagingRepository,
   PostgresSessionRepository,
 } from "../../.build/packages/persistence-postgres/src/index.js";
@@ -195,6 +198,11 @@ export async function createPersistentSendRuntime({
       maxApproxBytes: config.transientSource.maxApproxBytes,
     });
 
+    const deliveryService = new PersistentDeliveryService(
+      repository,
+      clock,
+    );
+
     const sendService = createPostgresMessagingService({
       repository,
       ids,
@@ -220,6 +228,7 @@ export async function createPersistentSendRuntime({
 
     return {
       sendService,
+      deliveryService,
       authenticate,
       repository,
       sessionRepository,
