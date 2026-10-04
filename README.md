@@ -98,7 +98,7 @@ The Context Engine is the main research and engineering differentiator. Messagin
 
 ## Repository status
 
-**Core Messaging implementation active: local-first delivery, mutation recovery and session/device authentication are executable.**
+**Core Messaging implementation active: persistent Send, command recovery, edit/delete, tenant-scoped sync/ACK and session/device authentication are executable behind PostgreSQL ports. Live PostgreSQL and reviewed envelope-crypto gates remain open.**
 
 The project is intentionally defining its contracts, architecture and evaluation methodology before committing to application code or model-specific implementations.
 
@@ -125,6 +125,7 @@ The project is intentionally defining its contracts, architecture and evaluation
 - [Message Mutations & Command Recovery — V1 Slice](docs/engineering/message-mutations-command-recovery-v1.md)
 - [PostgreSQL Core Schema — V1](docs/engineering/postgres-core-schema-v1.md)
 - [PostgreSQL Persistence Ports — V1](docs/engineering/postgres-persistence-ports-v1.md)
+- [Persistent Messaging Execution — V1](docs/architecture/persistent-send-v1.md)
 - [Privacy and data minimisation](docs/security/privacy-data-minimisation.md)
 - [Ephemeral messages and corrective memory](docs/architecture/ephemeral-message-memory-v1.md)
 - [Sanitised recovery checkpoints](docs/architecture/recovery-checkpoint-v1.md)
