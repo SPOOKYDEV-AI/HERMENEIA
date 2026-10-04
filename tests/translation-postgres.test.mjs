@@ -86,7 +86,7 @@ test("translation logical lookup is null-safe and fully parameterized", async ()
   const sql = connection.queries[1];
   assert.match(
     sql.text,
-    /context_snapshot_id IS NOT DISTINCT FROM $8::uuid/,
+    /context_snapshot_id IS NOT DISTINCT FROM \$8::uuid/,
   );
   assert.deepEqual(sql.params, [
     "tenant-1",
@@ -151,7 +151,7 @@ test("translation execution lock serializes provider attempt numbering", async (
 
   assert.equal(result.attemptNo, 3);
   assert.match(connection.queries[1].text, /FOR UPDATE/);
-  assert.match(connection.queries[2].text, /MAX(attempt_no)/);
+  assert.match(connection.queries[2].text, /MAX\(attempt_no\)/);
 });
 
 test("provider attempt insert contains metadata only and no provider body", async () => {
@@ -215,7 +215,7 @@ test("provider attempt completion is fenced by STARTED state", async () => {
   assert.equal(completed, true);
   const sql = connection.queries[1];
   assert.match(sql.text, /status = 'STARTED'/);
-  assert.match(sql.text, /completed_at = $9/);
+  assert.match(sql.text, /completed_at = \$9/);
 });
 
 test("SOURCE_REQUIRED transition only applies to PENDING execution", async () => {

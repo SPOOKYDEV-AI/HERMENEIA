@@ -226,6 +226,9 @@ function createFixture() {
           .digest("hex")}`;
       },
     },
+    materialValidator: {
+      validate() {},
+    },
   });
   return { store, service };
 }

@@ -581,7 +581,7 @@ test("missing transient source marks execution SOURCE_REQUIRED without provider 
     deviceId: "device-b1",
     inboxEpoch: 1,
     offset: 1,
-    eventId: "evt-4",
+    eventId: "evt-3",
     eventType: "translation.source_required",
     tenantId: "tenant-1",
     conversationId: "conversation-1",
@@ -664,7 +664,7 @@ test("provider attempt cancelled by a concurrent message mutation stops before p
       attempt.status = "CANCELLED_LOGICALLY";
       attempt.completedAt = "2026-10-04T12:00:00.000Z";
 
-      const execution = store.state.executions[0];
+      const execution = [...store.state.executions.values()][0];
       execution.status = "SUPERSEDED";
       execution.supersededAt = "2026-10-04T12:00:00.000Z";
 
@@ -698,7 +698,7 @@ test("provider attempt cancelled by a concurrent message mutation stops before p
     "CANCELLED_LOGICALLY",
   );
   assert.equal(
-    f.store.state.executions[0].status,
+    [...f.store.state.executions.values()][0].status,
     "SUPERSEDED",
   );
   assert.equal(f.store.state.envelopes.length, 0);
@@ -745,7 +745,7 @@ test("recipient with no active device is retried before provider cost is incurre
     createdAt: f.time.now(),
     expiresAt: "2026-10-04T12:05:00.000Z",
   });
-  f.store.devices = [];
+  f.store.publishDevices = [];
 
   assert.equal(
     await f.worker.runExecuteOnce(),

@@ -425,8 +425,8 @@ test("sync normalizes translation.source_required control event without an envel
     createdAt: "2026-10-04T12:00:00.000Z",
   });
 
-  const service = new PersistentDeliveryService(store, clock());
-  const result = await service.sync(actor(), {
+  const delivery = service(store);
+  const result = await delivery.sync(actor, {
     cursor: "1:0",
     limit: 10,
   });

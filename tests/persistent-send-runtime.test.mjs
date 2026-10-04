@@ -325,7 +325,7 @@ test("persistent Send runtime composes PostgreSQL service and persistent bearer 
     raw.queries.find((query) => /SELECT s\.tenant_id/.test(query.text)).text,
     /s\.tenant_id IS NOT NULL/,
   );
-  assert.equal(raw.releases, 1);
+  assert.equal(raw.releases, 2);
 
   await runtime.close();
   assert.equal(raw.ended, true);

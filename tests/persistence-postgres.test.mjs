@@ -945,7 +945,7 @@ test("message mutation supersedes current translation executions including READY
   assert.match(query.text, /status = 'SUPERSEDED'/);
   assert.match(
     query.text,
-    /status IN \('PENDING','SOURCE_REQUIRED','READY'\)/,
+    /status IN\s*\(\s*'PENDING',\s*'SOURCE_REQUIRED',\s*'READY',\s*'FAILED',\s*'EXPIRED'\s*\)/,
   );
   assert.match(query.text, /source_revision <= \$3/);
   assert.deepEqual(query.params, [
@@ -1585,7 +1585,7 @@ test("translation execute job reactivation never resurrects SUPERSEDED work", as
       rowCount: 1,
     },
   ]);
-  const repository = new PostgresMessagingRepository(
+  const repository = new PostgresOutboxRepository(
     new SqlTransactionManager(new SingleConnectionPool(connection)),
   );
 
@@ -1615,7 +1615,7 @@ test("manual translation retry reactivates DONE or DEAD execute work with fresh 
       },
       { rows: [], rowCount: 1 },
     ]);
-    const repository = new PostgresMessagingRepository(
+    const repository = new PostgresOutboxRepository(
       new SqlTransactionManager(new SingleConnectionPool(connection)),
     );
 
