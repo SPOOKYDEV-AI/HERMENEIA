@@ -412,7 +412,7 @@ test("inbox event replay is filtered by authenticated tenant and device", async 
   ]);
 });
 
-test("sync cursor reset is required for wrong epoch or purged history", () => {
+test("sync cursor separates replay position from ACK payload-purge watermark", () => {
   assert.deepEqual(
     evaluateSyncCursor(
       { inboxEpoch: 4, nextOffset: 31, lastAckedOffset: 20 },
@@ -430,8 +430,8 @@ test("sync cursor reset is required for wrong epoch or purged history", () => {
       { inboxEpoch: 4, afterOffset: 19 },
     ),
     {
-      kind: "RESET_PURGED",
-      minimumRecoverableOffset: 20,
+      kind: "CONTINUE",
+      afterOffset: 19,
     },
   );
 
