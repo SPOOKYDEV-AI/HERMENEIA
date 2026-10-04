@@ -6,8 +6,20 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REQUIRED = Object.freeze({
-  "@hpke/core": "1.9.0",
-  "@hpke/common": "1.10.1",
+  "@hpke/core": Object.freeze({
+    version: "1.9.0",
+    resolved:
+      "https://registry.npmjs.org/@hpke/core/-/core-1.9.0.tgz",
+    integrity:
+      "sha512-pFxWl1nNJeQCSUFs7+GAblHvXBCjn9EPN65vdKlYQil2aURaRxfGMO6vBKGqm1YHTKwiAxJQNEI70PbSowMP9Q==",
+  }),
+  "@hpke/common": Object.freeze({
+    version: "1.10.1",
+    resolved:
+      "https://registry.npmjs.org/@hpke/common/-/common-1.10.1.tgz",
+    integrity:
+      "sha512-moJwhmtLtuxiUzzNp1jpfBfx8yefKoO9D/RCR9dmwrnc7qjJqId1rEtQz+lSlU5cabX8daToMSx/7HayXOiaFw==",
+  }),
 });
 
 function fail(message) {
@@ -30,7 +42,7 @@ function assertExactVersion(actual, expected, label) {
   }
 }
 
-function assertLockedPackage(lockfile, packageName, expectedVersion) {
+function assertLockedPackage(lockfile, packageName, expected) {
   const key = `node_modules/${packageName}`;
   const entry = lockfile.packages?.[key];
 
@@ -40,23 +52,19 @@ function assertLockedPackage(lockfile, packageName, expectedVersion) {
 
   assertExactVersion(
     entry.version,
-    expectedVersion,
+    expected.version,
     `package-lock ${packageName}`,
   );
 
-  if (
-    typeof entry.integrity !== "string" ||
-    !/^sha512-[A-Za-z0-9+/=]+$/.test(entry.integrity)
-  ) {
-    fail(`package-lock ${packageName} must contain sha512 integrity`);
+  if (entry.resolved !== expected.resolved) {
+    fail(
+      `package-lock ${packageName} resolved URL does not match the approved artifact`,
+    );
   }
 
-  if (
-    typeof entry.resolved !== "string" ||
-    !entry.resolved.startsWith("https://registry.npmjs.org/")
-  ) {
+  if (entry.integrity !== expected.integrity) {
     fail(
-      `package-lock ${packageName} must resolve from the npm registry`,
+      `package-lock ${packageName} integrity does not match the approved artifact`,
     );
   }
 }
@@ -69,12 +77,12 @@ export function verifyEnvelopeCryptoDependencies(root = process.cwd()) {
 
   assertExactVersion(
     pkg.dependencies?.["@hpke/core"],
-    REQUIRED["@hpke/core"],
+    REQUIRED["@hpke/core"].version,
     "package.json @hpke/core",
   );
   assertExactVersion(
     pkg.overrides?.["@hpke/common"],
-    REQUIRED["@hpke/common"],
+    REQUIRED["@hpke/common"].version,
     "package.json override @hpke/common",
   );
 
@@ -106,7 +114,8 @@ export function verifyEnvelopeCryptoDependencies(root = process.cwd()) {
   return {
     ok: true,
     packages: {
-      ...REQUIRED,
+      "@hpke/core": REQUIRED["@hpke/core"].version,
+      "@hpke/common": REQUIRED["@hpke/common"].version,
     },
   };
 }
