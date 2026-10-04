@@ -31,6 +31,7 @@ class FakeWorkerStore {
     this.fanoutPlan = {
       conversationId: "conversation-1",
       sourceLanguageTag: "fr-FR",
+      sourceHash: "source-hash-1",
       targets: [{
         recipientUserId: "user-b",
         targetLanguageTag: "es-CO",
@@ -857,5 +858,31 @@ test("source-required control does not backfill old message metadata to a newly 
       (event) => event.deviceId === "device-b-new",
     ),
     false,
+  );
+});
+
+
+test("fanout normalizes a stale outbox source hash from the authoritative message revision", async () => {
+  const f = fixture();
+  f.store.state.jobs[0].payloadRef.source_hash =
+    "stale-or-corrupted-outbox-hash";
+  f.store.fanoutPlan.sourceHash = "source-hash-authoritative";
+
+  assert.equal(
+    await f.worker.runFanoutOnce(),
+    "FANOUT_DONE",
+  );
+
+  const child = f.store.state.jobs.find(
+    (job) => job.jobType === "translation.execute",
+  );
+  assert.ok(child);
+  assert.equal(
+    child.payloadRef.source_hash,
+    "source-hash-authoritative",
+  );
+  assert.notEqual(
+    child.payloadRef.source_hash,
+    f.store.state.jobs[0].payloadRef.source_hash,
   );
 });
