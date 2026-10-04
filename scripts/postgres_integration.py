@@ -20,6 +20,34 @@ def run_sql(psql: str, url: str, sql: Path) -> None:
     )
 
 
+def schema_exists(psql: str, url: str) -> bool:
+    result = subprocess.run(
+        [
+            psql,
+            url,
+            "-X",
+            "-q",
+            "-t",
+            "-A",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            "SELECT CASE WHEN to_regclass('public.message_metadata') IS NULL "
+            "THEN '0' ELSE '1' END;",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    value = result.stdout.strip()
+    if value not in {"0", "1"}:
+        raise RuntimeError(
+            f"Unexpected PostgreSQL schema probe result: {value!r}"
+        )
+    return value == "1"
+
+
 def main() -> int:
     url = os.getenv("HERMENEIA_TEST_DATABASE_URL")
     psql = shutil.which("psql")
@@ -66,11 +94,35 @@ def main() -> int:
     ]
 
     # This runner targets a dedicated disposable integration database.
-    # Guarded rollback failures are intentional: they expose leftover state
-    # rather than silently destroying data that may not belong to the test.
+    # A virgin database must not fail because later down migrations reference
+    # tables that have never existed. Clean up only when the base schema is
+    # already present.
+    if schema_exists(psql, url):
+        print("POSTGRES_INTEGRATION=CLEANUP existing_schema=yes")
+        for sql in rollbacks:
+            run_sql(psql, url, sql)
+    else:
+        print("POSTGRES_INTEGRATION=CLEANUP existing_schema=no")
+
+    # First forward migration + smoke pass.
+    for sql in migrations:
+        run_sql(psql, url, sql)
+
+    for sql in smoke_tests:
+        run_sql(psql, url, sql)
+
+    # Prove the reverse chain against the schema we just created. Smoke tests
+    # are transaction-scoped/rolled back, so guarded downs should remain safe.
     for sql in rollbacks:
         run_sql(psql, url, sql)
 
+    if schema_exists(psql, url):
+        raise RuntimeError(
+            "Rollback chain completed but core schema is still present"
+        )
+
+    # Re-apply once more so the disposable DB is left in the current schema and
+    # prove that a complete down/up cycle remains reproducible.
     for sql in migrations:
         run_sql(psql, url, sql)
 
