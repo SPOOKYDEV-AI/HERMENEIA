@@ -72,9 +72,11 @@ def main() -> int:
         ROOT / "db/migrations/0009_translation_source_required_event.sql",
         ROOT / "db/migrations/0010_device_trust_lifecycle.sql",
         ROOT / "db/migrations/0011_tenant_local_inbox_sequence.sql",
+        ROOT / "db/migrations/0012_context_snapshots.sql",
     ]
 
     rollbacks = [
+        ROOT / "db/migrations/0012_context_snapshots.down.sql",
         ROOT / "db/migrations/0011_tenant_local_inbox_sequence.down.sql",
         ROOT / "db/migrations/0010_device_trust_lifecycle.down.sql",
         ROOT / "db/migrations/0009_translation_source_required_event.down.sql",
