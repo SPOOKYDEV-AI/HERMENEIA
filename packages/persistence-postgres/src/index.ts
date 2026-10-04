@@ -1,4 +1,5 @@
 import type { ActorContext, UUID } from "../../domain/src/index.js";
+import type { OutboxJobLease } from "../../outbox-service/src/index.js";
 import type {
   SqlExecutor,
   SqlQueryResult,
@@ -586,7 +587,8 @@ export class PostgresMessagingRepository {
       `UPDATE outbox_jobs
           SET status = 'SUPERSEDED',
               completed_at = $4,
-              lease_until = NULL
+              lease_until = NULL,
+              fencing_token = fencing_token + 1
         WHERE tenant_id = $1
           AND job_type = 'translation.request'
           AND payload_ref->>'message_id' = $2
@@ -1157,6 +1159,171 @@ export class PostgresMessagingRepository {
     );
 
     return "ACKED";
+  }
+}
+
+export class PostgresOutboxRepository {
+  constructor(private readonly transactions: SqlTransactionManager) {}
+
+  withTransaction<T>(work: (tx: SqlExecutor) => Promise<T>): Promise<T> {
+    return this.transactions.withTransaction(work);
+  }
+
+  async leaseNextJob(
+    tx: SqlExecutor,
+    input: {
+      jobType: string;
+      now: string;
+      leaseUntil: string;
+    },
+  ): Promise<OutboxJobLease | undefined> {
+    const result = await tx.query<{
+      job_id: UUID;
+      tenant_id: UUID;
+      job_type: string;
+      business_key: string;
+      payload_ref: Record<string, unknown>;
+      priority: number;
+      fencing_token: number;
+      attempt_count: number;
+      lease_until: string;
+    }>(
+      `WITH candidate AS (
+         SELECT job_id
+           FROM outbox_jobs
+          WHERE job_type = $1
+            AND (
+              (status = 'AVAILABLE' AND available_at <= $2)
+              OR
+              (status = 'LEASED' AND lease_until <= $2)
+            )
+          ORDER BY priority, available_at, created_at, job_id
+          FOR UPDATE SKIP LOCKED
+          LIMIT 1
+       )
+       UPDATE outbox_jobs j
+          SET status = 'LEASED',
+              lease_until = $3,
+              fencing_token = j.fencing_token + 1,
+              attempt_count = j.attempt_count + 1,
+              completed_at = NULL
+         FROM candidate
+        WHERE j.job_id = candidate.job_id
+      RETURNING j.job_id,
+                j.tenant_id,
+                j.job_type,
+                j.business_key,
+                j.payload_ref,
+                j.priority,
+                j.fencing_token,
+                j.attempt_count,
+                j.lease_until::text AS lease_until`,
+      [input.jobType, input.now, input.leaseUntil],
+    );
+    const row = first(result);
+    return row
+      ? {
+          jobId: row.job_id,
+          tenantId: row.tenant_id,
+          jobType: row.job_type,
+          businessKey: row.business_key,
+          payloadRef: row.payload_ref,
+          priority: Number(row.priority),
+          fencingToken: Number(row.fencing_token),
+          attemptCount: Number(row.attempt_count),
+          leaseUntil: row.lease_until,
+        }
+      : undefined;
+  }
+
+  async completeJob(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      jobId: UUID;
+      fencingToken: number;
+      now: string;
+    },
+  ): Promise<boolean> {
+    const result = await tx.query(
+      `UPDATE outbox_jobs
+          SET status = 'DONE',
+              lease_until = NULL,
+              completed_at = $4
+        WHERE tenant_id = $1
+          AND job_id = $2
+          AND status = 'LEASED'
+          AND fencing_token = $3
+          AND lease_until > $4`,
+      [
+        input.tenantId,
+        input.jobId,
+        input.fencingToken,
+        input.now,
+      ],
+    );
+    return result.rowCount === 1;
+  }
+
+  async retryJob(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      jobId: UUID;
+      fencingToken: number;
+      now: string;
+      availableAt: string;
+    },
+  ): Promise<boolean> {
+    const result = await tx.query(
+      `UPDATE outbox_jobs
+          SET status = 'AVAILABLE',
+              available_at = $5,
+              lease_until = NULL,
+              completed_at = NULL
+        WHERE tenant_id = $1
+          AND job_id = $2
+          AND status = 'LEASED'
+          AND fencing_token = $3
+          AND lease_until > $4`,
+      [
+        input.tenantId,
+        input.jobId,
+        input.fencingToken,
+        input.now,
+        input.availableAt,
+      ],
+    );
+    return result.rowCount === 1;
+  }
+
+  async deadLetterJob(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      jobId: UUID;
+      fencingToken: number;
+      now: string;
+    },
+  ): Promise<boolean> {
+    const result = await tx.query(
+      `UPDATE outbox_jobs
+          SET status = 'DEAD',
+              lease_until = NULL,
+              completed_at = $4
+        WHERE tenant_id = $1
+          AND job_id = $2
+          AND status = 'LEASED'
+          AND fencing_token = $3
+          AND lease_until > $4`,
+      [
+        input.tenantId,
+        input.jobId,
+        input.fencingToken,
+        input.now,
+      ],
+    );
+    return result.rowCount === 1;
   }
 }
 
