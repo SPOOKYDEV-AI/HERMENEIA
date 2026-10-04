@@ -392,3 +392,49 @@ test("invalid ACK timestamps and batch sizes are rejected before persistence", a
     false,
   );
 });
+
+
+test("sync normalizes translation.source_required control event without an envelope", async () => {
+  const store = new FakeDeliveryStore();
+  store.events.push({
+    inboxEpoch: 1,
+    offset: 1,
+    eventId: "event-source-required",
+    eventType: "translation.source_required",
+    tenantId: "tenant-1",
+    conversationId: "conversation-1",
+    messageId: "message-1",
+    envelopeId: null,
+    sourceRevision: 2,
+    protectedPayload: null,
+    renditionType: null,
+    expiresAt: null,
+    translationId: "translation-1",
+    sourceRef: "hmac-sha256:k1:opaque-ref",
+    createdAt: "2026-10-04T12:00:00.000Z",
+  });
+
+  const service = new PersistentDeliveryService(store, clock());
+  const result = await service.sync(actor(), {
+    cursor: "1:0",
+    limit: 10,
+  });
+
+  assert.equal(result.kind, "OK");
+  assert.deepEqual(result.response.events, [{
+    protocol_version: 1,
+    event_id: "event-source-required",
+    cursor: "1:1",
+    type: "translation.source_required",
+    server_time: "2026-10-04T12:00:00.000Z",
+    tenant_id: "tenant-1",
+    conversation_id: "conversation-1",
+    payload: {
+      translation_id: "translation-1",
+      message_id: "message-1",
+      source_revision: 2,
+      source_ref: "hmac-sha256:k1:opaque-ref",
+    },
+  }]);
+  assert.equal(result.response.next_cursor, "1:1");
+});
