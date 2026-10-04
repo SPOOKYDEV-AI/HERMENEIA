@@ -591,9 +591,13 @@ export class TranslationRecoveryService<Tx> {
 
         if (!isRecoveryCurrent(recovery)) {
           await this.bestEffortSupersede(tx, recovery.execution, now);
-          throw new DomainError(
-            "REVISION_CONFLICT",
-            "Translation no longer targets the current source/profile",
+          return this.completeSourceCommand(
+            tx,
+            actor,
+            command,
+            commandFingerprint,
+            now,
+            "SUPERSEDED",
           );
         }
 
@@ -645,17 +649,10 @@ export class TranslationRecoveryService<Tx> {
             "FAILED",
           );
         }
-        if (recovery.execution.status === "PENDING") {
-          return this.completeSourceCommand(
-            tx,
-            actor,
-            command,
-            commandFingerprint,
-            now,
-            "PENDING",
-          );
-        }
-        if (recovery.execution.status !== "SOURCE_REQUIRED") {
+        if (
+          recovery.execution.status !== "PENDING" &&
+          recovery.execution.status !== "SOURCE_REQUIRED"
+        ) {
           throw new Error(
             "Invariant violation: unsupported translation recovery status",
           );
@@ -696,17 +693,19 @@ export class TranslationRecoveryService<Tx> {
           insertedTransient = true;
         }
 
-        const resumed = await this.deps.store.resumeSourceRequired(
-          tx,
-          {
-            tenantId: actor.tenantId,
-            translationId: command.translation_id,
-          },
-        );
-        if (!resumed) {
-          throw new Error(
-            "Invariant violation: SOURCE_REQUIRED translation was not resumed",
+        if (recovery.execution.status === "SOURCE_REQUIRED") {
+          const resumed = await this.deps.store.resumeSourceRequired(
+            tx,
+            {
+              tenantId: actor.tenantId,
+              translationId: command.translation_id,
+            },
           );
+          if (!resumed) {
+            throw new Error(
+              "Invariant violation: SOURCE_REQUIRED translation was not resumed",
+            );
+          }
         }
 
         const jobState =
