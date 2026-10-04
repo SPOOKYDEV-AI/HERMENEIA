@@ -80,6 +80,12 @@ export interface InboxEventRow {
   sourceRevision: number;
   protectedPayload: string | null;
   renditionType: "ORIGINAL" | "TRANSLATION" | null;
+  envelopeStatus:
+    | "PENDING"
+    | "ACKED"
+    | "EXPIRED"
+    | "REVOKED"
+    | null;
   expiresAt: string | null;
   translationId: UUID | null;
   sourceRef: string | null;
@@ -1472,6 +1478,12 @@ export class PostgresMessagingRepository {
       source_revision: number;
       protected_payload_b64: string | null;
       rendition_type: "ORIGINAL" | "TRANSLATION" | null;
+      envelope_status:
+        | "PENDING"
+        | "ACKED"
+        | "EXPIRED"
+        | "REVOKED"
+        | null;
       expires_at: string | null;
       translation_id: UUID | null;
       source_ref: string | null;
@@ -1499,6 +1511,7 @@ export class PostgresMessagingRepository {
                 THEN de.rendition_type
                 ELSE NULL
               END AS rendition_type,
+              de.status AS envelope_status,
               CASE
                 WHEN de.status = 'PENDING'
                 THEN de.expires_at::text
@@ -1539,6 +1552,7 @@ export class PostgresMessagingRepository {
       sourceRevision: Number(row.source_revision),
       protectedPayload: row.protected_payload_b64,
       renditionType: row.rendition_type,
+      envelopeStatus: row.envelope_status,
       expiresAt: row.expires_at,
       translationId: row.translation_id,
       sourceRef: row.source_ref,
