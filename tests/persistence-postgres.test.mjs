@@ -1815,3 +1815,75 @@ test("tenant-local inbox sequence permits the same logical offset for different 
     ]);
   }
 });
+
+
+test("sync expiry purge marks expired pending envelopes and destroys ciphertext", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 3 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const count = await repository.withTransaction((tx) =>
+    repository.expirePendingDeviceEnvelopes(tx, {
+      tenantId: "tenant-1",
+      deviceId: "device-1",
+      now: "2026-10-04T10:00:00.000Z",
+    }),
+  );
+
+  assert.equal(count, 3);
+  const query = connection.queries[1];
+  assert.match(query.text, /status = 'EXPIRED'/);
+  assert.match(query.text, /protected_payload = decode\('', 'hex'\)/);
+  assert.match(query.text, /recipient_device_id = \$2/);
+  assert.match(query.text, /status = 'PENDING'/);
+  assert.match(query.text, /expires_at <= \$3/);
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "device-1",
+    "2026-10-04T10:00:00.000Z",
+  ]);
+});
+
+test("ACK after envelope expiry purges ciphertext and returns EXPIRED instead of ACKED", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{
+        status: "PENDING",
+        inbox_epoch: 4,
+        offset_value: 18,
+        expires_at: "2026-10-04T09:59:59.000Z",
+      }],
+      rowCount: 1,
+    },
+    { rows: [], rowCount: 1 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const result = await repository.withTransaction((tx) =>
+    repository.acknowledgeEnvelope(tx, {
+      tenantId: "tenant-1",
+      deviceId: "device-1",
+      envelopeId: "envelope-expired",
+      ackedAt: "2026-10-04T10:00:00.000Z",
+    }),
+  );
+
+  assert.equal(result, "EXPIRED");
+  assert.match(connection.queries[2].text, /status = 'EXPIRED'/);
+  assert.match(
+    connection.queries[2].text,
+    /protected_payload = decode\('', 'hex'\)/,
+  );
+  assert.equal(
+    connection.queries.some((query) =>
+      /status = 'ACKED'/.test(query.text),
+    ),
+    false,
+  );
+  assert.equal(connection.queries.at(-1).text, "COMMIT");
+});
