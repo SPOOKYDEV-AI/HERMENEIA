@@ -1,7 +1,7 @@
-# Persistent Send Execution — V1
+# Persistent Messaging Execution — V1
 
 **Status:** Implemented execution slice; live PostgreSQL gate still required  
-**Scope:** durable Send acceptance, idempotency, per-device original delivery, transient source handling, translation dispatch reference
+**Scope:** durable Send, command recovery, edit/delete revisions, tenant-scoped sync/ACK, transient source handling and translation dispatch reference
 
 ## 1. Goal
 
@@ -21,7 +21,7 @@ HERMENEIA Core does not durably store the raw source body by default.
 
 ## 2. Canonical runtime path
 
-There is one canonical persistent Send implementation:
+There is one canonical persistent messaging implementation for Send and source mutations:
 
 ```text
 HTTP POST /v1/conversations/:conversation_id/messages
@@ -45,7 +45,7 @@ PersistentMessagingService
 
 `packages/runtime/src/persistent-messaging.ts` builds the application service from the repository and runtime dependencies.
 
-`apps/api/server.mjs` accepts an explicit `sendService`. It defaults to the supplied `core` only for the existing in-memory executable/test profile.
+`apps/api/server.mjs` accepts explicit `sendService`, `commandService`, `mutationService` and `deliveryService` dependencies. The in-memory Core remains only a compatibility/test profile; `apps/api/persistent-server.mjs` composes a pure persistent HTTP profile with no Core fallback.
 
 The previous duplicate persistent Send implementation was removed. New Send behaviour must be added to `packages/messaging-service`, not to a parallel service.
 
@@ -203,7 +203,33 @@ The sender's other active devices also receive ORIGINAL envelopes so multi-devic
 
 ACK lifecycle is per device/envelope.
 
-## 10. Translation independence
+## 10. Persistent mutation and delivery semantics
+
+Edit and delete use the same durable command/idempotency boundary as Send.
+
+Edit:
+
+- locks the authored message row;
+- verifies `expected_revision`;
+- allocates only a new conversation `op_seq`;
+- creates an immutable `EDITED` source revision;
+- revokes and payload-purges pending envelopes for older revisions;
+- marks pending/leased translation jobs `SUPERSEDED`;
+- creates fresh protected envelopes and `message.edited` events per deliverable device;
+- admits the new source to transient memory best-effort and removes the previous transient revision after commit.
+
+Delete:
+
+- creates an immutable content-free `DELETED` tombstone revision;
+- marks MessageMetadata deleted;
+- revokes/purges old pending envelopes;
+- supersedes old translation jobs;
+- emits content-free `message.deleted` events to currently deliverable devices;
+- is not blocked merely because a recipient currently has no active device.
+
+Sync state uses a globally monotonic device inbox offset but a **tenant + device** purge/replay watermark. This prevents a multi-tenant session from using another tenant's ACK state. ACK watermark advancement is restricted to the contiguous terminal envelope prefix, so an out-of-order ACK cannot skip an earlier PENDING envelope.
+
+## 11. Translation independence
 
 Translation work is represented by a durable outbox job.
 
@@ -221,7 +247,7 @@ translation_status = SOURCE_REQUIRED
 
 Provider availability never gates original Send acceptance.
 
-## 11. Current verification gates
+## 12. Current verification gates
 
 Verified in the local sandbox for this slice:
 
@@ -235,7 +261,9 @@ Verified in the local sandbox for this slice:
 - transaction and COMMIT rollback cleanup;
 - HMAC fingerprint generation and verification;
 - HMAC key-rotation retry compatibility;
-- HTTP Send routing to an injected persistent service;
+- HTTP Send, command recovery, edit/delete and sync/ACK routing to persistent services;
+- tenant-isolated sync state and out-of-order ACK protection;
+- persistent mutation rollback, stale-revision rejection and command replay;
 - static SQL migration contract;
 - no durable plaintext token/column in the SQL contract.
 
@@ -250,7 +278,7 @@ HERMENEIA_TEST_DATABASE_URL
 
 Until that gate passes, this slice must not be described as live-PostgreSQL validated.
 
-## 12. Runtime composition status
+## 13. Runtime composition status
 
 The repository now contains:
 
@@ -266,7 +294,7 @@ Still required before a production claim:
 - execute the actual external `pg` dependency against a live PostgreSQL instance;
 - apply migrations/smoke tests through `scripts/postgres_integration.py`;
 - complete the dedicated envelope cryptography review and provide that implementation;
-- wire persistent sync/edit/delete/ACK paths so a production API profile never mixes persistent Send with the in-memory Core;
-- define migration/startup and graceful-shutdown policy for the final service process.
+- execute and validate the translation outbox worker/provider/publication path with causal fencing;
+- complete the remaining device-enrollment/read-cursor/operational lifecycle surfaces required by Core V1.
 
 Do not silently fall back to the in-memory Core in a production profile.
