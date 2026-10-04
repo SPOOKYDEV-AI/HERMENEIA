@@ -64,8 +64,13 @@ export interface TranslationContextPlannerDependencies {
   metadata: ContextPlanningMetadataSource;
   transientSources: TransientSourceStore;
   stateSource?: ConversationContextStateSource;
-  config?: Partial<TranslationContextPlannerConfig> & {
-    budget?: Partial<Omit<ContextBudget, "currentMessageTokens">>;
+  config?: Omit<
+    Partial<TranslationContextPlannerConfig>,
+    "budget"
+  > & {
+    budget?: Partial<
+      Omit<ContextBudget, "currentMessageTokens">
+    >;
   };
 }
 
