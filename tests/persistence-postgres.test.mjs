@@ -764,3 +764,165 @@ test("markCommandSucceeded fences by actor type fingerprint and IN_PROGRESS stat
   assert.match(query.text, /command_fingerprint = \$6/);
   assert.equal(query.params[6], JSON.stringify({ status: "ACCEPTED" }));
 });
+
+
+test("message mutation lock is author device and tenant scoped", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{
+        conversation_id: "conversation-1",
+        message_seq: 7,
+        current_revision: 2,
+        status: "ACTIVE",
+      }],
+      rowCount: 1,
+    },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const result = await repository.withTransaction((tx) =>
+    repository.lockMessageForAuthorMutation(
+      tx,
+      actor(),
+      "message-1",
+    ),
+  );
+
+  assert.deepEqual(result, {
+    conversationId: "conversation-1",
+    messageSeq: 7,
+    currentRevision: 2,
+    status: "ACTIVE",
+  });
+
+  const query = connection.queries[1];
+  assert.match(query.text, /mm\.author_user_id = \$3/);
+  assert.match(query.text, /d\.device_id = \$4/);
+  assert.match(query.text, /FOR UPDATE OF mm/);
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "message-1",
+    "user-1",
+    "device-1",
+  ]);
+});
+
+test("mutation allocates only conversation op_seq under active actor membership", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{ op_seq: 12 }],
+      rowCount: 1,
+    },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const opSeq = await repository.withTransaction((tx) =>
+    repository.allocateOperationSequence(
+      tx,
+      actor(),
+      "conversation-1",
+    ),
+  );
+
+  assert.equal(opSeq, 12);
+  const query = connection.queries[1];
+  assert.match(query.text, /next_op_seq = c\.next_op_seq \+ 1/);
+  assert.doesNotMatch(query.text, /next_message_seq/);
+  assert.match(query.text, /actor_device\.status = 'ACTIVE'/);
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "conversation-1",
+    "user-1",
+    "device-1",
+  ]);
+});
+
+test("message revision pointer update is fenced by expected revision", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 1 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  await repository.withTransaction((tx) =>
+    repository.updateMessageRevisionPointer(tx, {
+      tenantId: "tenant-1",
+      messageId: "message-1",
+      expectedRevision: 2,
+      newRevision: 3,
+      status: "DELETED",
+      deletedAt: "2026-10-04T10:00:00.000Z",
+    }),
+  );
+
+  const query = connection.queries[1];
+  assert.match(query.text, /current_revision = \$4/);
+  assert.match(query.text, /current_revision = \$3/);
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "message-1",
+    2,
+    3,
+    "DELETED",
+    "2026-10-04T10:00:00.000Z",
+  ]);
+});
+
+test("message mutation revokes pending envelopes and purges protected payload", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 3 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const count = await repository.withTransaction((tx) =>
+    repository.revokePendingMessageEnvelopes(tx, {
+      tenantId: "tenant-1",
+      messageId: "message-1",
+      throughRevision: 2,
+    }),
+  );
+
+  assert.equal(count, 3);
+  const query = connection.queries[1];
+  assert.match(query.text, /status = 'REVOKED'/);
+  assert.match(query.text, /protected_payload = decode\('', 'hex'\)/);
+  assert.match(query.text, /source_revision <= \$3/);
+});
+
+test("message mutation supersedes available or leased translation jobs", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 2 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const count = await repository.withTransaction((tx) =>
+    repository.supersedeTranslationJobs(tx, {
+      tenantId: "tenant-1",
+      messageId: "message-1",
+      throughRevision: 2,
+      now: "2026-10-04T10:00:00.000Z",
+    }),
+  );
+
+  assert.equal(count, 2);
+  const query = connection.queries[1];
+  assert.match(query.text, /status = 'SUPERSEDED'/);
+  assert.match(query.text, /status IN \('AVAILABLE','LEASED'\)/);
+  assert.match(query.text, /payload_ref->>'message_id' = \$2/);
+  assert.match(query.text, /payload_ref->>'source_revision'/);
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "message-1",
+    2,
+    "2026-10-04T10:00:00.000Z",
+  ]);
+});
