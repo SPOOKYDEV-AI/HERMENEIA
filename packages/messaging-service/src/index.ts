@@ -153,6 +153,7 @@ export interface PersistentMessagingStore<Tx> {
 
   allocateDeviceInboxOffset(
     tx: Tx,
+    tenantId: UUID,
     deviceId: UUID,
   ): Promise<{ inboxEpoch: number; offset: number }>;
 
@@ -572,6 +573,7 @@ export class PersistentMessagingService<Tx> {
             const inbox =
               await this.deps.store.allocateDeviceInboxOffset(
                 tx,
+                actor.tenantId,
                 device.deviceId,
               );
 
