@@ -10,6 +10,7 @@
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test tests/*.test.mjs",
     "verify": "npm run typecheck && npm test",
+    "smoke:postgres-runtime": "npm run build && node scripts/postgres_runtime_smoke.mjs",
     "start:persistent": "npm run build && node apps/api/start-persistent-server.mjs"
   },
   "dependencies": {
