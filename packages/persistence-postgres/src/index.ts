@@ -23,6 +23,8 @@ export interface RecipientDevice {
 
 export interface RecipientDeliveryTarget {
   userId: UUID;
+  targetLanguageTag: string | null;
+  targetProfileVersion: number;
   devices: RecipientDevice[];
 }
 
@@ -323,16 +325,24 @@ export class PostgresMessagingRepository {
       device_id: UUID | null;
       credential_version: number | null;
       public_material_ref: string | null;
+      target_language_tag: string | null;
+      target_profile_version: number;
     }>(
       `SELECT cm.user_id,
               d.device_id,
               d.credential_version,
-              d.public_material_ref
+              d.public_material_ref,
+              COALESCE(cm.target_language_tag, u.default_language_tag)
+                AS target_language_tag,
+              cm.target_profile_version
          FROM conversation_members cm
          JOIN tenant_memberships tm
            ON tm.tenant_id = cm.tenant_id
           AND tm.user_id = cm.user_id
           AND tm.status = 'ACTIVE'
+         JOIN users u
+           ON u.user_id = cm.user_id
+          AND u.status = 'ACTIVE'
          LEFT JOIN devices d
            ON d.user_id = cm.user_id
           AND d.status = 'ACTIVE'
@@ -349,6 +359,8 @@ export class PostgresMessagingRepository {
     for (const row of result.rows) {
       const target = targets.get(row.user_id) ?? {
         userId: row.user_id,
+        targetLanguageTag: row.target_language_tag,
+        targetProfileVersion: Number(row.target_profile_version),
         devices: [],
       };
       if (
@@ -461,8 +473,18 @@ export class PostgresMessagingRepository {
     tx: SqlExecutor,
     actor: ActorContext,
     conversationId: UUID,
-  ): Promise<number | undefined> {
-    const result = await tx.query<{ op_seq: number }>(
+  ): Promise<{
+    opSeq: number;
+    membershipEpoch: number;
+    erasureEpoch: number;
+    policyVersion: number;
+  } | undefined> {
+    const result = await tx.query<{
+      op_seq: number;
+      membership_epoch: number;
+      erasure_epoch: number;
+      policy_version: number;
+    }>(
       `UPDATE conversations c
           SET next_op_seq = c.next_op_seq + 1
          FROM conversation_members cm
@@ -481,7 +503,10 @@ export class PostgresMessagingRepository {
           AND cm.conversation_id = c.conversation_id
           AND cm.user_id = $3
           AND cm.status = 'ACTIVE'
-      RETURNING c.next_op_seq - 1 AS op_seq`,
+      RETURNING c.next_op_seq - 1 AS op_seq,
+                c.membership_epoch,
+                c.erasure_epoch,
+                c.policy_version`,
       [
         actor.tenantId,
         conversationId,
@@ -490,7 +515,14 @@ export class PostgresMessagingRepository {
       ],
     );
     const row = first(result);
-    return row ? Number(row.op_seq) : undefined;
+    return row
+      ? {
+          opSeq: Number(row.op_seq),
+          membershipEpoch: Number(row.membership_epoch),
+          erasureEpoch: Number(row.erasure_epoch),
+          policyVersion: Number(row.policy_version),
+        }
+      : undefined;
   }
 
   async updateMessageRevisionPointer(
