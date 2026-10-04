@@ -26,6 +26,7 @@ function contentEvent(overrides = {}) {
     sourceRevision: 1,
     protectedPayload: "Y2lwaGVydGV4dA==",
     renditionType: "ORIGINAL",
+    envelopeStatus: "PENDING",
     expiresAt: "2026-10-05T00:00:00.000Z",
     createdAt: "2026-10-04T00:00:00.000Z",
     ...overrides,
@@ -138,6 +139,7 @@ test("sync normalizes content-free delete events", async () => {
       envelopeId: null,
       protectedPayload: null,
       renditionType: null,
+      envelopeStatus: null,
       expiresAt: null,
       sourceRevision: 2,
     })],
@@ -408,6 +410,7 @@ test("sync normalizes translation.source_required control event without an envel
     sourceRevision: 2,
     protectedPayload: null,
     renditionType: null,
+    envelopeStatus: null,
     expiresAt: null,
     translationId: "translation-1",
     sourceRef: "hmac-sha256:k1:opaque-ref",
@@ -437,4 +440,72 @@ test("sync normalizes translation.source_required control event without an envel
     },
   }]);
   assert.equal(result.response.next_cursor, "1:1");
+});
+
+
+test("sync skips ACKED and REVOKED content envelopes while preserving cursor continuity", async () => {
+  const store = new FakeDeliveryStore({
+    state: {
+      inboxEpoch: 4,
+      nextOffset: 12,
+      lastAckedOffset: 0,
+    },
+    events: [
+      contentEvent({
+        offset: 8,
+        eventId: "event-acked",
+        envelopeStatus: "ACKED",
+        protectedPayload: null,
+        renditionType: null,
+        expiresAt: null,
+      }),
+      contentEvent({
+        offset: 9,
+        eventId: "event-revoked",
+        envelopeStatus: "REVOKED",
+        protectedPayload: null,
+        renditionType: null,
+        expiresAt: null,
+      }),
+      contentEvent({
+        offset: 10,
+        eventId: "event-live",
+        envelopeStatus: "PENDING",
+      }),
+    ],
+  });
+
+  const result = await service(store).sync(actor, {
+    cursor: "4:7",
+  });
+
+  assert.equal(result.kind, "OK");
+  assert.equal(result.response.events.length, 1);
+  assert.equal(result.response.events[0].event_id, "event-live");
+  assert.equal(result.response.next_cursor, "4:10");
+});
+
+test("expired content still forces a controlled sync reset", async () => {
+  const store = new FakeDeliveryStore({
+    state: {
+      inboxEpoch: 4,
+      nextOffset: 10,
+      lastAckedOffset: 0,
+    },
+    events: [contentEvent({
+      offset: 8,
+      eventId: "event-expired",
+      envelopeStatus: "EXPIRED",
+      protectedPayload: null,
+      renditionType: null,
+      expiresAt: null,
+    })],
+  });
+
+  const result = await service(store).sync(actor, {
+    cursor: "4:7",
+  });
+
+  assert.equal(result.kind, "RESET");
+  assert.equal(result.response.new_cursor, "4:8");
 });
