@@ -36,6 +36,11 @@ export interface PersistentRecipientTarget {
   devices: PersistentRecipientDevice[];
 }
 
+export interface PersistentConversationEventDevice {
+  userId: UUID;
+  deviceId: UUID;
+}
+
 export interface PersistentExistingAcceptance {
   messageId: UUID;
   conversationId: UUID;
@@ -103,6 +108,12 @@ export interface PersistentMessagingStore<Tx> {
     actor: ActorContext,
     conversationId: UUID,
   ): Promise<PersistentRecipientTarget[]>;
+
+  listConversationEventDevices(
+    tx: Tx,
+    actor: ActorContext,
+    conversationId: UUID,
+  ): Promise<PersistentConversationEventDevice[]>;
 
   lockMessageForAuthorMutation(
     tx: Tx,
@@ -1232,35 +1243,33 @@ export class PersistentMessagingService<Tx> {
         now,
       });
 
-      const targets =
-        await this.deps.store.listRecipientDeliveryTargets(
+      const eventDevices =
+        await this.deps.store.listConversationEventDevices(
           tx,
           actor,
           message.conversationId,
         );
 
-      for (const target of targets) {
-        for (const device of target.devices) {
-          const inbox =
-            await this.deps.store.allocateDeviceInboxOffset(
-              tx,
-              actor.tenantId,
-              device.deviceId,
-            );
-          await this.deps.store.insertInboxEvent(tx, {
-            deviceId: device.deviceId,
-            inboxEpoch: inbox.inboxEpoch,
-            offset: inbox.offset,
-            eventId: this.deps.ids.next("evt"),
-            eventType: "message.deleted",
-            tenantId: actor.tenantId,
-            conversationId: message.conversationId,
-            messageId: command.message_id,
-            envelopeId: null,
-            sourceRevision: newRevision,
-            createdAt: now,
-          });
-        }
+      for (const device of eventDevices) {
+        const inbox =
+          await this.deps.store.allocateDeviceInboxOffset(
+            tx,
+            actor.tenantId,
+            device.deviceId,
+          );
+        await this.deps.store.insertInboxEvent(tx, {
+          deviceId: device.deviceId,
+          inboxEpoch: inbox.inboxEpoch,
+          offset: inbox.offset,
+          eventId: this.deps.ids.next("evt"),
+          eventType: "message.deleted",
+          tenantId: actor.tenantId,
+          conversationId: message.conversationId,
+          messageId: command.message_id,
+          envelopeId: null,
+          sourceRevision: newRevision,
+          createdAt: now,
+        });
       }
 
       const mutationResult: MessageRevisionResult = {
