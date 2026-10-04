@@ -155,7 +155,7 @@ test("sync normalizes content-free delete events", async () => {
   });
 });
 
-test("sync reset handles wrong epoch purged history future and malformed cursors", async () => {
+test("sync reset handles wrong epoch future and malformed cursors without using ACK purge watermark as replay floor", async () => {
   const store = new FakeDeliveryStore({
     state: {
       inboxEpoch: 4,
@@ -171,14 +171,16 @@ test("sync reset handles wrong epoch purged history future and malformed cursors
     response: {
       protocol_version: 1,
       code: "SYNC_RESET_REQUIRED",
-      new_cursor: "4:6",
+      new_cursor: "4:0",
       events: [],
     },
   });
 
-  const purged = await delivery.sync(actor, { cursor: "4:5" });
-  assert.equal(purged.kind, "RESET");
-  assert.equal(purged.response.new_cursor, "4:6");
+  const behindAckWatermark = await delivery.sync(actor, {
+    cursor: "4:5",
+  });
+  assert.equal(behindAckWatermark.kind, "OK");
+  assert.equal(behindAckWatermark.response.next_cursor, "4:5");
 
   const ahead = await delivery.sync(actor, { cursor: "4:11" });
   assert.equal(ahead.kind, "RESET");
@@ -186,7 +188,35 @@ test("sync reset handles wrong epoch purged history future and malformed cursors
 
   const malformed = await delivery.sync(actor, { cursor: "bad" });
   assert.equal(malformed.kind, "RESET");
-  assert.equal(malformed.response.new_cursor, "4:6");
+  assert.equal(malformed.response.new_cursor, "4:0");
+});
+
+test("content-free delete below ACK watermark remains replayable", async () => {
+  const store = new FakeDeliveryStore({
+    state: {
+      inboxEpoch: 4,
+      nextOffset: 10,
+      lastAckedOffset: 9,
+    },
+    events: [contentEvent({
+      offset: 8,
+      eventId: "event-delete-8",
+      eventType: "message.deleted",
+      envelopeId: null,
+      protectedPayload: null,
+      renditionType: null,
+      expiresAt: null,
+      sourceRevision: 2,
+    })],
+  });
+
+  const result = await service(store).sync(actor, {
+    cursor: "4:7",
+  });
+
+  assert.equal(result.kind, "OK");
+  assert.equal(result.response.next_cursor, "4:8");
+  assert.equal(result.response.events[0].type, "message.deleted");
 });
 
 test("future cursor is rejected by the shared cursor decision helper", () => {
