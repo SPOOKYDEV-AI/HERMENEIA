@@ -15,6 +15,7 @@ MIGRATION = ROOT / "db/migrations/0001_core_messaging.sql"
 SESSION_MIGRATION = ROOT / "db/migrations/0002_session_access_credential.sql"
 RUNTIME_MIGRATION = ROOT / "db/migrations/0003_runtime_alignment.sql"
 COMMAND_MIGRATION = ROOT / "db/migrations/0004_command_fingerprint.sql"
+TENANT_SYNC_MIGRATION = ROOT / "db/migrations/0005_tenant_device_sync_state.sql"
 
 REQUIRED_TABLES = {
     "users",
@@ -67,6 +68,7 @@ def main() -> int:
     session_sql = SESSION_MIGRATION.read_text(encoding="utf-8")
     runtime_sql = RUNTIME_MIGRATION.read_text(encoding="utf-8")
     command_sql = COMMAND_MIGRATION.read_text(encoding="utf-8")
+    tenant_sync_sql = TENANT_SYNC_MIGRATION.read_text(encoding="utf-8")
     upper = sql.upper()
 
     if not upper.lstrip().startswith("BEGIN;"):
@@ -153,6 +155,22 @@ def main() -> int:
         fail("command migration must begin with BEGIN")
     if not command_sql.rstrip().endswith("COMMIT;"):
         fail("command migration must end with COMMIT")
+
+    tenant_sync_required = [
+        "CREATE TABLE tenant_device_sync_states",
+        "PRIMARY KEY (tenant_id, device_id)",
+        "last_acked_offset bigint NOT NULL DEFAULT 0",
+        "FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id)",
+        "FOREIGN KEY (device_id) REFERENCES devices(device_id)",
+    ]
+    for snippet in tenant_sync_required:
+        if snippet not in tenant_sync_sql:
+            fail(f"tenant sync migration missing invariant: {snippet}")
+
+    if not tenant_sync_sql.lstrip().startswith("BEGIN;"):
+        fail("tenant sync migration must begin with BEGIN")
+    if not tenant_sync_sql.rstrip().endswith("COMMIT;"):
+        fail("tenant sync migration must end with COMMIT")
 
     command_lower = command_sql.lower()
     for forbidden in (
