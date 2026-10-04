@@ -367,7 +367,12 @@ export interface TranslationRecoveryRecord {
   expectedSourceHash: string;
   messageCurrentRevision: number;
   messageStatus: "ACTIVE" | "DELETED";
-  targetMembershipStatus: "ACTIVE" | "LEFT" | "REMOVED" | null;
+  targetMembershipStatus:
+    | "ACTIVE"
+    | "LEFT"
+    | "REMOVED"
+    | "BLOCKED"
+    | null;
   currentTargetProfileVersion: number | null;
   currentTargetLanguageTag: string | null;
 }
