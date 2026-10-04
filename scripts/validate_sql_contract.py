@@ -17,6 +17,7 @@ RUNTIME_MIGRATION = ROOT / "db/migrations/0003_runtime_alignment.sql"
 COMMAND_MIGRATION = ROOT / "db/migrations/0004_command_fingerprint.sql"
 TENANT_SYNC_MIGRATION = ROOT / "db/migrations/0005_tenant_device_sync_state.sql"
 OUTBOX_LIFECYCLE_MIGRATION = ROOT / "db/migrations/0006_outbox_superseded.sql"
+OUTBOX_LEASE_MIGRATION = ROOT / "db/migrations/0007_outbox_lease_shape.sql"
 
 REQUIRED_TABLES = {
     "users",
@@ -71,6 +72,7 @@ def main() -> int:
     command_sql = COMMAND_MIGRATION.read_text(encoding="utf-8")
     tenant_sync_sql = TENANT_SYNC_MIGRATION.read_text(encoding="utf-8")
     outbox_lifecycle_sql = OUTBOX_LIFECYCLE_MIGRATION.read_text(encoding="utf-8")
+    outbox_lease_sql = OUTBOX_LEASE_MIGRATION.read_text(encoding="utf-8")
     upper = sql.upper()
 
     if not upper.lstrip().startswith("BEGIN;"):
@@ -190,6 +192,23 @@ def main() -> int:
         fail("outbox lifecycle migration must begin with BEGIN")
     if not outbox_lifecycle_sql.rstrip().endswith("COMMIT;"):
         fail("outbox lifecycle migration must end with COMMIT")
+
+    outbox_lease_required = [
+        "outbox_jobs_lifecycle_shape_check",
+        "status = 'AVAILABLE'",
+        "status = 'LEASED'",
+        "status IN ('DONE','DEAD','SUPERSEDED')",
+        "lease_until IS NOT NULL",
+        "completed_at IS NOT NULL",
+    ]
+    for snippet in outbox_lease_required:
+        if snippet not in outbox_lease_sql:
+            fail(f"outbox lease migration missing invariant: {snippet}")
+
+    if not outbox_lease_sql.lstrip().startswith("BEGIN;"):
+        fail("outbox lease migration must begin with BEGIN")
+    if not outbox_lease_sql.rstrip().endswith("COMMIT;"):
+        fail("outbox lease migration must end with COMMIT")
 
     command_lower = command_sql.lower()
     for forbidden in (
