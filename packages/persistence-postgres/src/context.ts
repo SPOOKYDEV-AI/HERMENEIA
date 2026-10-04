@@ -14,6 +14,10 @@ interface ContextSnapshotRow
   snapshot_id: UUID;
   conversation_id: UUID;
   message_id: UUID;
+  source_revision: number;
+  recipient_user_id: UUID;
+  target_language_tag: string;
+  target_profile_version: number;
   strategy: ContextStrategy;
   strategy_version: string;
   context_state_version: number | null;
@@ -51,6 +55,10 @@ export class PostgresContextSnapshotRepository {
          snapshot_id,
          conversation_id,
          message_id,
+         source_revision,
+         recipient_user_id,
+         target_language_tag,
+         target_profile_version,
          strategy,
          strategy_version,
          context_state_version,
@@ -65,9 +73,9 @@ export class PostgresContextSnapshotRepository {
          recovery_mode,
          created_at
        ) VALUES (
-         $1,$2,$3,$4,$5,$6,$7,$8,
-         $9::jsonb,$10::jsonb,$11::jsonb,
-         $12,$13::jsonb,$14,$15,$16,$17
+         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+         $11::jsonb,$12::jsonb,$13::jsonb,
+         $14,$15::jsonb,$16,$17,$18,$19
        )
        ON CONFLICT (tenant_id, snapshot_id)
        DO NOTHING`,
@@ -76,6 +84,10 @@ export class PostgresContextSnapshotRepository {
         snapshot.snapshotId,
         snapshot.conversationId,
         snapshot.messageId,
+        snapshot.sourceRevision,
+        snapshot.recipientUserId,
+        snapshot.targetLanguageTag,
+        snapshot.targetProfileVersion,
         snapshot.strategy,
         snapshot.strategyVersion,
         snapshot.contextStateVersion,
@@ -110,6 +122,10 @@ export class PostgresContextSnapshotRepository {
            snapshot_id,
            conversation_id,
            message_id,
+           source_revision,
+           recipient_user_id,
+           target_language_tag,
+           target_profile_version,
            strategy,
            strategy_version,
            context_state_version,
@@ -136,6 +152,10 @@ export class PostgresContextSnapshotRepository {
       snapshotId: row.snapshot_id,
       conversationId: row.conversation_id,
       messageId: row.message_id,
+      sourceRevision: Number(row.source_revision),
+      recipientUserId: row.recipient_user_id,
+      targetLanguageTag: row.target_language_tag,
+      targetProfileVersion: Number(row.target_profile_version),
       strategy: row.strategy,
       strategyVersion: row.strategy_version,
       contextStateVersion:
