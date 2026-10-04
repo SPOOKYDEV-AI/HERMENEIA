@@ -23,6 +23,7 @@ export interface TranslationContextRequest {
 
 export interface TranslationContextCandidateSet {
   currentSequence: number;
+  erasureEpoch: number;
   strategy: ContextStrategy;
   state: ConversationContextState | null;
   candidates: ContextCandidate[];
@@ -65,6 +66,7 @@ export class TranslationContextService<Tx> {
       targetLanguageTag: input.targetLanguageTag,
       targetProfileVersion: input.targetProfileVersion,
       currentSequence: loaded.currentSequence,
+      erasureEpoch: loaded.erasureEpoch,
       strategy: loaded.strategy,
       state: loaded.state,
       candidates: loaded.candidates,
