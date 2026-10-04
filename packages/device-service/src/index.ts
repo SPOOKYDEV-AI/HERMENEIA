@@ -180,10 +180,15 @@ export interface DeviceMaterialFingerprinter {
   fingerprint(publicMaterialRef: string): string;
 }
 
+export interface DeviceMaterialValidator {
+  validate(publicMaterialRef: string): void;
+}
+
 export interface PersistentDeviceServiceDependencies<Tx> {
   store: PersistentDeviceStore<Tx>;
   clock: DeviceClock;
   materialFingerprinter: DeviceMaterialFingerprinter;
+  materialValidator: DeviceMaterialValidator;
 }
 
 interface EnrollFingerprintV1 {
@@ -233,6 +238,8 @@ export class PersistentDeviceService<Tx> {
   ): Promise<DeviceResult> {
     validateCommandIdentity(command.command_id, command.device_id);
     validateMaterial(command.public_material_ref);
+    this.validateMaterialFormat(command.public_material_ref);
+    this.validateMaterialFormat(command.public_material_ref);
     const platform = command.platform ?? "OTHER";
     validatePlatform(platform);
 
@@ -562,6 +569,17 @@ export class PersistentDeviceService<Tx> {
       );
       return result;
     });
+  }
+
+  private validateMaterialFormat(value: string): void {
+    try {
+      this.deps.materialValidator.validate(value);
+    } catch {
+      throw new DomainError(
+        "INVALID_COMMAND",
+        "public_material_ref is not a supported delivery key",
+      );
+    }
   }
 
   private materialFingerprint(value: string): string {
