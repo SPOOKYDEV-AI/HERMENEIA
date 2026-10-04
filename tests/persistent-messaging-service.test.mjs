@@ -216,7 +216,7 @@ class TransactionalFakeStore {
     this.state.envelopes.push(clone(input));
   }
 
-  async allocateDeviceInboxOffset(_tx, deviceId) {
+  async allocateDeviceInboxOffset(_tx, _tenantId, deviceId) {
     this.maybeFail("allocateDeviceInboxOffset");
     const next = this.state.inboxOffsets.get(deviceId) ?? 1;
     this.state.inboxOffsets.set(deviceId, next + 1);
