@@ -461,8 +461,18 @@ export class PostgresMessagingRepository {
     tx: SqlExecutor,
     actor: ActorContext,
     conversationId: UUID,
-  ): Promise<number | undefined> {
-    const result = await tx.query<{ op_seq: number }>(
+  ): Promise<{
+    opSeq: number;
+    membershipEpoch: number;
+    erasureEpoch: number;
+    policyVersion: number;
+  } | undefined> {
+    const result = await tx.query<{
+      op_seq: number;
+      membership_epoch: number;
+      erasure_epoch: number;
+      policy_version: number;
+    }>(
       `UPDATE conversations c
           SET next_op_seq = c.next_op_seq + 1
          FROM conversation_members cm
@@ -481,7 +491,10 @@ export class PostgresMessagingRepository {
           AND cm.conversation_id = c.conversation_id
           AND cm.user_id = $3
           AND cm.status = 'ACTIVE'
-      RETURNING c.next_op_seq - 1 AS op_seq`,
+      RETURNING c.next_op_seq - 1 AS op_seq,
+                c.membership_epoch,
+                c.erasure_epoch,
+                c.policy_version`,
       [
         actor.tenantId,
         conversationId,
@@ -490,7 +503,14 @@ export class PostgresMessagingRepository {
       ],
     );
     const row = first(result);
-    return row ? Number(row.op_seq) : undefined;
+    return row
+      ? {
+          opSeq: Number(row.op_seq),
+          membershipEpoch: Number(row.membership_epoch),
+          erasureEpoch: Number(row.erasure_epoch),
+          policyVersion: Number(row.policy_version),
+        }
+      : undefined;
   }
 
   async updateMessageRevisionPointer(
