@@ -28,6 +28,24 @@ export interface TranslationLogicalKey {
   strategyVersion: string;
 }
 
+export interface TranslationFanoutTarget {
+  recipientUserId: UUID;
+  targetLanguageTag: string;
+  targetProfileVersion: number;
+}
+
+export interface TranslationFanoutPlan {
+  conversationId: UUID;
+  sourceLanguageTag: string | null;
+  targets: TranslationFanoutTarget[];
+}
+
+export interface TranslationRecipientDevice {
+  deviceId: UUID;
+  credentialVersion: number;
+  publicMaterialRef: string;
+}
+
 export interface TranslationExecutionRecord
   extends TranslationLogicalKey {
   translationId: UUID;
