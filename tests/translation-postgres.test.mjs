@@ -397,3 +397,33 @@ test("translation retry and terminal transitions are fenced by PENDING state", a
   assert.match(connection.queries[3].text, /status = 'FAILED'/);
   assert.match(connection.queries[4].text, /status = 'SUPERSEDED'/);
 });
+
+
+test("translation control device query includes active devices without requiring delivery key material", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [
+        { device_id: "device-b1" },
+        { device_id: "device-b2" },
+      ],
+      rowCount: 2,
+    },
+  ]);
+  const repository = new PostgresTranslationRepository(
+    new SqlTransactionManager(new Pool(connection)),
+  );
+
+  const devices = await repository.withTransaction((tx) =>
+    repository.listRecipientControlDevices(tx, {
+      tenantId: "tenant-1",
+      recipientUserId: "user-b",
+    }),
+  );
+
+  assert.deepEqual(devices, ["device-b1", "device-b2"]);
+  const sql = connection.queries[1];
+  assert.match(sql.text, /tm\.tenant_id = \$1/);
+  assert.match(sql.text, /tm\.status = 'ACTIVE'/);
+  assert.match(sql.text, /d\.status = 'ACTIVE'/);
+  assert.doesNotMatch(sql.text, /public_material_ref/);
+});
