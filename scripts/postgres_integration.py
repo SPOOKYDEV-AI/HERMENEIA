@@ -27,6 +27,7 @@ def main() -> int:
     session_migration = ROOT / "db/migrations/0002_session_access_credential.sql"
     runtime_migration = ROOT / "db/migrations/0003_runtime_alignment.sql"
     command_migration = ROOT / "db/migrations/0004_command_fingerprint.sql"
+    tenant_sync_migration = ROOT / "db/migrations/0005_tenant_device_sync_state.sql"
     smoke = ROOT / "db/tests/0001_core_messaging_smoke.sql"
     runtime_smoke = ROOT / "db/tests/0003_runtime_alignment_smoke.sql"
     down = ROOT / "db/migrations/0001_core_messaging.down.sql"
@@ -37,6 +38,7 @@ def main() -> int:
         session_migration,
         runtime_migration,
         command_migration,
+        tenant_sync_migration,
         smoke,
         runtime_smoke,
     ):
