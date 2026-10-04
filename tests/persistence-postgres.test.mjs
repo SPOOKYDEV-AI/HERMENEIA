@@ -6,6 +6,7 @@ import {
 } from "../.build/packages/persistence/src/index.js";
 import {
   PostgresMessagingRepository,
+  PostgresOutboxRepository,
   PostgresSessionRepository,
   evaluateSyncCursor,
 } from "../.build/packages/persistence-postgres/src/index.js";
@@ -978,4 +979,148 @@ test("content-free conversation events include active devices without public del
     "conversation-1",
     "device-1",
   ]);
+});
+
+
+test("outbox lease uses SKIP LOCKED and fences every lease attempt", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{
+        job_id: "job-1",
+        tenant_id: "tenant-1",
+        job_type: "translation.request",
+        business_key: "message-1:1",
+        payload_ref: {
+          message_id: "message-1",
+          source_revision: 1,
+        },
+        priority: 10,
+        fencing_token: 4,
+        attempt_count: 2,
+        lease_until: "2026-10-04T10:00:30.000Z",
+      }],
+      rowCount: 1,
+    },
+  ]);
+  const repository = new PostgresOutboxRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const lease = await repository.withTransaction((tx) =>
+    repository.leaseNextJob(tx, {
+      jobType: "translation.request",
+      now: "2026-10-04T10:00:00.000Z",
+      leaseUntil: "2026-10-04T10:00:30.000Z",
+    }),
+  );
+
+  assert.deepEqual(lease, {
+    jobId: "job-1",
+    tenantId: "tenant-1",
+    jobType: "translation.request",
+    businessKey: "message-1:1",
+    payloadRef: {
+      message_id: "message-1",
+      source_revision: 1,
+    },
+    priority: 10,
+    fencingToken: 4,
+    attemptCount: 2,
+    leaseUntil: "2026-10-04T10:00:30.000Z",
+  });
+
+  const sql = connection.queries[1];
+  assert.match(sql.text, /FOR UPDATE SKIP LOCKED/);
+  assert.match(sql.text, /status = 'AVAILABLE'/);
+  assert.match(sql.text, /status = 'LEASED'/);
+  assert.match(sql.text, /lease_until <= \$2/);
+  assert.match(sql.text, /fencing_token = j\.fencing_token \+ 1/);
+  assert.match(sql.text, /attempt_count = j\.attempt_count \+ 1/);
+});
+
+test("outbox completion is accepted only for a live matching fencing token", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 1 },
+  ]);
+  const repository = new PostgresOutboxRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const completed = await repository.withTransaction((tx) =>
+    repository.completeJob(tx, {
+      tenantId: "tenant-1",
+      jobId: "job-1",
+      fencingToken: 7,
+      now: "2026-10-04T10:00:10.000Z",
+    }),
+  );
+
+  assert.equal(completed, true);
+  const sql = connection.queries[1];
+  assert.match(sql.text, /status = 'LEASED'/);
+  assert.match(sql.text, /fencing_token = \$3/);
+  assert.match(sql.text, /lease_until > \$4/);
+  assert.match(sql.text, /status = 'DONE'/);
+});
+
+test("outbox retry and dead-letter transitions are lease fenced", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 1 },
+    { rows: [], rowCount: 1 },
+  ]);
+  const repository = new PostgresOutboxRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const result = await repository.withTransaction(async (tx) => ({
+    retry: await repository.retryJob(tx, {
+      tenantId: "tenant-1",
+      jobId: "job-1",
+      fencingToken: 9,
+      now: "2026-10-04T10:00:10.000Z",
+      availableAt: "2026-10-04T10:01:00.000Z",
+    }),
+    dead: await repository.deadLetterJob(tx, {
+      tenantId: "tenant-1",
+      jobId: "job-2",
+      fencingToken: 5,
+      now: "2026-10-04T10:00:10.000Z",
+    }),
+  }));
+
+  assert.deepEqual(result, {
+    retry: true,
+    dead: true,
+  });
+
+  assert.match(connection.queries[1].text, /status = 'AVAILABLE'/);
+  assert.match(connection.queries[1].text, /fencing_token = \$3/);
+  assert.match(connection.queries[1].text, /lease_until > \$4/);
+  assert.match(connection.queries[2].text, /status = 'DEAD'/);
+  assert.match(connection.queries[2].text, /fencing_token = \$3/);
+  assert.match(connection.queries[2].text, /lease_until > \$4/);
+});
+
+test("superseding translation work invalidates any in-flight fencing token", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 2 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const count = await repository.withTransaction((tx) =>
+    repository.supersedeTranslationJobs(tx, {
+      tenantId: "tenant-1",
+      messageId: "message-1",
+      throughRevision: 2,
+      now: "2026-10-04T10:00:00.000Z",
+    }),
+  );
+
+  assert.equal(count, 2);
+  const sql = connection.queries[1];
+  assert.match(sql.text, /status = 'SUPERSEDED'/);
+  assert.match(sql.text, /fencing_token = fencing_token \+ 1/);
+  assert.match(sql.text, /lease_until = NULL/);
 });
