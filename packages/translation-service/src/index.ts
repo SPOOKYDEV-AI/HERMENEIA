@@ -894,10 +894,7 @@ export class TranslationRecoveryService<Tx> {
     execution: TranslationExecutionRecord,
     now: string,
   ): Promise<void> {
-    if (
-      execution.status === "PENDING" ||
-      execution.status === "SOURCE_REQUIRED"
-    ) {
+    if (execution.status !== "SUPERSEDED") {
       await this.deps.store.markSuperseded(tx, {
         tenantId: execution.tenantId,
         translationId: execution.translationId,
