@@ -33,6 +33,8 @@ export interface PersistentRecipientDevice {
 
 export interface PersistentRecipientTarget {
   userId: UUID;
+  targetLanguageTag: string | null;
+  targetProfileVersion: number;
   devices: PersistentRecipientDevice[];
 }
 
@@ -130,7 +132,12 @@ export interface PersistentMessagingStore<Tx> {
     tx: Tx,
     actor: ActorContext,
     conversationId: UUID,
-  ): Promise<number | undefined>;
+  ): Promise<{
+    opSeq: number;
+    membershipEpoch: number;
+    erasureEpoch: number;
+    policyVersion: number;
+  } | undefined>;
 
   updateMessageRevisionPointer(
     tx: Tx,
@@ -600,10 +607,16 @@ export class PersistentMessagingService<Tx> {
           );
         }
 
+        const translationTargets = externalRecipients.filter(
+          (target) => Boolean(target.targetLanguageTag),
+        );
+
         const sourceRevision = 1;
         let translationStatus:
           AcceptedMessage["translation_status"] =
-          "SOURCE_REQUIRED";
+          translationTargets.length > 0
+            ? "SOURCE_REQUIRED"
+            : "NOT_REQUESTED";
 
         const transientBuffered =
           await this.bestEffortBufferSource(
@@ -621,7 +634,9 @@ export class PersistentMessagingService<Tx> {
             messageId: proposedMessageId,
             sourceRevision,
           };
-          translationStatus = "PENDING";
+          if (translationTargets.length > 0) {
+            translationStatus = "PENDING";
+          }
         }
 
         await this.deps.store.insertMessageMetadata(tx, {
@@ -716,24 +731,31 @@ export class PersistentMessagingService<Tx> {
           }
         }
 
-        await this.deps.store.insertOutboxJob(tx, {
-          jobId: this.deps.ids.next("job"),
-          tenantId: actor.tenantId,
-          jobType: "translation.request",
-          businessKey: `${proposedMessageId}:${sourceRevision}`,
-          payloadRef: {
-            message_id: proposedMessageId,
-            source_revision: sourceRevision,
-            source_hash: sourceFingerprint,
-            source_buffer_key:
-              `${actor.tenantId}:${proposedMessageId}:${sourceRevision}`,
-            membership_epoch: allocation.membershipEpoch,
-            erasure_epoch: allocation.erasureEpoch,
-            policy_version: allocation.policyVersion,
-          },
-          priority: 10,
-          availableAt: now,
-        });
+        for (const target of translationTargets) {
+          await this.deps.store.insertOutboxJob(tx, {
+            jobId: this.deps.ids.next("job"),
+            tenantId: actor.tenantId,
+            jobType: "translation.request",
+            businessKey:
+              `${proposedMessageId}:${sourceRevision}:${target.userId}:${target.targetProfileVersion}:t0-v1`,
+            payloadRef: {
+              message_id: proposedMessageId,
+              source_revision: sourceRevision,
+              source_hash: sourceFingerprint,
+              source_buffer_key:
+                `${actor.tenantId}:${proposedMessageId}:${sourceRevision}`,
+              recipient_user_id: target.userId,
+              target_language_tag: target.targetLanguageTag,
+              target_profile_version: target.targetProfileVersion,
+              strategy_version: "t0-v1",
+              membership_epoch: allocation.membershipEpoch,
+              erasure_epoch: allocation.erasureEpoch,
+              policy_version: allocation.policyVersion,
+            },
+            priority: 10,
+            availableAt: now,
+          });
+        }
 
         const accepted: AcceptedMessage = {
           protocol_version: 1,
@@ -883,12 +905,13 @@ export class PersistentMessagingService<Tx> {
           );
         }
 
-        const opSeq = await this.deps.store.allocateOperationSequence(
-          tx,
-          actor,
-          message.conversationId,
-        );
-        if (!opSeq) {
+        const allocation =
+          await this.deps.store.allocateOperationSequence(
+            tx,
+            actor,
+            message.conversationId,
+          );
+        if (!allocation) {
           throw new DomainError(
             "NOT_AUTHORIZED",
             "Conversation is not available to actor",
@@ -946,7 +969,7 @@ export class PersistentMessagingService<Tx> {
           conversationId: message.conversationId,
           messageId: command.message_id,
           revision: newRevision,
-          opSeq,
+          opSeq: allocation.opSeq,
           mutationType: "EDITED",
           actorUserId: actor.userId,
           sourceHash: sourceFingerprint,
@@ -1040,26 +1063,40 @@ export class PersistentMessagingService<Tx> {
           }
         }
 
-        await this.deps.store.insertOutboxJob(tx, {
-          jobId: this.deps.ids.next("job"),
-          tenantId: actor.tenantId,
-          jobType: "translation.request",
-          businessKey: `${command.message_id}:${newRevision}`,
-          payloadRef: {
-            message_id: command.message_id,
-            source_revision: newRevision,
-            source_hash: sourceFingerprint,
-            source_buffer_key:
-              `${actor.tenantId}:${command.message_id}:${newRevision}`,
-          },
-          priority: 10,
-          availableAt: now,
-        });
+        const translationTargets = externalRecipients.filter(
+          (target) => Boolean(target.targetLanguageTag),
+        );
+
+        for (const target of translationTargets) {
+          await this.deps.store.insertOutboxJob(tx, {
+            jobId: this.deps.ids.next("job"),
+            tenantId: actor.tenantId,
+            jobType: "translation.request",
+            businessKey:
+              `${command.message_id}:${newRevision}:${target.userId}:${target.targetProfileVersion}:t0-v1`,
+            payloadRef: {
+              message_id: command.message_id,
+              source_revision: newRevision,
+              source_hash: sourceFingerprint,
+              source_buffer_key:
+                `${actor.tenantId}:${command.message_id}:${newRevision}`,
+              recipient_user_id: target.userId,
+              target_language_tag: target.targetLanguageTag,
+              target_profile_version: target.targetProfileVersion,
+              strategy_version: "t0-v1",
+              membership_epoch: allocation.membershipEpoch,
+              erasure_epoch: allocation.erasureEpoch,
+              policy_version: allocation.policyVersion,
+            },
+            priority: 10,
+            availableAt: now,
+          });
+        }
 
         const mutationResult: MessageRevisionResult = {
           message_id: command.message_id,
           revision: newRevision,
-          op_seq: opSeq,
+          op_seq: allocation.opSeq,
           status: "ACTIVE",
         };
 
@@ -1188,12 +1225,13 @@ export class PersistentMessagingService<Tx> {
         );
       }
 
-      const opSeq = await this.deps.store.allocateOperationSequence(
-        tx,
-        actor,
-        message.conversationId,
-      );
-      if (!opSeq) {
+      const allocation =
+        await this.deps.store.allocateOperationSequence(
+          tx,
+          actor,
+          message.conversationId,
+        );
+      if (!allocation) {
         throw new DomainError(
           "NOT_AUTHORIZED",
           "Conversation is not available to actor",
@@ -1213,7 +1251,7 @@ export class PersistentMessagingService<Tx> {
         conversationId: message.conversationId,
         messageId: command.message_id,
         revision: newRevision,
-        opSeq,
+        opSeq: allocation.opSeq,
         mutationType: "DELETED",
         actorUserId: actor.userId,
         sourceHash: null,
@@ -1275,7 +1313,7 @@ export class PersistentMessagingService<Tx> {
       const mutationResult: MessageRevisionResult = {
         message_id: command.message_id,
         revision: newRevision,
-        op_seq: opSeq,
+        op_seq: allocation.opSeq,
         status: "DELETED",
       };
 
