@@ -41,7 +41,10 @@ export interface PersistentContextTranslationDependencies {
   ids: PersistentContextTranslationIds;
   clock: PersistentContextTranslationClock;
   stateSource?: ConversationContextStateSource;
-  plannerConfig?: Partial<TranslationContextPlannerConfig> & {
+  plannerConfig?: Omit<
+    Partial<TranslationContextPlannerConfig>,
+    "budget"
+  > & {
     budget?: Partial<
       TranslationContextPlannerConfig["budget"]
     >;
