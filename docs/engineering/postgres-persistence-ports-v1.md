@@ -115,23 +115,31 @@ Therefore the durable privacy invariant is **payload purge on ACK**, not necessa
 
 This is the persistent equivalent of the in-memory relay tombstone.
 
-## 8. Cursor after purge
+## 8. Tenant-local cursor and payload purge
 
-Once the service records:
+Persistent sync cursor state is stored in `tenant_device_sync_states` and is scoped by:
 
-    last_acked_offset = N
+    tenant_id
+    device_id
 
-a client cannot request recoverable payload history from an offset earlier than N.
+The state owns:
 
-`evaluateSyncCursor()` returns:
+    inbox_epoch
+    next_offset
+    last_acked_offset
 
-    CONTINUE
-    RESET_EPOCH
-    RESET_PURGED
+`next_offset` is tenant-local. The same physical device may therefore have the same numeric offset in multiple tenants without exposing activity between them.
 
-The implemented persistent delivery service applies this rule before querying old events. Replay is filtered by authenticated tenant and device.
+`last_acked_offset` tracks the contiguous terminal envelope prefix for payload lifecycle purposes. It is deliberately **not** used as a blanket replay floor because content-free control events may still need replay.
 
-The purge/replay watermark is stored in `tenant_device_sync_states`; global device offsets remain monotonic in `device_sync_states`. ACK advancement scans for the first non-terminal envelope-bearing event and never jumps over it.
+Persistent sync behavior therefore distinguishes:
+
+- ACKED/REVOKED content envelopes: advance cursor without exposing payload;
+- PENDING content envelopes: deliver normally;
+- EXPIRED/missing content payload at the current replay point: controlled reset;
+- content-free controls such as `message.deleted`: remain replayable even below the ACK watermark.
+
+`evaluateSyncCursor()` rejects wrong epochs and cursors ahead of the tenant-local issued range; it does not infer another tenant's activity from a global device counter.
 
 ## 9. Mutation lifecycle
 
@@ -195,5 +203,5 @@ The persistence-specific suite contains 7 tests covering:
 - parameterized sequence allocation;
 - ACK payload purge;
 - ACK idempotency;
-- cursor reset after epoch/purge;
+- tenant-local cursor isolation and controlled replay/reset;
 - exact tenant session binding.
