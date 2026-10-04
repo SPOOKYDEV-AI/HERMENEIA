@@ -581,7 +581,7 @@ components:
         - command_id
         - message_id
         - source_revision
-        - source_hash
+        - source_ref
         - source
       properties:
         protocol_version:
@@ -594,7 +594,7 @@ components:
         source_revision:
           type: integer
           minimum: 1
-        source_hash:
+        source_ref:
           type: string
           minLength: 16
           maxLength: 256
@@ -748,6 +748,7 @@ components:
             - DEVICE_REVOKED
             - RECIPIENT_UNAVAILABLE
             - SOURCE_REQUIRED
+            - SOURCE_BUFFER_UNAVAILABLE
             - SOURCE_EXPIRED
             - SOURCE_REVISION_MISMATCH
             - SYNC_CURSOR_EXPIRED
