@@ -712,6 +712,10 @@ export class PostgresMessagingRepository {
                        d.credential_version,
                        d.public_material_ref
          FROM device_inbox_events die
+         JOIN devices d
+           ON d.device_id = die.device_id
+          AND d.status = 'ACTIVE'
+          AND length(d.public_material_ref) > 0
          JOIN message_metadata mm
            ON mm.tenant_id = die.tenant_id
           AND mm.message_id = die.message_id
@@ -724,10 +728,6 @@ export class PostgresMessagingRepository {
            ON tm.tenant_id = mm.tenant_id
           AND tm.user_id = d.user_id
           AND tm.status = 'ACTIVE'
-         JOIN devices d
-           ON d.device_id = die.device_id
-          AND d.status = 'ACTIVE'
-          AND length(d.public_material_ref) > 0
         WHERE die.tenant_id = $1
           AND die.message_id = $2
           AND die.device_id <> $3
