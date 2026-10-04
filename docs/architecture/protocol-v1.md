@@ -93,7 +93,7 @@ with the original logical result when available.
 
     GET /v1/sync?cursor={cursor}&limit={n}&wait_ms={ms}
 
-Returns ordered device-scoped events and next cursor.
+Returns ordered tenant-and-device-scoped events and the next opaque cursor.
 
 A missing/expired epoch returns `SYNC_RESET_REQUIRED`.
 
@@ -340,7 +340,7 @@ Client event application is one local transaction:
 1. verify event ID not already applied;
 2. apply event/rendition mutation;
 3. persist any received envelope content;
-4. update device cursor;
+4. update the tenant/device cursor;
 5. commit;
 6. ACK delivery envelope if applicable.
 
