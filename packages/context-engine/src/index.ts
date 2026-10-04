@@ -115,6 +115,10 @@ export interface BuildContextInput {
   snapshotId: UUID;
   conversationId: UUID;
   messageId: UUID;
+  sourceRevision: number;
+  recipientUserId: UUID;
+  targetLanguageTag: string;
+  targetProfileVersion: number;
   currentSequence: number;
   now: string;
   strategy: ContextStrategy;
@@ -144,6 +148,10 @@ export interface ContextSnapshot {
   snapshotId: UUID;
   conversationId: UUID;
   messageId: UUID;
+  sourceRevision: number;
+  recipientUserId: UUID;
+  targetLanguageTag: string;
+  targetProfileVersion: number;
   strategy: ContextStrategy;
   strategyVersion: string;
   contextStateVersion: number | null;
@@ -253,6 +261,10 @@ export class ContextEngine {
       snapshotId: input.snapshotId,
       conversationId: input.conversationId,
       messageId: input.messageId,
+      sourceRevision: input.sourceRevision,
+      recipientUserId: input.recipientUserId,
+      targetLanguageTag: input.targetLanguageTag,
+      targetProfileVersion: input.targetProfileVersion,
       strategy: input.strategy,
       strategyVersion: this.config.strategyVersion,
       contextStateVersion:
@@ -580,10 +592,30 @@ function validateInput(input: BuildContextInput): void {
   if (
     !input.snapshotId ||
     !input.conversationId ||
-    !input.messageId
+    !input.messageId ||
+    !input.recipientUserId ||
+    !input.targetLanguageTag.trim()
   ) {
     throw new TypeError(
-      "snapshotId, conversationId and messageId are required",
+      "snapshotId, conversationId, messageId, recipientUserId and targetLanguageTag are required",
+    );
+  }
+
+  if (
+    !Number.isInteger(input.sourceRevision) ||
+    input.sourceRevision < 1
+  ) {
+    throw new TypeError(
+      "sourceRevision must be a positive integer",
+    );
+  }
+
+  if (
+    !Number.isInteger(input.targetProfileVersion) ||
+    input.targetProfileVersion < 1
+  ) {
+    throw new TypeError(
+      "targetProfileVersion must be a positive integer",
     );
   }
   if (
