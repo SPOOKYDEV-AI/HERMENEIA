@@ -278,6 +278,13 @@ class TransactionalFakeStore {
     return count;
   }
 
+  async cancelStartedProviderAttempts(_tx, input) {
+    this.maybeFail("cancelStartedProviderAttempts");
+    this.cancelledProviderAttempts ??= [];
+    this.cancelledProviderAttempts.push(clone(input));
+    return 1;
+  }
+
   async supersedeTranslationExecutions(_tx, input) {
     this.maybeFail("supersedeTranslationExecutions");
     this.translationSupersedeCalls.push(clone(input));
@@ -999,6 +1006,13 @@ test("persistent edit creates revision, revokes old envelopes and supersedes old
   );
 
   assert.equal(store.state.jobs[0].status, "SUPERSEDED");
+  assert.equal(store.cancelledProviderAttempts?.length, 1);
+  assert.deepEqual(store.cancelledProviderAttempts?.[0], {
+    tenantId: "tenant-1",
+    messageId: accepted.message_id,
+    throughRevision: 1,
+    now: "2026-10-03T23:00:00.000Z",
+  });
   assert.equal(store.state.jobs[1].status, "AVAILABLE");
   assert.deepEqual(
     {
@@ -1132,6 +1146,7 @@ test("persistent delete creates tombstone, purges pending delivery and transient
     true,
   );
   assert.equal(store.state.jobs[0].status, "SUPERSEDED");
+  assert.equal(store.cancelledProviderAttempts?.length, 1);
   assert.deepEqual(store.translationSupersedeCalls.at(-1), {
     tenantId: "tenant-1",
     messageId: accepted.message_id,
