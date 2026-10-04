@@ -160,6 +160,19 @@ These are configuration defaults for experiments, not validated final values:
 
 Exact values are deployment policy and must be measured.
 
+### Source fingerprint keys
+
+Durable source fingerprints use an opaque keyed construction in production.
+
+Fingerprint verification keys have a lifecycle dependency on any retained command receipt or source revision that must remain retryable/re-suppliable. Rotating the active key does not by itself make older durable fingerprints independently verifiable.
+
+A deployment must therefore either:
+
+- retain old fingerprint keys for the required verification window; or
+- expire/erase the dependent verification records before retiring the key.
+
+These fingerprint keys are separate from per-device delivery-envelope keys.
+
 ## 8. No hidden retention
 
 Forbidden retention paths:
