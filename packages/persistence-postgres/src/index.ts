@@ -1288,39 +1288,33 @@ export class PostgresMessagingRepository {
       inbox_epoch: number;
       offset_value: number;
     }>(
-      `UPDATE device_sync_states
-          SET next_offset = next_offset + 1,
-              updated_at = now()
-        WHERE device_id = $1
-      RETURNING inbox_epoch,
-                next_offset - 1 AS offset_value`,
-      [deviceId],
+      `WITH eligible_device AS (
+         SELECT d.device_id
+           FROM devices d
+          WHERE d.device_id = $2
+            AND d.status = 'ACTIVE'
+          FOR UPDATE OF d
+       )
+       INSERT INTO tenant_device_sync_states(
+         tenant_id, device_id, inbox_epoch,
+         next_offset, last_acked_offset, updated_at
+       )
+       SELECT $1, eligible_device.device_id, 1, 2, 0, now()
+         FROM eligible_device
+       ON CONFLICT (tenant_id, device_id)
+       DO UPDATE SET
+         next_offset = tenant_device_sync_states.next_offset + 1,
+         updated_at = now()
+       RETURNING inbox_epoch,
+                 next_offset - 1 AS offset_value`,
+      [tenantId, deviceId],
     );
     const row = first(result);
     if (!row) {
-      throw new Error("Missing device_sync_states row");
+      throw new Error(
+        "Device is not active for tenant-local inbox allocation",
+      );
     }
-
-    await tx.query(
-      `INSERT INTO tenant_device_sync_states(
-         tenant_id, device_id, inbox_epoch,
-         last_acked_offset, updated_at
-       ) VALUES ($1,$2,$3,0,now())
-       ON CONFLICT (tenant_id, device_id)
-       DO UPDATE SET
-         inbox_epoch = EXCLUDED.inbox_epoch,
-         last_acked_offset = CASE
-           WHEN tenant_device_sync_states.inbox_epoch = EXCLUDED.inbox_epoch
-           THEN tenant_device_sync_states.last_acked_offset
-           ELSE 0
-         END,
-         updated_at = CASE
-           WHEN tenant_device_sync_states.inbox_epoch = EXCLUDED.inbox_epoch
-           THEN tenant_device_sync_states.updated_at
-           ELSE now()
-         END`,
-      [tenantId, deviceId, Number(row.inbox_epoch)],
-    );
 
     return {
       inboxEpoch: Number(row.inbox_epoch),
@@ -1468,23 +1462,25 @@ export class PostgresMessagingRepository {
       next_offset: number;
       last_acked_offset: number;
     }>(
-      `SELECT dss.inbox_epoch,
-              dss.next_offset,
-              COALESCE(tds.last_acked_offset, 0) AS last_acked_offset
-         FROM device_sync_states dss
-         JOIN devices d
-           ON d.device_id = dss.device_id
-          AND d.user_id = $2
-          AND d.status = 'ACTIVE'
+      `INSERT INTO tenant_device_sync_states(
+         tenant_id, device_id, inbox_epoch,
+         next_offset, last_acked_offset, updated_at
+       )
+       SELECT $1, d.device_id, 1, 1, 0, now()
+         FROM devices d
          JOIN tenant_memberships tm
            ON tm.tenant_id = $1
           AND tm.user_id = d.user_id
           AND tm.status = 'ACTIVE'
-         LEFT JOIN tenant_device_sync_states tds
-           ON tds.tenant_id = $1
-          AND tds.device_id = dss.device_id
-          AND tds.inbox_epoch = dss.inbox_epoch
-        WHERE dss.device_id = $3`,
+        WHERE d.device_id = $3
+          AND d.user_id = $2
+          AND d.status = 'ACTIVE'
+       ON CONFLICT (tenant_id, device_id)
+       DO UPDATE SET
+         updated_at = tenant_device_sync_states.updated_at
+       RETURNING inbox_epoch,
+                 next_offset,
+                 last_acked_offset`,
       [actor.tenantId, actor.userId, actor.deviceId],
     );
     const row = first(result);
@@ -1658,16 +1654,13 @@ export class PostgresMessagingRepository {
       next_offset: number;
       last_acked_offset: number;
     }>(
-      `SELECT dss.inbox_epoch,
-              dss.next_offset,
-              tds.last_acked_offset
-         FROM device_sync_states dss
-         JOIN tenant_device_sync_states tds
-           ON tds.tenant_id = $1
-          AND tds.device_id = dss.device_id
-          AND tds.inbox_epoch = dss.inbox_epoch
-        WHERE dss.device_id = $2
-        FOR UPDATE OF tds`,
+      `SELECT inbox_epoch,
+              next_offset,
+              last_acked_offset
+         FROM tenant_device_sync_states
+        WHERE tenant_id = $1
+          AND device_id = $2
+        FOR UPDATE`,
       [input.tenantId, input.deviceId],
     );
     const state = first(syncState);
