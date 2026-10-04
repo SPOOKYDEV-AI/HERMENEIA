@@ -1272,6 +1272,13 @@ export class PersistentMessagingService<Tx> {
         now,
       });
 
+      await this.deps.store.supersedeTranslationExecutions(tx, {
+        tenantId: actor.tenantId,
+        messageId: command.message_id,
+        throughRevision: previousRevision,
+        now,
+      });
+
       const eventDevices =
         await this.deps.store.listConversationEventDevices(
           tx,
