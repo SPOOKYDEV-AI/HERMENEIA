@@ -847,6 +847,8 @@ export class TranslationWorkerService<Tx> {
             {
               tenantId: execution.tenantId,
               recipientUserId: execution.recipientUserId,
+              sourceMessageId: execution.sourceMessageId,
+              sourceRevision: execution.sourceRevision,
             },
           );
 
