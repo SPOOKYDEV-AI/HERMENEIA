@@ -1336,6 +1336,62 @@ export class PostgresOutboxRepository {
       : undefined;
   }
 
+  async reactivateTranslationExecuteJob(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      translationId: UUID;
+      availableAt: string;
+    },
+  ): Promise<
+    "REACTIVATED" | "ACTIVE" | "SUPERSEDED" | "NOT_FOUND"
+  > {
+    const lookup = await tx.query<{
+      job_id: UUID;
+      status:
+        | "AVAILABLE"
+        | "LEASED"
+        | "DONE"
+        | "DEAD"
+        | "SUPERSEDED";
+    }>(
+      `SELECT job_id, status
+         FROM outbox_jobs
+        WHERE tenant_id = $1
+          AND job_type = 'translation.execute'
+          AND business_key = $2
+        FOR UPDATE`,
+      [input.tenantId, input.translationId],
+    );
+    const row = first(lookup);
+    if (!row) return "NOT_FOUND";
+    if (row.status === "AVAILABLE" || row.status === "LEASED") {
+      return "ACTIVE";
+    }
+    if (row.status === "SUPERSEDED") {
+      return "SUPERSEDED";
+    }
+
+    const updated = await tx.query(
+      `UPDATE outbox_jobs
+          SET status = 'AVAILABLE',
+              available_at = $3,
+              lease_until = NULL,
+              attempt_count = 0,
+              completed_at = NULL
+        WHERE tenant_id = $1
+          AND job_id = $2
+          AND status IN ('DONE','DEAD')`,
+      [input.tenantId, row.job_id, input.availableAt],
+    );
+    if (updated.rowCount !== 1) {
+      throw new Error(
+        "Invariant violation: terminal translation job was not reactivated",
+      );
+    }
+    return "REACTIVATED";
+  }
+
   async completeJob(
     tx: SqlExecutor,
     input: {
