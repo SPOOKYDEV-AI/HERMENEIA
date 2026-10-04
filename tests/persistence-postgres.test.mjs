@@ -930,6 +930,10 @@ test("message mutation supersedes available or leased translation jobs", async (
   assert.equal(count, 2);
   const query = connection.queries[1];
   assert.match(query.text, /status = 'SUPERSEDED'/);
+  assert.match(
+    query.text,
+    /job_type IN \('translation\.request','translation\.execute'\)/,
+  );
   assert.match(query.text, /status IN \('AVAILABLE','LEASED'\)/);
   assert.match(query.text, /payload_ref->>'message_id' = \$2/);
   assert.match(query.text, /payload_ref->>'source_revision'/);
@@ -1123,4 +1127,36 @@ test("superseding translation work invalidates any in-flight fencing token", asy
   assert.match(sql.text, /status = 'SUPERSEDED'/);
   assert.match(sql.text, /fencing_token = fencing_token \+ 1/);
   assert.match(sql.text, /lease_until = NULL/);
+});
+
+
+test("message mutation supersedes pending translation executions", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 2 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const count = await repository.withTransaction((tx) =>
+    repository.supersedeTranslationExecutions(tx, {
+      tenantId: "tenant-1",
+      messageId: "message-1",
+      throughRevision: 2,
+      now: "2026-10-04T12:30:00.000Z",
+    }),
+  );
+
+  assert.equal(count, 2);
+  const query = connection.queries[1];
+  assert.match(query.text, /UPDATE translation_executions/);
+  assert.match(query.text, /status = 'SUPERSEDED'/);
+  assert.match(query.text, /source_revision <= \$3/);
+  assert.match(query.text, /status IN \('PENDING','SOURCE_REQUIRED'\)/);
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "message-1",
+    2,
+    "2026-10-04T12:30:00.000Z",
+  ]);
 });
