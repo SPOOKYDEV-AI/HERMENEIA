@@ -1283,3 +1283,215 @@ test("message mutation logically cancels started provider attempts for supersede
     "2026-10-04T12:00:00.000Z",
   ]);
 });
+
+
+test("device administration requires active tenant membership and current active device", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [{ found: true }], rowCount: 1 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const allowed = await repository.withTransaction((tx) =>
+    repository.actorCanManageDevices(tx, actor()),
+  );
+
+  assert.equal(allowed, true);
+  const query = connection.queries[1];
+  assert.match(query.text, /tenant_memberships/);
+  assert.match(query.text, /d\.status = 'ACTIVE'/);
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "user-1",
+    "device-1",
+  ]);
+});
+
+test("device enrollment insert owns credential version 1 on the server", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{ device_id: "device-new" }],
+      rowCount: 1,
+    },
+    { rows: [], rowCount: 1 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const inserted = await repository.withTransaction(async (tx) => {
+    const created = await repository.insertDevice(tx, {
+      deviceId: "device-new",
+      userId: "user-1",
+      publicMaterialRef: "public:new",
+      platform: "ANDROID",
+      registeredAt: "2026-10-04T16:00:00.000Z",
+    });
+    await repository.insertDeviceSyncState(tx, "device-new");
+    return created;
+  });
+
+  assert.equal(inserted, true);
+  assert.match(connection.queries[1].text, /'ACTIVE',1,/);
+  assert.match(connection.queries[1].text, /ON CONFLICT \(device_id\) DO NOTHING/);
+  assert.deepEqual(connection.queries[1].params, [
+    "device-new",
+    "user-1",
+    "public:new",
+    "ANDROID",
+    "2026-10-04T16:00:00.000Z",
+  ]);
+  assert.match(connection.queries[2].text, /device_sync_states/);
+});
+
+test("device material rotation is fenced by current credential version", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{
+        device_id: "device-1",
+        user_id: "user-1",
+        status: "ACTIVE",
+        credential_version: 2,
+        public_material_ref: "public:v2",
+        platform: "DESKTOP",
+        revocation_epoch: 0,
+        registered_at: "2026-10-04T10:00:00.000Z",
+        revoked_at: null,
+        last_seen_at: "2026-10-04T16:00:00.000Z",
+      }],
+      rowCount: 1,
+    },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const rotated = await repository.withTransaction((tx) =>
+    repository.rotateDeviceMaterial(tx, {
+      deviceId: "device-1",
+      userId: "user-1",
+      expectedCredentialVersion: 1,
+      publicMaterialRef: "public:v2",
+      now: "2026-10-04T16:00:00.000Z",
+    }),
+  );
+
+  assert.equal(rotated.credentialVersion, 2);
+  const query = connection.queries[1];
+  assert.match(query.text, /credential_version = credential_version \+ 1/);
+  assert.match(query.text, /credential_version = \$3/);
+  assert.deepEqual(query.params, [
+    "device-1",
+    "user-1",
+    1,
+    "public:v2",
+    "2026-10-04T16:00:00.000Z",
+  ]);
+});
+
+test("device revocation increments epoch and active sessions are revoked", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{
+        device_id: "device-old",
+        user_id: "user-1",
+        status: "REVOKED",
+        credential_version: 3,
+        public_material_ref: "public:old",
+        platform: "ANDROID",
+        revocation_epoch: 2,
+        registered_at: "2026-10-01T10:00:00.000Z",
+        revoked_at: "2026-10-04T16:00:00.000Z",
+        last_seen_at: null,
+      }],
+      rowCount: 1,
+    },
+    { rows: [], rowCount: 2 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const result = await repository.withTransaction(async (tx) => {
+    const device = await repository.revokeDevice(tx, {
+      deviceId: "device-old",
+      userId: "user-1",
+      now: "2026-10-04T16:00:00.000Z",
+    });
+    const sessions = await repository.revokeActiveSessionsForDevice(tx, {
+      userId: "user-1",
+      deviceId: "device-old",
+      now: "2026-10-04T16:00:00.000Z",
+    });
+    return { device, sessions };
+  });
+
+  assert.equal(result.device.status, "REVOKED");
+  assert.equal(result.device.revocationEpoch, 2);
+  assert.equal(result.sessions, 2);
+  assert.match(connection.queries[1].text, /revocation_epoch = revocation_epoch \+ 1/);
+  assert.match(connection.queries[2].text, /UPDATE sessions/);
+  assert.match(connection.queries[2].text, /status = 'REVOKED'/);
+});
+
+test("device rotation or revocation purges only pending envelopes through the old credential version", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 4 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const count = await repository.withTransaction((tx) =>
+    repository.revokePendingDeviceEnvelopes(tx, {
+      deviceId: "device-old",
+      throughCredentialVersion: 3,
+    }),
+  );
+
+  assert.equal(count, 4);
+  const query = connection.queries[1];
+  assert.match(query.text, /recipient_device_id = \$1/);
+  assert.match(query.text, /recipient_credential_version <= \$2/);
+  assert.match(query.text, /status = 'PENDING'/);
+  assert.match(query.text, /protected_payload = decode\('', 'hex'\)/);
+  assert.deepEqual(query.params, ["device-old", 3]);
+});
+
+test("device list query never exposes another user's devices", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{
+        device_id: "device-1",
+        user_id: "user-1",
+        status: "ACTIVE",
+        credential_version: 1,
+        public_material_ref: "internal-only",
+        platform: "DESKTOP",
+        revocation_epoch: 0,
+        registered_at: "2026-10-04T10:00:00.000Z",
+        revoked_at: null,
+        last_seen_at: null,
+      }],
+      rowCount: 1,
+    },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const devices = await repository.withTransaction((tx) =>
+    repository.listUserDevices(tx, actor()),
+  );
+
+  assert.equal(devices.length, 1);
+  const query = connection.queries[1];
+  assert.match(query.text, /target\.user_id = tm\.user_id/);
+  assert.match(query.text, /tm\.user_id = \$2/);
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "user-1",
+    "device-1",
+  ]);
+});
