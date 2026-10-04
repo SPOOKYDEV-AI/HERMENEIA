@@ -53,6 +53,7 @@ class TransactionalFakeStore {
     this.authorized = authorized;
     this.failAt = failAt;
     this.failCommit = failCommit;
+    this.translationSupersedeCalls = [];
     this.targets = targets ?? [
       {
         userId: "user-a",
@@ -277,8 +278,9 @@ class TransactionalFakeStore {
     return count;
   }
 
-  async supersedeTranslationExecutions() {
+  async supersedeTranslationExecutions(_tx, input) {
     this.maybeFail("supersedeTranslationExecutions");
+    this.translationSupersedeCalls.push(clone(input));
     return 0;
   }
 
@@ -1130,6 +1132,12 @@ test("persistent delete creates tombstone, purges pending delivery and transient
     true,
   );
   assert.equal(store.state.jobs[0].status, "SUPERSEDED");
+  assert.deepEqual(store.translationSupersedeCalls.at(-1), {
+    tenantId: "tenant-1",
+    messageId: accepted.message_id,
+    throughRevision: 1,
+    now: "2026-10-03T23:00:00.000Z",
+  });
 
   const deleteEvents = store.state.events.filter(
     (row) => row.eventType === "message.deleted",
