@@ -287,6 +287,9 @@ test("persistent Send runtime composes PostgreSQL service and persistent bearer 
   assert.equal(typeof runtime.mutationService.editMessage, "function");
   assert.equal(typeof runtime.mutationService.deleteMessage, "function");
   assert.equal(typeof runtime.deliveryService.sync, "function");
+  assert.equal(typeof runtime.deviceService.enrollDevice, "function");
+  assert.equal(typeof runtime.deviceService.rotateMaterial, "function");
+  assert.equal(typeof runtime.deviceService.revokeDevice, "function");
   assert.equal(typeof runtime.deliveryService.acknowledge, "function");
   assert.equal(typeof runtime.outboxService.leaseNext, "function");
   assert.equal(typeof runtime.outboxService.complete, "function");
