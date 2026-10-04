@@ -347,7 +347,20 @@ export async function createPersistentSendRuntime({
                    FROM pg_constraint
                   WHERE conname =
                     'device_inbox_events_translation_source_required_check'
-               ) AS has_source_required_constraint`,
+               ) AS has_source_required_constraint,
+               EXISTS (
+                 SELECT 1
+                   FROM information_schema.columns
+                  WHERE table_schema = 'public'
+                    AND table_name = 'devices'
+                    AND column_name = 'platform'
+               ) AS has_device_platform,
+               EXISTS (
+                 SELECT 1
+                   FROM pg_constraint
+                  WHERE conname =
+                    'devices_public_material_ref_length_check'
+               ) AS has_device_material_constraint`,
           );
 
           const row = result.rows[0];
@@ -358,7 +371,9 @@ export async function createPersistentSendRuntime({
             row?.has_translation_executions &&
             row?.has_provider_executions &&
             row?.has_command_fingerprint &&
-            row?.has_source_required_constraint
+            row?.has_source_required_constraint &&
+            row?.has_device_platform &&
+            row?.has_device_material_constraint
           );
         } catch {
           return false;
