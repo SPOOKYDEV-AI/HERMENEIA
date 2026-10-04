@@ -50,6 +50,15 @@ export interface ContextCandidate {
   content: string;
 
   sourceSequence?: number | null;
+
+  /**
+   * Highest conversation sequence whose evidence contributed to this
+   * candidate. Required for derived conversational state that has no single
+   * sourceSequence. It prevents a checkpoint/episode computed in the future
+   * from leaking into an earlier translation.
+   */
+  causalThroughSequence?: number | null;
+
   sourceRevisionRefs?: string[];
   claimRefs?: string[];
 
@@ -640,6 +649,60 @@ function validateInput(input: BuildContextInput): void {
     }
 
     if (
+      candidate.sourceSequence !== undefined &&
+      candidate.sourceSequence !== null &&
+      (!Number.isInteger(candidate.sourceSequence) ||
+        candidate.sourceSequence < 1)
+    ) {
+      throw new TypeError(
+        "candidate sourceSequence must be a positive integer when present",
+      );
+    }
+
+    if (
+      candidate.causalThroughSequence !== undefined &&
+      candidate.causalThroughSequence !== null &&
+      (!Number.isInteger(candidate.causalThroughSequence) ||
+        candidate.causalThroughSequence < 0)
+    ) {
+      throw new TypeError(
+        "candidate causalThroughSequence must be a non-negative integer when present",
+      );
+    }
+
+    if (
+      candidate.candidateType === "ACTIVE_EPISODE" ||
+      candidate.candidateType === "RECOVERY_CHECKPOINT"
+    ) {
+      if (
+        candidate.causalThroughSequence === undefined ||
+        candidate.causalThroughSequence === null
+      ) {
+        throw new TypeError(
+          "Derived episode/checkpoint candidates require causalThroughSequence",
+        );
+      }
+    }
+
+    if (
+      candidate.candidateType === "CORRECTION_MEMORY" &&
+      candidate.causalThroughSequence === undefined
+    ) {
+      throw new TypeError(
+        "Correction memory must declare causalThroughSequence or null explicitly",
+      );
+    }
+
+    if (
+      candidate.validUntil &&
+      !Number.isFinite(Date.parse(candidate.validUntil))
+    ) {
+      throw new TypeError(
+        "candidate validUntil must be a valid timestamp",
+      );
+    }
+
+    if (
       !Number.isInteger(candidate.erasureEpoch) ||
       candidate.erasureEpoch < 0
     ) {
@@ -750,6 +813,14 @@ function isEligible(
     candidate.sourceSequence !== undefined &&
     candidate.sourceSequence !== null &&
     candidate.sourceSequence >= input.currentSequence
+  ) {
+    return false;
+  }
+
+  if (
+    candidate.causalThroughSequence !== undefined &&
+    candidate.causalThroughSequence !== null &&
+    candidate.causalThroughSequence >= input.currentSequence
   ) {
     return false;
   }
