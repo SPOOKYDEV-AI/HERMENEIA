@@ -176,6 +176,7 @@ export function createHermeneiaHttpServer({
   authenticate,
   sendService = core,
   commandService = core,
+  mutationService = core,
   deliveryService = null,
 }) {
   if (!core) {
@@ -189,6 +190,15 @@ export function createHermeneiaHttpServer({
     typeof commandService.getCommandStatus !== "function"
   ) {
     throw new TypeError("commandService.getCommandStatus is required");
+  }
+  if (
+    !mutationService ||
+    typeof mutationService.editMessage !== "function" ||
+    typeof mutationService.deleteMessage !== "function"
+  ) {
+    throw new TypeError(
+      "mutationService.editMessage and mutationService.deleteMessage are required",
+    );
   }
   if (
     deliveryService !== null &&
@@ -292,7 +302,7 @@ export function createHermeneiaHttpServer({
           throw new HttpError(400, "INVALID_COMMAND", "Invalid edit payload");
         }
 
-        const result = await core.editMessage(actor, {
+        const result = await mutationService.editMessage(actor, {
           protocol_version: 1,
           command_id: body.command_id,
           message_id: messageMatch[0],
@@ -321,7 +331,7 @@ export function createHermeneiaHttpServer({
           throw new HttpError(400, "INVALID_COMMAND", "Invalid delete payload");
         }
 
-        const result = await core.deleteMessage(actor, {
+        const result = await mutationService.deleteMessage(actor, {
           protocol_version: 1,
           command_id: body.command_id,
           message_id: messageMatch[0],
