@@ -115,6 +115,14 @@ export interface TranslationWorkerStore<Tx> {
     translationId: UUID,
   ): Promise<TranslationExecutionRecord | undefined>;
 
+  listRecipientControlDevices(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      recipientUserId: UUID;
+    },
+  ): Promise<UUID[]>;
+
   listRecipientDevicesForPublish(
     tx: Tx,
     input: {
@@ -197,12 +205,18 @@ export interface TranslationWorkerStore<Tx> {
       inboxEpoch: number;
       offset: number;
       eventId: UUID;
-      eventType: "message.available" | "message.edited" | "message.deleted";
+      eventType:
+        | "message.available"
+        | "message.edited"
+        | "message.deleted"
+        | "translation.source_required";
       tenantId: UUID;
       conversationId: UUID;
       messageId: UUID;
       envelopeId?: UUID | null;
       sourceRevision: number;
+      translationId?: UUID | null;
+      sourceRef?: string | null;
       createdAt: string;
     },
   ): Promise<void>;
@@ -432,6 +446,7 @@ export class TranslationWorkerService<Tx> {
       return this.markSourceRequiredAndComplete(
         lease,
         execution,
+        payload,
       );
     }
 
@@ -767,14 +782,35 @@ export class TranslationWorkerService<Tx> {
   private async markSourceRequiredAndComplete(
     lease: OutboxJobLease,
     execution: TranslationExecutionRecord,
+    payload: ExecutePayload,
   ): Promise<TranslationWorkerResult> {
     try {
       return await this.deps.store.withTransaction(async (tx) => {
-        await this.deps.store.lockTranslationExecution(
-          tx,
-          execution.tenantId,
-          execution.translationId,
-        );
+        const current =
+          await this.deps.store.lockCurrentTranslationForPublish(
+            tx,
+            execution.tenantId,
+            execution.translationId,
+          );
+
+        const now = this.deps.clock.now();
+
+        if (!current) {
+          await this.deps.store.markSuperseded(tx, {
+            tenantId: execution.tenantId,
+            translationId: execution.translationId,
+            supersededAt: now,
+          });
+
+          const completed = await this.deps.store.completeJob(tx, {
+            tenantId: lease.tenantId,
+            jobId: lease.jobId,
+            fencingToken: lease.fencingToken,
+            now,
+          });
+          if (!completed) throw new StaleLeaseError();
+          return "SUPERSEDED";
+        }
 
         const marked =
           await this.deps.store.markSourceRequired(tx, {
@@ -783,7 +819,40 @@ export class TranslationWorkerService<Tx> {
           });
         if (!marked) throw new StaleLeaseError();
 
-        const now = this.deps.clock.now();
+        const devices =
+          await this.deps.store.listRecipientControlDevices(
+            tx,
+            {
+              tenantId: execution.tenantId,
+              recipientUserId: execution.recipientUserId,
+            },
+          );
+
+        for (const deviceId of devices) {
+          const inbox =
+            await this.deps.store.allocateDeviceInboxOffset(
+              tx,
+              execution.tenantId,
+              deviceId,
+            );
+
+          await this.deps.store.insertInboxEvent(tx, {
+            deviceId,
+            inboxEpoch: inbox.inboxEpoch,
+            offset: inbox.offset,
+            eventId: this.deps.ids.next("evt"),
+            eventType: "translation.source_required",
+            tenantId: execution.tenantId,
+            conversationId: execution.conversationId,
+            messageId: execution.sourceMessageId,
+            envelopeId: null,
+            sourceRevision: execution.sourceRevision,
+            translationId: execution.translationId,
+            sourceRef: payload.sourceHash,
+            createdAt: now,
+          });
+        }
+
         const completed = await this.deps.store.completeJob(tx, {
           tenantId: lease.tenantId,
           jobId: lease.jobId,
