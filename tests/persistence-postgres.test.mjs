@@ -980,12 +980,12 @@ test("message mutation supersedes available or leased translation jobs", async (
 });
 
 
-test("content-free conversation events include active devices without public delivery material", async () => {
+test("message delete tombstones target active devices that historically received the message", async () => {
   const connection = new ScriptedConnection([
     {
       rows: [
         { user_id: "user-a", device_id: "device-a2" },
-        { user_id: "user-b", device_id: "device-b-no-key" },
+        { user_id: "user-b", device_id: "device-b-historical" },
       ],
       rowCount: 2,
     },
@@ -998,23 +998,29 @@ test("content-free conversation events include active devices without public del
     repository.listMessageDeletionEventDevices(
       tx,
       actor(),
-      "conversation-1",
+      "message-1",
     ),
   );
 
   assert.deepEqual(devices, [
     { userId: "user-a", deviceId: "device-a2" },
-    { userId: "user-b", deviceId: "device-b-no-key" },
+    { userId: "user-b", deviceId: "device-b-historical" },
   ]);
 
   const sql = connection.queries[1];
+  assert.match(sql.text, /FROM device_inbox_events die/);
   assert.match(sql.text, /JOIN devices d/);
   assert.match(sql.text, /d\.status = 'ACTIVE'/);
-  assert.match(sql.text, /d\.device_id <> \$3/);
+  assert.match(sql.text, /die\.tenant_id = \$1/);
+  assert.match(sql.text, /die\.message_id = \$2/);
+  assert.match(sql.text, /die\.device_id <> \$3/);
+  assert.match(sql.text, /'message\.available'/);
+  assert.match(sql.text, /'message\.edited'/);
+  assert.doesNotMatch(sql.text, /conversation_members/);
   assert.doesNotMatch(sql.text, /public_material_ref/);
   assert.deepEqual(sql.params, [
     "tenant-1",
-    "conversation-1",
+    "message-1",
     "device-1",
   ]);
 });
