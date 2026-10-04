@@ -290,15 +290,46 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/DeviceResult'
+  /v1/devices/{device_id}/delivery-material:
+    patch:
+      tags: [Devices]
+      operationId: rotateDeviceDeliveryMaterial
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RotateDeviceMaterialRequest'
+      responses:
+        '200':
+          description: Device delivery material rotated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResult'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /v1/devices/{device_id}/revoke:
     post:
       tags: [Devices]
       operationId: revokeDevice
       parameters:
         - $ref: '#/components/parameters/DeviceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeDeviceRequest'
       responses:
-        '204':
+        '200':
           description: Device revoked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResult'
         '404':
           $ref: '#/components/responses/NotFound'
 components:
@@ -637,27 +668,64 @@ components:
     RegisterDeviceRequest:
       type: object
       additionalProperties: false
-      required: [protocol_version, command_id, public_material, credential_version]
+      required: [protocol_version, command_id, device_id, public_material_ref]
       properties:
         protocol_version:
           type: integer
           const: 1
         command_id:
           $ref: '#/components/schemas/Uuid'
-        public_material:
+        device_id:
+          $ref: '#/components/schemas/Uuid'
+        public_material_ref:
           type: string
           minLength: 1
-          maxLength: 16384
-        credential_version:
-          type: integer
-          minimum: 1
+          maxLength: 4096
         platform:
           type: string
           enum: [WEB, ANDROID, IOS, DESKTOP, OTHER]
+    RotateDeviceMaterialRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - command_id
+        - expected_credential_version
+        - public_material_ref
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        expected_credential_version:
+          type: integer
+          minimum: 1
+        public_material_ref:
+          type: string
+          minLength: 1
+          maxLength: 4096
+    RevokeDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, command_id]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
     DeviceResult:
       type: object
       additionalProperties: false
-      required: [device_id, status, credential_version, registered_at]
+      required:
+        - device_id
+        - status
+        - credential_version
+        - platform
+        - registered_at
+        - revoked_at
+        - last_seen_at
       properties:
         device_id:
           $ref: '#/components/schemas/Uuid'
@@ -667,9 +735,16 @@ components:
         credential_version:
           type: integer
           minimum: 1
+        platform:
+          type: string
+          enum: [WEB, ANDROID, IOS, DESKTOP, OTHER]
         registered_at:
           $ref: '#/components/schemas/Timestamp'
         revoked_at:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        last_seen_at:
           anyOf:
             - $ref: '#/components/schemas/Timestamp'
             - type: 'null'
@@ -768,6 +843,7 @@ components:
             - REVISION_CONFLICT
             - NOT_AUTHORIZED
             - DEVICE_REVOKED
+            - DEVICE_SERVICE_UNAVAILABLE
             - RECIPIENT_UNAVAILABLE
             - SOURCE_REQUIRED
             - SOURCE_BUFFER_UNAVAILABLE
