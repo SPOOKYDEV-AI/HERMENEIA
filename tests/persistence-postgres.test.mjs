@@ -379,6 +379,7 @@ test("inbox event replay is filtered by authenticated tenant and device", async 
         source_revision: 1,
         protected_payload_b64: "Y2lwaGVydGV4dA==",
         rendition_type: "ORIGINAL",
+        envelope_status: "PENDING",
         expires_at: "2026-10-05T00:00:00.000Z",
         created_at: "2026-10-04T00:00:00.000Z",
       }],
@@ -401,7 +402,9 @@ test("inbox event replay is filtered by authenticated tenant and device", async 
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].tenantId, "tenant-1");
+  assert.equal(rows[0].envelopeStatus, "PENDING");
   const sql = connection.queries[1];
+  assert.match(sql.text, /de\.status AS envelope_status/);
   assert.match(sql.text, /die\.tenant_id = \$1/);
   assert.match(sql.text, /die\.device_id = \$2/);
   assert.deepEqual(sql.params, [
