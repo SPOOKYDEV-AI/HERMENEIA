@@ -399,7 +399,7 @@ test("translation retry and terminal transitions are fenced by PENDING state", a
 });
 
 
-test("translation control device query includes active devices without requiring delivery key material", async () => {
+test("translation control device query only returns active devices historically exposed to the exact ORIGINAL revision", async () => {
   const connection = new ScriptedConnection([
     {
       rows: [
@@ -417,15 +417,27 @@ test("translation control device query includes active devices without requiring
     repository.listRecipientControlDevices(tx, {
       tenantId: "tenant-1",
       recipientUserId: "user-b",
+      sourceMessageId: "message-1",
+      sourceRevision: 2,
     }),
   );
 
   assert.deepEqual(devices, ["device-b1", "device-b2"]);
   const sql = connection.queries[1];
-  assert.match(sql.text, /tm\.tenant_id = \$1/);
+  assert.match(sql.text, /FROM delivery_envelopes de/);
+  assert.match(sql.text, /de\.recipient_user_id = \$2/);
+  assert.match(sql.text, /de\.message_id = \$3/);
+  assert.match(sql.text, /de\.source_revision = \$4/);
+  assert.match(sql.text, /de\.rendition_type = 'ORIGINAL'/);
   assert.match(sql.text, /tm\.status = 'ACTIVE'/);
   assert.match(sql.text, /d\.status = 'ACTIVE'/);
   assert.doesNotMatch(sql.text, /public_material_ref/);
+  assert.deepEqual(sql.params, [
+    "tenant-1",
+    "user-b",
+    "message-1",
+    2,
+  ]);
 });
 
 
