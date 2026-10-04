@@ -16,6 +16,9 @@ import {
   createPostgresDeliveryService,
 } from "../../.build/packages/runtime/src/persistent-delivery.js";
 import {
+  createPostgresDeviceService,
+} from "../../.build/packages/runtime/src/persistent-device.js";
+import {
   createPostgresOutboxService,
 } from "../../.build/packages/runtime/src/persistent-outbox.js";
 import {
@@ -31,6 +34,7 @@ import {
   InMemoryTransientSourceStore,
 } from "../../.build/packages/transient-source/src/index.js";
 import { createBearerAuthenticator } from "./session-auth.mjs";
+import { createDeviceMaterialFingerprinter } from "./device-material-fingerprint.mjs";
 import { sha256CredentialReference } from "./session-credential.mjs";
 import {
   createHmacSourceFingerprinter,
@@ -263,6 +267,12 @@ export async function createPersistentSendRuntime({
       clock,
     });
 
+    const deviceService = createPostgresDeviceService({
+      repository,
+      clock,
+      materialFingerprinter: createDeviceMaterialFingerprinter(),
+    });
+
     const outboxService = createPostgresOutboxService({
       repository: outboxRepository,
       clock,
@@ -375,6 +385,7 @@ export async function createPersistentSendRuntime({
       commandService: sendService,
       mutationService: sendService,
       deliveryService,
+      deviceService,
       outboxService,
       translationService,
       translationRecoveryService,
