@@ -170,6 +170,16 @@ export interface PersistentMessagingStore<Tx> {
     },
   ): Promise<number>;
 
+  supersedeTranslationExecutions(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      messageId: UUID;
+      throughRevision: number;
+      now: string;
+    },
+  ): Promise<number>;
+
   replyTargetExists(
     tx: Tx,
     tenantId: UUID,
@@ -978,6 +988,13 @@ export class PersistentMessagingService<Tx> {
         });
 
         await this.deps.store.supersedeTranslationJobs(tx, {
+          tenantId: actor.tenantId,
+          messageId: command.message_id,
+          throughRevision: previousRevision,
+          now,
+        });
+
+        await this.deps.store.supersedeTranslationExecutions(tx, {
           tenantId: actor.tenantId,
           messageId: command.message_id,
           throughRevision: previousRevision,
