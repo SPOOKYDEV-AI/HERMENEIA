@@ -767,6 +767,51 @@ export class PostgresMessagingRepository {
     );
   }
 
+  async insertTranslationDeliveryEnvelope(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      envelopeId: UUID;
+      conversationId: UUID;
+      messageId: UUID;
+      sourceRevision: number;
+      translationId: UUID;
+      recipientUserId: UUID;
+      recipientDeviceId: UUID;
+      credentialVersion: number;
+      protectedPayload: string;
+      createdAt: string;
+      expiresAt: string;
+    },
+  ): Promise<void> {
+    await tx.query(
+      `INSERT INTO delivery_envelopes(
+         tenant_id, envelope_id, conversation_id, message_id,
+         source_revision, translation_id,
+         recipient_user_id, recipient_device_id,
+         recipient_credential_version, rendition_type,
+         protected_payload, status, created_at, expires_at
+       ) VALUES (
+         $1,$2,$3,$4,$5,$6,$7,$8,$9,'TRANSLATION',
+         decode($10,'base64'),'PENDING',$11,$12
+       )`,
+      [
+        input.tenantId,
+        input.envelopeId,
+        input.conversationId,
+        input.messageId,
+        input.sourceRevision,
+        input.translationId,
+        input.recipientUserId,
+        input.recipientDeviceId,
+        input.credentialVersion,
+        input.protectedPayload,
+        input.createdAt,
+        input.expiresAt,
+      ],
+    );
+  }
+
   async allocateDeviceInboxOffset(
     tx: SqlExecutor,
     tenantId: UUID,
