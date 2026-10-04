@@ -173,6 +173,12 @@ export async function createPersistentSendRuntime({
   }
 
   const config = persistentSendConfigFromEnv(env);
+  const fingerprinter = createHmacSourceFingerprinter({
+    key: config.sourceFingerprint.key,
+    keyVersion: config.sourceFingerprint.keyVersion,
+    verificationKeys: config.sourceFingerprint.verificationKeys,
+  });
+
   const sqlPool = await createNodePostgresPool({
     ...config.postgres,
     pgModule,
@@ -187,12 +193,6 @@ export async function createPersistentSendRuntime({
       clock,
       maxEntries: config.transientSource.maxEntries,
       maxApproxBytes: config.transientSource.maxApproxBytes,
-    });
-
-    const fingerprinter = createHmacSourceFingerprinter({
-      key: config.sourceFingerprint.key,
-      keyVersion: config.sourceFingerprint.keyVersion,
-      verificationKeys: config.sourceFingerprint.verificationKeys,
     });
 
     const sendService = createPostgresMessagingService({
