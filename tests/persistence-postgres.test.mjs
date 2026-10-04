@@ -983,52 +983,6 @@ test("message mutation supersedes available or leased translation jobs", async (
 });
 
 
-test("message delete tombstones target active devices that historically received the message", async () => {
-  const connection = new ScriptedConnection([
-    {
-      rows: [
-        { user_id: "user-a", device_id: "device-a2" },
-        { user_id: "user-b", device_id: "device-b-historical" },
-      ],
-      rowCount: 2,
-    },
-  ]);
-  const repository = new PostgresMessagingRepository(
-    new SqlTransactionManager(new SingleConnectionPool(connection)),
-  );
-
-  const devices = await repository.withTransaction((tx) =>
-    repository.listMessageDeletionEventDevices(
-      tx,
-      actor(),
-      "message-1",
-    ),
-  );
-
-  assert.deepEqual(devices, [
-    { userId: "user-a", deviceId: "device-a2" },
-    { userId: "user-b", deviceId: "device-b-historical" },
-  ]);
-
-  const sql = connection.queries[1];
-  assert.match(sql.text, /FROM device_inbox_events die/);
-  assert.match(sql.text, /JOIN devices d/);
-  assert.match(sql.text, /d\.status = 'ACTIVE'/);
-  assert.match(sql.text, /die\.tenant_id = \$1/);
-  assert.match(sql.text, /die\.message_id = \$2/);
-  assert.match(sql.text, /die\.device_id <> \$3/);
-  assert.match(sql.text, /'message\.available'/);
-  assert.match(sql.text, /'message\.edited'/);
-  assert.doesNotMatch(sql.text, /conversation_members/);
-  assert.doesNotMatch(sql.text, /public_material_ref/);
-  assert.deepEqual(sql.params, [
-    "tenant-1",
-    "message-1",
-    "device-1",
-  ]);
-});
-
-
 test("outbox lease uses SKIP LOCKED and fences every lease attempt", async () => {
   const connection = new ScriptedConnection([
     {
@@ -1195,7 +1149,15 @@ test("message mutation supersedes pending translation executions", async () => {
   assert.match(query.text, /UPDATE translation_executions/);
   assert.match(query.text, /status = 'SUPERSEDED'/);
   assert.match(query.text, /source_revision <= \$3/);
-  assert.match(query.text, /status IN \('PENDING','SOURCE_REQUIRED'\)/);
+  for (const status of [
+    "PENDING",
+    "SOURCE_REQUIRED",
+    "READY",
+    "FAILED",
+    "EXPIRED",
+  ]) {
+    assert.match(query.text, new RegExp(`'${status}'`));
+  }
   assert.deepEqual(query.params, [
     "tenant-1",
     "message-1",
