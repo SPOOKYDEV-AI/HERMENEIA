@@ -62,6 +62,7 @@ function input(overrides = {}) {
     targetLanguageTag: "fr-FR",
     targetProfileVersion: 3,
     currentSequence: 8,
+    erasureEpoch: 2,
     now: "2026-10-04T20:00:00.000Z",
     strategy: "T2_ADAPTIVE_V1",
     state: state(),
