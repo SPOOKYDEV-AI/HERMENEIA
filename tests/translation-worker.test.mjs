@@ -45,6 +45,7 @@ class FakeWorkerStore {
       publicMaterialRef: "pub:b1",
     }];
     this.controlDevices = ["device-b1"];
+    this.publishDevices = clone(this.devices);
     this.forceCompleteStale = false;
   }
 
@@ -260,7 +261,7 @@ class FakeWorkerStore {
   }
 
   async listRecipientDevicesForPublish() {
-    return this.current ? clone(this.devices) : [];
+    return this.current ? clone(this.publishDevices) : [];
   }
 
   async markSourceRequired(_tx, input) {
@@ -884,5 +885,55 @@ test("fanout normalizes a stale outbox source hash from the authoritative messag
   assert.notEqual(
     child.payloadRef.source_hash,
     f.store.state.jobs[0].payloadRef.source_hash,
+  );
+});
+
+
+test("translation publish never backfills an old message to a newly added device", async () => {
+  const f = fixture();
+  await fanoutOne(f);
+
+  f.transientSources.put({
+    tenantId: "tenant-1",
+    messageId: "message-1",
+    sourceRevision: 1,
+    sourceHash: "source-hash-1",
+    source: {
+      text: "Bonjour monde",
+      language_hint: "fr-FR",
+    },
+    createdAt: "2026-10-04T12:00:00.000Z",
+    expiresAt: "2026-10-04T12:05:00.000Z",
+  });
+
+  f.store.devices.push({
+    deviceId: "device-b-new",
+    credentialVersion: 1,
+    publicMaterialRef: "pub:b-new",
+  });
+
+  assert.equal(
+    await f.worker.runExecuteOnce(),
+    "EXECUTION_DONE",
+  );
+
+  const translationEnvelopes =
+    f.store.state.envelopes.filter(
+      (envelope) => envelope.renditionType === "TRANSLATION",
+    );
+
+  assert.equal(
+    translationEnvelopes.some(
+      (envelope) =>
+        envelope.recipientDeviceId === "device-b-new",
+    ),
+    false,
+  );
+  assert.equal(
+    translationEnvelopes.some(
+      (envelope) =>
+        envelope.recipientDeviceId === "device-b1",
+    ),
+    true,
   );
 });
