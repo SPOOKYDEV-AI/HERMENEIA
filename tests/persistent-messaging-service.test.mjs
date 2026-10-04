@@ -120,6 +120,21 @@ class TransactionalFakeStore {
     }
   }
 
+  async findCommandReceipt(_tx, receivedActor, commandId) {
+    this.maybeFail("findCommandReceipt");
+    const receipt = this.state.receipts.get(
+      `${receivedActor.tenantId}:${commandId}`,
+    );
+    if (
+      !receipt ||
+      receipt.actorUserId !== receivedActor.userId ||
+      receipt.actorDeviceId !== receivedActor.deviceId
+    ) {
+      return undefined;
+    }
+    return clone(receipt);
+  }
+
   async claimCommand(_tx, input) {
     this.maybeFail("claimCommand");
     const key = `${input.actor.tenantId}:${input.commandId}`;
@@ -783,4 +798,37 @@ test("transient store refuses duplicate keys without overwriting admitted source
     }).source.text,
     "first",
   );
+});
+
+
+test("persistent command recovery returns exact committed Send result", async () => {
+  const store = new TransactionalFakeStore();
+  const { service } = createService(store);
+
+  const accepted = await service.sendMessage(actor, sendCommand());
+  const status = await service.getCommandStatus(actor, "cmd-1");
+
+  assert.deepEqual(status, {
+    command_id: "cmd-1",
+    status: "SUCCEEDED",
+    result: accepted,
+  });
+});
+
+test("persistent command recovery hides foreign actor receipts and reports unknown", async () => {
+  const store = new TransactionalFakeStore();
+  const { service } = createService(store);
+  await service.sendMessage(actor, sendCommand());
+
+  const foreign = {
+    tenantId: "tenant-1",
+    userId: "user-b",
+    deviceId: "device-b1",
+  };
+  const status = await service.getCommandStatus(foreign, "cmd-1");
+
+  assert.deepEqual(status, {
+    command_id: "cmd-1",
+    status: "UNKNOWN",
+  });
 });
