@@ -287,7 +287,7 @@ export class TranslationExecutionService<Tx> {
   async completeProviderAttempt(input: {
     tenantId: UUID;
     attemptId: UUID;
-    status: Exclude<ProviderExecutionStatus, "STARTED">;
+    status: ProviderExecutionStatus;
     inputTokens?: number | null;
     outputTokens?: number | null;
     billedCostMicrounits?: number | null;
