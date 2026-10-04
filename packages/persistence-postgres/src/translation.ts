@@ -1,10 +1,14 @@
-import type { UUID } from "../../domain/src/index.js";
+import type {
+  ActorContext,
+  UUID,
+} from "../../domain/src/index.js";
 import type {
   ProviderExecutionRecord,
   TranslationExecutionRecord,
   TranslationFanoutPlan,
   TranslationLogicalKey,
   TranslationRecipientDevice,
+  TranslationRecoveryRecord,
 } from "../../translation-service/src/index.js";
 import type {
   SqlExecutor,
@@ -327,6 +331,152 @@ export class PostgresTranslationRepository {
     );
     const row = first(result);
     return row ? mapTranslation(row) : undefined;
+  }
+
+  async lockTranslationForRecovery(
+    tx: SqlExecutor,
+    actor: ActorContext,
+    translationId: UUID,
+  ): Promise<TranslationRecoveryRecord | undefined> {
+    const executionResult = await tx.query<
+      TranslationRow & {
+        expected_source_hash: string;
+        message_current_revision: number;
+        message_status: "ACTIVE" | "DELETED";
+      }
+    >(
+      `SELECT te.tenant_id,
+              te.translation_id,
+              te.conversation_id,
+              te.source_message_id,
+              te.source_revision,
+              te.recipient_user_id,
+              te.target_language_tag,
+              te.target_profile_version,
+              te.context_snapshot_id,
+              te.strategy_version,
+              te.status,
+              te.next_attempt_at::text AS next_attempt_at,
+              te.created_at::text AS created_at,
+              te.ready_at::text AS ready_at,
+              te.superseded_at::text AS superseded_at,
+              mr.source_hash AS expected_source_hash,
+              mm.current_revision AS message_current_revision,
+              mm.status AS message_status
+         FROM translation_executions te
+         JOIN message_metadata mm
+           ON mm.tenant_id = te.tenant_id
+          AND mm.conversation_id = te.conversation_id
+          AND mm.message_id = te.source_message_id
+         JOIN message_revisions mr
+           ON mr.tenant_id = te.tenant_id
+          AND mr.message_id = te.source_message_id
+          AND mr.revision = te.source_revision
+         JOIN conversation_members actor_cm
+           ON actor_cm.tenant_id = te.tenant_id
+          AND actor_cm.conversation_id = te.conversation_id
+          AND actor_cm.user_id = $3
+          AND actor_cm.status = 'ACTIVE'
+         JOIN tenant_memberships actor_tm
+           ON actor_tm.tenant_id = te.tenant_id
+          AND actor_tm.user_id = $3
+          AND actor_tm.status = 'ACTIVE'
+         JOIN devices actor_device
+           ON actor_device.device_id = $4
+          AND actor_device.user_id = $3
+          AND actor_device.status = 'ACTIVE'
+        WHERE te.tenant_id = $1
+          AND te.translation_id = $2
+          AND mr.source_hash IS NOT NULL
+        FOR UPDATE OF te, mm
+        FOR SHARE OF actor_cm, actor_tm, actor_device`,
+      [
+        actor.tenantId,
+        translationId,
+        actor.userId,
+        actor.deviceId,
+      ],
+    );
+
+    const executionRow = first(executionResult);
+    if (!executionRow) return undefined;
+
+    const targetResult = await tx.query<{
+      status: "ACTIVE" | "LEFT" | "REMOVED" | "BLOCKED";
+      membership_version: number;
+      target_language_tag: string | null;
+    }>(
+      `SELECT cm.status,
+              cm.membership_version,
+              COALESCE(
+                NULLIF(trim(cm.target_locale_override), ''),
+                NULLIF(trim(cm.target_language_tag), '')
+              ) AS target_language_tag
+         FROM conversation_members cm
+        WHERE cm.tenant_id = $1
+          AND cm.conversation_id = $2
+          AND cm.user_id = $3
+        FOR SHARE`,
+      [
+        actor.tenantId,
+        executionRow.conversation_id,
+        executionRow.recipient_user_id,
+      ],
+    );
+    const targetRow = first(targetResult);
+
+    return {
+      execution: mapTranslation(executionRow),
+      expectedSourceHash: executionRow.expected_source_hash,
+      messageCurrentRevision: Number(
+        executionRow.message_current_revision,
+      ),
+      messageStatus: executionRow.message_status,
+      targetMembershipStatus: targetRow?.status ?? null,
+      currentTargetProfileVersion: targetRow
+        ? Number(targetRow.membership_version)
+        : null,
+      currentTargetLanguageTag:
+        targetRow?.target_language_tag ?? null,
+    };
+  }
+
+  async resumeSourceRequired(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      translationId: UUID;
+    },
+  ): Promise<boolean> {
+    const result = await tx.query(
+      `UPDATE translation_executions
+          SET status = 'PENDING',
+              next_attempt_at = NULL
+        WHERE tenant_id = $1
+          AND translation_id = $2
+          AND status = 'SOURCE_REQUIRED'`,
+      [input.tenantId, input.translationId],
+    );
+    return result.rowCount === 1;
+  }
+
+  async resumeFailed(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      translationId: UUID;
+    },
+  ): Promise<boolean> {
+    const result = await tx.query(
+      `UPDATE translation_executions
+          SET status = 'PENDING',
+              next_attempt_at = NULL
+        WHERE tenant_id = $1
+          AND translation_id = $2
+          AND status = 'FAILED'`,
+      [input.tenantId, input.translationId],
+    );
+    return result.rowCount === 1;
   }
 
   async listRecipientControlDevices(
