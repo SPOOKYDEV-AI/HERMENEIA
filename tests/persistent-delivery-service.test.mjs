@@ -509,3 +509,20 @@ test("expired content still forces a controlled sync reset", async () => {
   assert.equal(result.kind, "RESET");
   assert.equal(result.response.new_cursor, "4:8");
 });
+
+
+test("ACK racing with edit/delete revocation is terminal and idempotent", async () => {
+  const store = new FakeDeliveryStore({
+    ackResults: ["REVOKED"],
+  });
+
+  await service(store).acknowledge(actor, [{
+    envelope_id: "revoked-by-mutation",
+    persisted_at: "2026-10-04T09:29:00.000Z",
+  }]);
+
+  const ackCalls = store.calls.filter(
+    (call) => call.method === "acknowledgeEnvelope",
+  );
+  assert.equal(ackCalls.length, 1);
+});
