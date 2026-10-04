@@ -13,7 +13,11 @@ export interface PersistentInboxEvent {
   inboxEpoch: number;
   offset: number;
   eventId: UUID;
-  eventType: "message.available" | "message.edited" | "message.deleted";
+  eventType:
+    | "message.available"
+    | "message.edited"
+    | "message.deleted"
+    | "translation.source_required";
   tenantId: UUID;
   conversationId: UUID;
   messageId: UUID;
@@ -22,6 +26,8 @@ export interface PersistentInboxEvent {
   protectedPayload: string | null;
   renditionType: "ORIGINAL" | "TRANSLATION" | null;
   expiresAt: string | null;
+  translationId: UUID | null;
+  sourceRef: string | null;
   createdAt: string;
 }
 
@@ -195,6 +201,17 @@ export class PersistentDeliveryService<Tx> {
           continue;
         }
 
+        if (row.eventType === "translation.source_required") {
+          if (!row.translationId || !row.sourceRef) {
+            throw new Error(
+              "Invariant violation: source-required event metadata missing",
+            );
+          }
+          events.push(normalizeSourceRequired(row));
+          nextOffset = row.offset;
+          continue;
+        }
+
         if (
           !row.envelopeId ||
           !row.protectedPayload ||
@@ -344,6 +361,26 @@ function normalizeDelete(row: PersistentInboxEvent): ServerEvent {
     payload: {
       message_id: row.messageId,
       source_revision: row.sourceRevision,
+    },
+  };
+}
+
+function normalizeSourceRequired(
+  row: PersistentInboxEvent,
+): ServerEvent {
+  if (!row.translationId || !row.sourceRef) {
+    throw new Error(
+      "Invariant violation: source-required event metadata missing",
+    );
+  }
+
+  return {
+    ...baseEvent(row),
+    payload: {
+      translation_id: row.translationId,
+      message_id: row.messageId,
+      source_revision: row.sourceRevision,
+      source_ref: row.sourceRef,
     },
   };
 }
