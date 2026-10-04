@@ -19,6 +19,7 @@ import {
   TranslationWorkerService,
   type TranslationEnvelopeProtector,
   type TranslationWorkerClock,
+  type TranslationWorkerContextBridge,
   type TranslationWorkerIds,
   type TranslationWorkerProvider,
 } from "../../translation-worker/src/index.js";
@@ -32,6 +33,7 @@ export interface PostgresTranslationWorkerDependencies {
   transientSources: InMemoryTransientSourceStore;
   provider: TranslationWorkerProvider;
   envelopeProtector: TranslationEnvelopeProtector;
+  contextBridge?: TranslationWorkerContextBridge;
   ids: TranslationWorkerIds;
   clock: TranslationWorkerClock;
   strategyVersion?: string;
@@ -199,6 +201,7 @@ export function createPostgresTranslationWorker(
     transientSources: deps.transientSources,
     provider: deps.provider,
     envelopeProtector: deps.envelopeProtector,
+    contextBridge: deps.contextBridge,
     ids: deps.ids,
     clock: deps.clock,
     strategyVersion: deps.strategyVersion,
