@@ -533,6 +533,7 @@ export class PostgresMessagingRepository {
 
   async allocateDeviceInboxOffset(
     tx: SqlExecutor,
+    tenantId: UUID,
     deviceId: UUID,
   ): Promise<{ inboxEpoch: number; offset: number }> {
     const result = await tx.query<{
@@ -551,6 +552,28 @@ export class PostgresMessagingRepository {
     if (!row) {
       throw new Error("Missing device_sync_states row");
     }
+
+    await tx.query(
+      `INSERT INTO tenant_device_sync_states(
+         tenant_id, device_id, inbox_epoch,
+         last_acked_offset, updated_at
+       ) VALUES ($1,$2,$3,0,now())
+       ON CONFLICT (tenant_id, device_id)
+       DO UPDATE SET
+         inbox_epoch = EXCLUDED.inbox_epoch,
+         last_acked_offset = CASE
+           WHEN tenant_device_sync_states.inbox_epoch = EXCLUDED.inbox_epoch
+           THEN tenant_device_sync_states.last_acked_offset
+           ELSE 0
+         END,
+         updated_at = CASE
+           WHEN tenant_device_sync_states.inbox_epoch = EXCLUDED.inbox_epoch
+           THEN tenant_device_sync_states.updated_at
+           ELSE now()
+         END`,
+      [tenantId, deviceId, Number(row.inbox_epoch)],
+    );
+
     return {
       inboxEpoch: Number(row.inbox_epoch),
       offset: Number(row.offset_value),
@@ -671,7 +694,7 @@ export class PostgresMessagingRepository {
 
   async getDeviceSyncState(
     tx: SqlExecutor,
-    deviceId: UUID,
+    actor: ActorContext,
   ): Promise<{
     inboxEpoch: number;
     nextOffset: number;
@@ -682,10 +705,24 @@ export class PostgresMessagingRepository {
       next_offset: number;
       last_acked_offset: number;
     }>(
-      `SELECT inbox_epoch, next_offset, last_acked_offset
-         FROM device_sync_states
-        WHERE device_id = $1`,
-      [deviceId],
+      `SELECT dss.inbox_epoch,
+              dss.next_offset,
+              COALESCE(tds.last_acked_offset, 0) AS last_acked_offset
+         FROM device_sync_states dss
+         JOIN devices d
+           ON d.device_id = dss.device_id
+          AND d.user_id = $2
+          AND d.status = 'ACTIVE'
+         JOIN tenant_memberships tm
+           ON tm.tenant_id = $1
+          AND tm.user_id = d.user_id
+          AND tm.status = 'ACTIVE'
+         LEFT JOIN tenant_device_sync_states tds
+           ON tds.tenant_id = $1
+          AND tds.device_id = dss.device_id
+          AND tds.inbox_epoch = dss.inbox_epoch
+        WHERE dss.device_id = $3`,
+      [actor.tenantId, actor.userId, actor.deviceId],
     );
     const row = first(result);
     return row
@@ -700,6 +737,7 @@ export class PostgresMessagingRepository {
   async listInboxEvents(
     tx: SqlExecutor,
     input: {
+      tenantId: UUID;
       deviceId: UUID;
       inboxEpoch: number;
       afterOffset: number;
@@ -754,12 +792,14 @@ export class PostgresMessagingRepository {
            ON de.tenant_id = die.tenant_id
           AND de.envelope_id = die.envelope_id
           AND de.recipient_device_id = die.device_id
-        WHERE die.device_id = $1
-          AND die.inbox_epoch = $2
-          AND die.offset_value > $3
+        WHERE die.tenant_id = $1
+          AND die.device_id = $2
+          AND die.inbox_epoch = $3
+          AND die.offset_value > $4
         ORDER BY die.offset_value
-        LIMIT $4`,
+        LIMIT $5`,
       [
+        input.tenantId,
         input.deviceId,
         input.inboxEpoch,
         input.afterOffset,
@@ -841,11 +881,17 @@ export class PostgresMessagingRepository {
       next_offset: number;
       last_acked_offset: number;
     }>(
-      `SELECT inbox_epoch, next_offset, last_acked_offset
-         FROM device_sync_states
-        WHERE device_id = $1
-        FOR UPDATE`,
-      [input.deviceId],
+      `SELECT dss.inbox_epoch,
+              dss.next_offset,
+              tds.last_acked_offset
+         FROM device_sync_states dss
+         JOIN tenant_device_sync_states tds
+           ON tds.tenant_id = $1
+          AND tds.device_id = dss.device_id
+          AND tds.inbox_epoch = dss.inbox_epoch
+        WHERE dss.device_id = $2
+        FOR UPDATE OF tds`,
+      [input.tenantId, input.deviceId],
     );
     const state = first(syncState);
     if (!state || Number(state.inbox_epoch) !== Number(row.inbox_epoch)) {
@@ -863,15 +909,17 @@ export class PostgresMessagingRepository {
            ON de.tenant_id = die.tenant_id
           AND de.envelope_id = die.envelope_id
           AND de.recipient_device_id = die.device_id
-        WHERE die.device_id = $1
-          AND die.inbox_epoch = $2
-          AND die.offset_value > $3
+        WHERE die.tenant_id = $1
+          AND die.device_id = $2
+          AND die.inbox_epoch = $3
+          AND die.offset_value > $4
           AND die.envelope_id IS NOT NULL
           AND (
             de.envelope_id IS NULL
             OR de.status = 'PENDING'
           )`,
       [
+        input.tenantId,
         input.deviceId,
         Number(state.inbox_epoch),
         Number(state.last_acked_offset),
@@ -887,12 +935,14 @@ export class PostgresMessagingRepository {
         : Number(firstBlockingOffset) - 1;
 
     await tx.query(
-      `UPDATE device_sync_states
-          SET last_acked_offset = GREATEST(last_acked_offset, $2),
-              updated_at = $3
-        WHERE device_id = $1
-          AND inbox_epoch = $4`,
+      `UPDATE tenant_device_sync_states
+          SET last_acked_offset = GREATEST(last_acked_offset, $3),
+              updated_at = $4
+        WHERE tenant_id = $1
+          AND device_id = $2
+          AND inbox_epoch = $5`,
       [
+        input.tenantId,
         input.deviceId,
         terminalPrefix,
         input.ackedAt,
