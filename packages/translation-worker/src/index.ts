@@ -611,7 +611,7 @@ export class TranslationWorkerService<Tx> {
     execution: TranslationExecutionRecord,
     translatedText: string,
   ): Promise<TranslationWorkerResult> {
-    return this.deps.store.withTransaction(async (tx) => {
+    return this.deps.store.withTransaction<TranslationWorkerResult>(async (tx) => {
       const current =
         await this.deps.store.lockCurrentTranslationForPublish(
           tx,
@@ -766,7 +766,7 @@ export class TranslationWorkerService<Tx> {
     execution: TranslationExecutionRecord,
   ): Promise<TranslationWorkerResult> {
     try {
-      return await this.deps.store.withTransaction(async (tx) => {
+      return await this.deps.store.withTransaction<TranslationWorkerResult>(async (tx) => {
         const now = this.deps.clock.now();
         await this.deps.store.markSuperseded(tx, {
           tenantId: execution.tenantId,
@@ -797,7 +797,7 @@ export class TranslationWorkerService<Tx> {
     payload: ExecutePayload,
   ): Promise<TranslationWorkerResult> {
     try {
-      return await this.deps.store.withTransaction(async (tx) => {
+      return await this.deps.store.withTransaction<TranslationWorkerResult>(async (tx) => {
         const current =
           await this.deps.store.lockCurrentTranslationForPublish(
             tx,
@@ -887,7 +887,7 @@ export class TranslationWorkerService<Tx> {
     execution: TranslationExecutionRecord,
   ): Promise<TranslationWorkerResult> {
     try {
-      return await this.deps.store.withTransaction(async (tx) => {
+      return await this.deps.store.withTransaction<TranslationWorkerResult>(async (tx) => {
         const now = this.deps.clock.now();
         const nextAttemptAt = this.nextRetryAt(
           lease.attemptCount,
@@ -927,7 +927,7 @@ export class TranslationWorkerService<Tx> {
     execution: TranslationExecutionRecord,
   ): Promise<TranslationWorkerResult> {
     try {
-      return await this.deps.store.withTransaction(async (tx) => {
+      return await this.deps.store.withTransaction<TranslationWorkerResult>(async (tx) => {
         const failed = await this.deps.store.markFailed(tx, {
           tenantId: execution.tenantId,
           translationId: execution.translationId,
