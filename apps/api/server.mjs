@@ -175,6 +175,7 @@ export function createHermeneiaHttpServer({
   core,
   authenticate,
   sendService = core,
+  commandService = core,
   deliveryService = null,
 }) {
   if (!core) {
@@ -182,6 +183,12 @@ export function createHermeneiaHttpServer({
   }
   if (!sendService || typeof sendService.sendMessage !== "function") {
     throw new TypeError("sendService.sendMessage is required");
+  }
+  if (
+    !commandService ||
+    typeof commandService.getCommandStatus !== "function"
+  ) {
+    throw new TypeError("commandService.getCommandStatus is required");
   }
   if (
     deliveryService !== null &&
@@ -219,7 +226,10 @@ export function createHermeneiaHttpServer({
         return json(
           res,
           200,
-          core.getCommandStatus(actor, commandStatusMatch[0]),
+          await commandService.getCommandStatus(
+            actor,
+            commandStatusMatch[0],
+          ),
         );
       }
 
