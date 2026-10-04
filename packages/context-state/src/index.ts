@@ -20,7 +20,6 @@ export interface ContextOperationRef {
   messageId?: UUID;
   sourceRevision?: number;
   status: ContextOperationStatus;
-  completedPatch?: ContextStatePatch;
   registeredAt: string;
 }
 
@@ -119,6 +118,7 @@ export class ContextStateConflictError extends Error {
       | "EPOCH_MISMATCH"
       | "UNKNOWN_OPERATION"
       | "OPERATION_CONFLICT"
+      | "CAUSAL_GAP"
       | "INVALID_STATE",
     message: string,
   ) {
@@ -205,7 +205,7 @@ export function createDegradedContextStateFromFloor(input: {
 
 export function registerContextOperation(
   state: ConversationContextState,
-  operation: Omit<ContextOperationRef, "status" | "completedPatch">,
+  operation: Omit<ContextOperationRef, "status">,
 ): ConversationContextState {
   validateState(state);
   validateOperation(operation);
@@ -299,6 +299,13 @@ export function applyContextDerivation(
     );
   }
 
+  if (result.opSeq !== state.processedPrefixOpSeq + 1) {
+    throw new ContextStateConflictError(
+      "CAUSAL_GAP",
+      "Context operation cannot publish before its causal predecessor",
+    );
+  }
+
   const next = structuredClone(state);
   const pending = next.pendingOperations[index];
 
@@ -308,10 +315,7 @@ export function applyContextDerivation(
   } else {
     pending.status = "PROCESSED";
     if (result.patch) {
-      validateSafePatch(next, result.patch);
-      pending.completedPatch = structuredClone(result.patch);
-    } else {
-      delete pending.completedPatch;
+      applySafePatch(next, result.patch);
     }
   }
 
@@ -338,15 +342,6 @@ export function processingGapRefs(
     .map((operation) => structuredClone(operation));
 }
 
-export function completedTailRefs(
-  state: ConversationContextState,
-): ContextOperationRef[] {
-  validateState(state);
-  return state.pendingOperations
-    .filter((operation) => operation.status === "PROCESSED")
-    .map((operation) => structuredClone(operation));
-}
-
 function advanceContiguousPrefix(state: ConversationContextState): void {
   while (true) {
     const nextSequence = state.processedPrefixOpSeq + 1;
@@ -358,20 +353,9 @@ function advanceContiguousPrefix(state: ConversationContextState): void {
     const operation = state.pendingOperations[index];
     if (operation.status !== "PROCESSED") return;
 
-    if (operation.completedPatch) {
-      applySafePatch(state, operation.completedPatch);
-    }
     state.processedPrefixOpSeq = operation.opSeq;
     state.pendingOperations.splice(index, 1);
   }
-}
-
-function validateSafePatch(
-  state: ConversationContextState,
-  patch: ContextStatePatch,
-): void {
-  const probe = structuredClone(state);
-  applySafePatch(probe, patch);
 }
 
 function applySafePatch(
@@ -704,9 +688,7 @@ function validateState(state: ConversationContextState): void {
 }
 
 function validateOperation(
-  operation:
-    | Omit<ContextOperationRef, "status" | "completedPatch">
-    | ContextOperationRef,
+  operation: Omit<ContextOperationRef, "status"> | ContextOperationRef,
 ): void {
   requireSafeInteger(operation.opSeq, "opSeq", 1);
   requireOpaqueIdentifier(operation.operationId, "operationId");
@@ -721,48 +703,6 @@ function validateOperation(
       1,
     );
   }
-
-  if ("status" in operation) {
-    if (
-      operation.status !== "PROCESSED" &&
-      operation.completedPatch !== undefined
-    ) {
-      throw new ContextStateConflictError(
-        "INVALID_STATE",
-        "Only processed operations may retain a completed patch",
-      );
-    }
-    if (operation.completedPatch) {
-      const probe = createPatchValidationProbe();
-      applySafePatch(probe, operation.completedPatch);
-    }
-  }
-}
-
-function createPatchValidationProbe(): ConversationContextState {
-  return {
-    tenantId: "validation:tenant",
-    conversationId: "validation:conversation",
-    stateVersion: 1,
-    causalFloorOpSeq: 0,
-    processedPrefixOpSeq: 0,
-    pendingOperations: [],
-    membershipEpoch: 1,
-    erasureEpoch: 1,
-    policyVersion: 1,
-    strategyVersion: "validation-v1",
-    stateSchemaVersion: 1,
-    recoveryMode: "FULL",
-    status: "ACTIVE",
-    terminologyClaimRefs: [],
-    lexicalClaimRefs: [],
-    correctionClaimRefs: [],
-    entityHandles: [],
-    unresolvedReferenceHandles: [],
-    styleState: {},
-    pragmaticState: {},
-    updatedAt: "1970-01-01T00:00:00.000Z",
-  };
 }
 
 function validateDerivationResult(
