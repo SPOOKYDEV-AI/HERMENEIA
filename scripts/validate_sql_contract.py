@@ -21,6 +21,7 @@ OUTBOX_LEASE_MIGRATION = ROOT / "db/migrations/0007_outbox_lease_shape.sql"
 TRANSLATION_MIGRATION = ROOT / "db/migrations/0008_translation_execution.sql"
 SOURCE_REQUIRED_EVENT_MIGRATION = ROOT / "db/migrations/0009_translation_source_required_event.sql"
 DEVICE_TRUST_MIGRATION = ROOT / "db/migrations/0010_device_trust_lifecycle.sql"
+CONTEXT_STATE_MIGRATION = ROOT / "db/migrations/0011_context_state.sql"
 
 REQUIRED_TABLES = {
     "users",
@@ -81,6 +82,7 @@ def main() -> int:
         encoding="utf-8"
     )
     device_trust_sql = DEVICE_TRUST_MIGRATION.read_text(encoding="utf-8")
+    context_state_sql = CONTEXT_STATE_MIGRATION.read_text(encoding="utf-8")
     upper = sql.upper()
 
     if not upper.lstrip().startswith("BEGIN;"):
@@ -293,6 +295,48 @@ def main() -> int:
         fail("device trust migration must begin with BEGIN")
     if not device_trust_sql.rstrip().endswith("COMMIT;"):
         fail("device trust migration must end with COMMIT")
+
+
+    context_state_required = [
+        "CREATE FUNCTION hermeneia_context_jsonb_has_forbidden_key",
+        "CREATE TABLE conversation_context_states",
+        "CREATE TABLE translation_repair_events",
+        "CREATE TABLE context_claims",
+        "CREATE TABLE provenance_edges",
+        "CREATE TABLE recovery_checkpoints",
+        "processed_prefix_sequence bigint NOT NULL DEFAULT 0",
+        "pending_operations jsonb NOT NULL DEFAULT '[]'::jsonb",
+        "retention_class <> 'CORRECTIVE_DURABLE'",
+        "'EXPLICIT_TEXTUAL_CORRECTION'",
+        "'APPROVED_GLOSSARY_CHANGE'",
+        "'TENANT_POLICY_CHANGE'",
+        "recovery_checkpoints_one_active_idx",
+        "NOT hermeneia_context_jsonb_has_forbidden_key",
+    ]
+    for snippet in context_state_required:
+        if snippet not in context_state_sql:
+            fail(f"context state migration missing invariant: {snippet}")
+
+    if not context_state_sql.lstrip().startswith("BEGIN;"):
+        fail("context state migration must begin with BEGIN")
+    if not context_state_sql.rstrip().endswith("COMMIT;"):
+        fail("context state migration must end with COMMIT")
+
+    context_lower = context_state_sql.lower()
+    for forbidden_column in (
+        " raw_text text",
+        " message_text text",
+        " source_text text",
+        " translated_text text",
+        " transcript text",
+        " conversation_history",
+        " raw_history",
+    ):
+        if forbidden_column in context_lower:
+            fail(
+                "context state migration contains forbidden durable transcript "
+                f"column/token: {forbidden_column.strip()}"
+            )
 
     command_lower = command_sql.lower()
     for forbidden in (
