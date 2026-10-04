@@ -617,7 +617,13 @@ export class PostgresTranslationRepository {
               superseded_at = $3
         WHERE tenant_id = $1
           AND translation_id = $2
-          AND status IN ('PENDING','SOURCE_REQUIRED')`,
+          AND status IN (
+            'PENDING',
+            'SOURCE_REQUIRED',
+            'READY',
+            'FAILED',
+            'EXPIRED'
+          )`,
       [
         input.tenantId,
         input.translationId,
