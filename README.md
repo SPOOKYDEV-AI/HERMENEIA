@@ -98,9 +98,9 @@ The Context Engine is the main research and engineering differentiator. Messagin
 
 ## Repository status
 
-**Core Messaging implementation active: persistent Send, command recovery, edit/delete, tenant-scoped sync/ACK and session/device authentication are executable behind PostgreSQL ports. Live PostgreSQL and reviewed envelope-crypto gates remain open.**
+**Persistent Core V1 execution is active: Send, command recovery, edit/delete, tenant-scoped sync/ACK, session/device trust, translation outbox/recovery/worker orchestration and a fail-closed persistent API process are implemented behind PostgreSQL ports. Live PostgreSQL, reviewed envelope cryptography and a real provider adapter remain open production gates.**
 
-The project is intentionally defining its contracts, architecture and evaluation methodology before committing to application code or model-specific implementations.
+The repository now contains executable messaging and translation control-plane code as well as the architecture/research contracts. The next major implementation focus is the context engine and its measurable T0/T1/T2 behaviour, after the remaining persistence/security production gates are closed.
 
 ## Documentation
 
