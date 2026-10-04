@@ -30,6 +30,7 @@ def main() -> int:
     tenant_sync_migration = ROOT / "db/migrations/0005_tenant_device_sync_state.sql"
     outbox_lifecycle_migration = ROOT / "db/migrations/0006_outbox_superseded.sql"
     outbox_lease_migration = ROOT / "db/migrations/0007_outbox_lease_shape.sql"
+    translation_migration = ROOT / "db/migrations/0008_translation_execution.sql"
     smoke = ROOT / "db/tests/0001_core_messaging_smoke.sql"
     runtime_smoke = ROOT / "db/tests/0003_runtime_alignment_smoke.sql"
     down = ROOT / "db/migrations/0001_core_messaging.down.sql"
@@ -43,6 +44,7 @@ def main() -> int:
         tenant_sync_migration,
         outbox_lifecycle_migration,
         outbox_lease_migration,
+        translation_migration,
         smoke,
         runtime_smoke,
     ):
