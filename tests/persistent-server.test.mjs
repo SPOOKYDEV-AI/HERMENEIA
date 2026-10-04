@@ -34,6 +34,8 @@ class FakeClient {
           has_provider_executions: true,
           has_command_fingerprint: true,
           has_source_required_constraint: true,
+          has_device_platform: true,
+          has_device_material_constraint: true,
         }],
         rowCount: 1,
       };
