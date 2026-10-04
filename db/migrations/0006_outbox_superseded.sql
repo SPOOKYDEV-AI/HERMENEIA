@@ -23,6 +23,6 @@ CREATE INDEX outbox_jobs_message_revision_idx
     (((payload_ref->>'source_revision')::integer)),
     status
   )
-  WHERE job_type = 'translation.request';
+  WHERE job_type IN ('translation.request','translation.execute');
 
 COMMIT;
