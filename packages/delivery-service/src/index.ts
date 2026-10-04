@@ -72,7 +72,6 @@ export interface PersistentDeliveryClock {
 export type SyncCursorDecision =
   | { kind: "CONTINUE"; afterOffset: number }
   | { kind: "RESET_EPOCH"; currentEpoch: number }
-  | { kind: "RESET_PURGED"; minimumRecoverableOffset: number }
   | { kind: "RESET_AHEAD"; maximumIssuedOffset: number };
 
 export function evaluateSyncCursor(
@@ -90,13 +89,6 @@ export function evaluateSyncCursor(
     return {
       kind: "RESET_EPOCH",
       currentEpoch: state.inboxEpoch,
-    };
-  }
-
-  if (requested.afterOffset < state.lastAckedOffset) {
-    return {
-      kind: "RESET_PURGED",
-      minimumRecoverableOffset: state.lastAckedOffset,
     };
   }
 
@@ -166,7 +158,7 @@ export class PersistentDeliveryService<Tx> {
       if (!requested) {
         return resetResponse(
           state.inboxEpoch,
-          state.lastAckedOffset,
+          0,
         );
       }
 
@@ -175,9 +167,7 @@ export class PersistentDeliveryService<Tx> {
         const resetOffset =
           decision.kind === "RESET_AHEAD"
             ? decision.maximumIssuedOffset
-            : decision.kind === "RESET_PURGED"
-              ? decision.minimumRecoverableOffset
-              : state.lastAckedOffset;
+            : 0;
         return resetResponse(state.inboxEpoch, resetOffset);
       }
 
