@@ -518,6 +518,97 @@ export function createHpkeP256EnvelopeCodec() {
   };
 }
 
+export function createHpkeP256OriginalEnvelopeProtector() {
+  const codec = createHpkeP256EnvelopeCodec();
+  return {
+    async protect(input: {
+      envelopeId: string;
+      tenantId: string;
+      conversationId: string;
+      messageId: string;
+      sourceRevision: number;
+      recipientUserId: string;
+      recipientDeviceId: string;
+      recipientCredentialVersion: number;
+      recipientPublicMaterialRef: string;
+      source: {
+        text: string;
+        language_hint?: string;
+      };
+    }): Promise<string> {
+      return codec.seal({
+        binding: {
+          envelopeId: input.envelopeId,
+          tenantId: input.tenantId,
+          conversationId: input.conversationId,
+          messageId: input.messageId,
+          sourceRevision: input.sourceRevision,
+          recipientUserId: input.recipientUserId,
+          recipientDeviceId: input.recipientDeviceId,
+          recipientCredentialVersion:
+            input.recipientCredentialVersion,
+          renditionType: "ORIGINAL",
+        },
+        recipientPublicMaterialRef:
+          input.recipientPublicMaterialRef,
+        plaintext: {
+          v: 1,
+          kind: "ORIGINAL",
+          text: input.source.text,
+          ...(input.source.language_hint
+            ? { language_hint: input.source.language_hint }
+            : {}),
+        },
+      });
+    },
+  };
+}
+
+export function createHpkeP256TranslationEnvelopeProtector() {
+  const codec = createHpkeP256EnvelopeCodec();
+  return {
+    async protect(input: {
+      envelopeId: string;
+      tenantId: string;
+      conversationId: string;
+      messageId: string;
+      sourceRevision: number;
+      translationId: string;
+      recipientUserId: string;
+      recipientDeviceId: string;
+      recipientCredentialVersion: number;
+      recipientPublicMaterialRef: string;
+      translatedText: string;
+      targetLanguageTag: string;
+    }): Promise<string> {
+      return codec.seal({
+        binding: {
+          envelopeId: input.envelopeId,
+          tenantId: input.tenantId,
+          conversationId: input.conversationId,
+          messageId: input.messageId,
+          sourceRevision: input.sourceRevision,
+          recipientUserId: input.recipientUserId,
+          recipientDeviceId: input.recipientDeviceId,
+          recipientCredentialVersion:
+            input.recipientCredentialVersion,
+          renditionType: "TRANSLATION",
+          translationId: input.translationId,
+          targetLanguageTag: input.targetLanguageTag,
+        },
+        recipientPublicMaterialRef:
+          input.recipientPublicMaterialRef,
+        plaintext: {
+          v: 1,
+          kind: "TRANSLATION",
+          text: input.translatedText,
+          target_language_tag: input.targetLanguageTag,
+        },
+      });
+    },
+  };
+}
+
 export const HPKE_P256_V1 = Object.freeze({
   publicMaterialPrefix: PUBLIC_MATERIAL_PREFIX,
   wireVersion: WIRE_VERSION,
