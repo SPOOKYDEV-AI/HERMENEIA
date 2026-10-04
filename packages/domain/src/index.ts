@@ -17,6 +17,9 @@ export type DomainErrorCode =
   | "NOT_AUTHORIZED"
   | "DEVICE_REVOKED"
   | "RECIPIENT_UNAVAILABLE"
+  | "SOURCE_REQUIRED"
+  | "SOURCE_EXPIRED"
+  | "SOURCE_REVISION_MISMATCH"
   | "INVALID_COMMAND"
   | "DELIVERY_EXPIRED";
 
@@ -106,6 +109,6 @@ export interface MessageRevisionResult {
 
 export interface CommandStatusResult {
   command_id: UUID;
-  status: "UNKNOWN" | "SUCCEEDED" | "FAILED";
+  status: "UNKNOWN" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED";
   result?: Record<string, unknown>;
 }
