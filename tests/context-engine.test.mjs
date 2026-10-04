@@ -221,6 +221,7 @@ test("cold state can use a sanitised recovery checkpoint without fabricating his
         candidateId: "checkpoint",
         candidateType: "RECOVERY_CHECKPOINT",
         sourceSequence: null,
+        causalThroughSequence: 7,
         content: "validated terminology handles only",
         privacyScope: "CHECKPOINT",
         erasureEpoch: 0,
@@ -260,6 +261,7 @@ test("explicit old-topic reference bypasses adaptive utility threshold", () => {
         candidateId: "old-topic",
         candidateType: "ACTIVE_EPISODE",
         sourceSequence: 12,
+        causalThroughSequence: 12,
         content: "old topic handle",
         semanticScore: 0.1,
         temporalScore: 0.01,
@@ -373,6 +375,7 @@ test("durable correction memory requires an explicit correction trigger", () => 
             candidateId: "bad-memory",
             candidateType: "CORRECTION_MEMORY",
             sourceSequence: null,
+            causalThroughSequence: 7,
             privacyScope: "CORRECTION",
             correctionTrigger: null,
           }),
@@ -391,6 +394,7 @@ test("explicit correction memory is admissible at bounded scope", () => {
         candidateId: "correction",
         candidateType: "CORRECTION_MEMORY",
         sourceSequence: null,
+        causalThroughSequence: 7,
         content: "CR means change request in this conversation",
         privacyScope: "CORRECTION",
         correctionTrigger: "EXPLICIT_REPAIR",
@@ -498,5 +502,95 @@ test("invalid fixed reserves are rejected before selection", () => {
         },
       })),
     /Fixed context reserves exceed totalTokens/,
+  );
+});
+
+
+test("derived checkpoint from the future is never eligible", () => {
+  const engine = new ContextEngine();
+
+  const result = engine.build(input({
+    candidates: [
+      candidate({
+        candidateId: "future-checkpoint",
+        candidateType: "RECOVERY_CHECKPOINT",
+        sourceSequence: null,
+        causalThroughSequence: 8,
+        content: "must not leak from future state",
+        privacyScope: "CHECKPOINT",
+      }),
+    ],
+  }));
+
+  assert.equal(result.metrics.candidatesEligible, 0);
+  assert.deepEqual(result.selected, []);
+});
+
+test("derived episode from the future is never eligible", () => {
+  const engine = new ContextEngine();
+
+  const result = engine.build(input({
+    currentSequence: 20,
+    messageId: "message-20",
+    state: state({
+      processedPrefixSequence: 19,
+    }),
+    candidates: [
+      candidate({
+        candidateId: "future-episode",
+        candidateType: "ACTIVE_EPISODE",
+        sourceSequence: null,
+        causalThroughSequence: 20,
+        content: "future episode projection",
+        activeEpisode: true,
+      }),
+    ],
+  }));
+
+  assert.deepEqual(result.selected, []);
+});
+
+test("derived episode and checkpoint candidates require a causal frontier", () => {
+  const engine = new ContextEngine();
+
+  for (const candidateType of [
+    "ACTIVE_EPISODE",
+    "RECOVERY_CHECKPOINT",
+  ]) {
+    assert.throws(
+      () =>
+        engine.build(input({
+          candidates: [
+            candidate({
+              candidateId: `missing-frontier-${candidateType}`,
+              candidateType,
+              sourceSequence: null,
+              causalThroughSequence: undefined,
+            }),
+          ],
+        })),
+      /require causalThroughSequence/,
+    );
+  }
+});
+
+test("correction memory requires a causal frontier in addition to a trigger", () => {
+  const engine = new ContextEngine();
+
+  assert.throws(
+    () =>
+      engine.build(input({
+        candidates: [
+          candidate({
+            candidateId: "correction-without-frontier",
+            candidateType: "CORRECTION_MEMORY",
+            sourceSequence: null,
+            causalThroughSequence: null,
+            privacyScope: "CORRECTION",
+            correctionTrigger: "EXPLICIT_REPAIR",
+          }),
+        ],
+      })),
+    /Correction memory requires causalThroughSequence/,
   );
 });
