@@ -2,31 +2,15 @@ import type { UUID } from "../../domain/src/index.js";
 import type {
   ProviderExecutionRecord,
   TranslationExecutionRecord,
+  TranslationFanoutPlan,
   TranslationLogicalKey,
+  TranslationRecipientDevice,
 } from "../../translation-service/src/index.js";
 import type {
   SqlExecutor,
   SqlQueryResult,
   SqlTransactionManager,
 } from "../../persistence/src/index.js";
-
-export interface TranslationFanoutTarget {
-  recipientUserId: UUID;
-  targetLanguageTag: string;
-  targetProfileVersion: number;
-}
-
-export interface TranslationFanoutPlan {
-  conversationId: UUID;
-  sourceLanguageTag: string | null;
-  targets: TranslationFanoutTarget[];
-}
-
-export interface TranslationRecipientDevice {
-  deviceId: UUID;
-  credentialVersion: number;
-  publicMaterialRef: string;
-}
 
 function first<Row extends Record<string, unknown>>(
   result: SqlQueryResult<Row>,
