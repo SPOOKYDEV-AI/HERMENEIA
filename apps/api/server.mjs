@@ -175,12 +175,24 @@ export function createHermeneiaHttpServer({
   core,
   authenticate,
   sendService = core,
+  deliveryService = null,
 }) {
   if (!core) {
     throw new TypeError("core is required");
   }
   if (!sendService || typeof sendService.sendMessage !== "function") {
     throw new TypeError("sendService.sendMessage is required");
+  }
+  if (
+    deliveryService !== null &&
+    (
+      typeof deliveryService.sync !== "function" ||
+      typeof deliveryService.acknowledge !== "function"
+    )
+  ) {
+    throw new TypeError(
+      "deliveryService.sync and deliveryService.acknowledge are required",
+    );
   }
   if (typeof authenticate !== "function") {
     throw new TypeError("authenticate(req) dependency is required");
@@ -310,8 +322,45 @@ export function createHermeneiaHttpServer({
       }
 
       if (req.method === "GET" && requestUrl.pathname === "/v1/sync") {
+        const limit = Math.min(
+          MAX_SYNC_LIMIT,
+          Math.max(1, Number(requestUrl.searchParams.get("limit") ?? 100) || 100),
+        );
+        const waitMs = Math.min(
+          MAX_WAIT_MS,
+          Math.max(0, Number(requestUrl.searchParams.get("wait_ms") ?? 0) || 0),
+        );
+
+        if (deliveryService) {
+          const syncInput = {
+            ...(requestUrl.searchParams.get("cursor")
+              ? { cursor: requestUrl.searchParams.get("cursor") }
+              : {}),
+            limit,
+          };
+
+          let result = await deliveryService.sync(actor, syncInput);
+          if (
+            result.kind === "OK" &&
+            result.response.events.length === 0 &&
+            waitMs > 0
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, waitMs));
+            result = await deliveryService.sync(actor, syncInput);
+          }
+
+          return json(
+            res,
+            result.kind === "RESET" ? 409 : 200,
+            result.response,
+          );
+        }
+
         const position = core.getDeviceSyncPosition(actor.deviceId);
-        const parsed = parseCursor(requestUrl.searchParams.get("cursor"), position.inboxEpoch);
+        const parsed = parseCursor(
+          requestUrl.searchParams.get("cursor"),
+          position.inboxEpoch,
+        );
 
         if (parsed.epoch !== position.inboxEpoch) {
           return json(res, 409, {
@@ -321,15 +370,6 @@ export function createHermeneiaHttpServer({
             events: [],
           });
         }
-
-        const limit = Math.min(
-          MAX_SYNC_LIMIT,
-          Math.max(1, Number(requestUrl.searchParams.get("limit") ?? 100) || 100),
-        );
-        const waitMs = Math.min(
-          MAX_WAIT_MS,
-          Math.max(0, Number(requestUrl.searchParams.get("wait_ms") ?? 0) || 0),
-        );
 
         let events = core.syncDevice(actor.deviceId, parsed.offset);
         if (!events.length && waitMs > 0) {
@@ -361,9 +401,22 @@ export function createHermeneiaHttpServer({
         }
 
         for (const ack of body.acks) {
-          if (!ack || typeof ack.envelope_id !== "string") {
+          if (
+            !ack ||
+            typeof ack.envelope_id !== "string" ||
+            typeof ack.persisted_at !== "string" ||
+            !Number.isFinite(Date.parse(ack.persisted_at))
+          ) {
             throw new HttpError(400, "INVALID_COMMAND", "Invalid delivery ACK");
           }
+        }
+
+        if (deliveryService) {
+          await deliveryService.acknowledge(actor, body.acks);
+          return noContent(res);
+        }
+
+        for (const ack of body.acks) {
           core.acknowledgeEnvelope(actor.deviceId, ack.envelope_id);
         }
 
