@@ -1,4 +1,4 @@
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import process from "node:process";
 
@@ -106,9 +106,28 @@ export async function startPersistentServerProcess({
   pgModule,
   clock,
   ids,
+  host: hostOverride,
+  port: portOverride,
   onStarted = null,
 } = {}) {
   const config = persistentServerProcessConfigFromEnv(env);
+  const host =
+    hostOverride === undefined ? config.host : hostOverride;
+  const port =
+    portOverride === undefined ? config.port : portOverride;
+
+  if (typeof host !== "string" || !host) {
+    throw new TypeError("host override must be a non-empty string");
+  }
+  if (
+    !Number.isInteger(port) ||
+    port < 0 ||
+    port > 65535
+  ) {
+    throw new TypeError(
+      "port override must be an integer between 0 and 65535",
+    );
+  }
   const security =
     securityRuntime ??
     await loadSecurityRuntimeModule({
@@ -137,7 +156,7 @@ export async function startPersistentServerProcess({
   };
 
   try {
-    await listen(app.server, config.host, config.port);
+    await listen(app.server, host, port);
   } catch (error) {
     await close();
     throw error;
@@ -145,15 +164,15 @@ export async function startPersistentServerProcess({
 
   if (typeof onStarted === "function") {
     await onStarted({
-      host: config.host,
-      port: app.server.address()?.port ?? config.port,
+      host,
+      port: app.server.address()?.port ?? port,
     });
   }
 
   return {
     ...app,
-    host: config.host,
-    port: app.server.address()?.port ?? config.port,
+    host,
+    port: app.server.address()?.port ?? port,
     get closing() {
       return closing;
     },
@@ -204,7 +223,7 @@ export async function runPersistentServerMain({
 const invokedDirectly =
   process.argv[1] &&
   path.resolve(process.argv[1]) ===
-    path.resolve(new URL(import.meta.url).pathname);
+    path.resolve(fileURLToPath(import.meta.url));
 
 if (invokedDirectly) {
   runPersistentServerMain().catch((error) => {
