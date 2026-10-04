@@ -238,3 +238,162 @@ test("SOURCE_REQUIRED transition only applies to PENDING execution", async () =>
   assert.match(sql.text, /status = 'SOURCE_REQUIRED'/);
   assert.match(sql.text, /status = 'PENDING'/);
 });
+
+
+test("fanout plan resolves locale override and membership version without source text", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{
+        conversation_id: "conversation-1",
+        declared_source_language: "fr-FR",
+      }],
+      rowCount: 1,
+    },
+    {
+      rows: [{
+        user_id: "user-b",
+        target_language_tag: "es-CO",
+        membership_version: 4,
+      }],
+      rowCount: 1,
+    },
+  ]);
+  const repository = new PostgresTranslationRepository(
+    new SqlTransactionManager(new Pool(connection)),
+  );
+
+  const plan = await repository.withTransaction((tx) =>
+    repository.loadFanoutPlan(tx, {
+      tenantId: "tenant-1",
+      sourceMessageId: "message-1",
+      sourceRevision: 2,
+    }),
+  );
+
+  assert.deepEqual(plan, {
+    conversationId: "conversation-1",
+    sourceLanguageTag: "fr-FR",
+    targets: [{
+      recipientUserId: "user-b",
+      targetLanguageTag: "es-CO",
+      targetProfileVersion: 4,
+    }],
+  });
+
+  assert.match(connection.queries[1].text, /mm\.current_revision = \$3/);
+  assert.match(connection.queries[2].text, /target_locale_override/);
+  assert.match(connection.queries[2].text, /membership_version/);
+  assert.doesNotMatch(
+    connection.queries[2].text,
+    /source_text|translated_text|prompt_text/,
+  );
+});
+
+test("publish lock verifies current source revision and target profile", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [row()], rowCount: 1 },
+  ]);
+  const repository = new PostgresTranslationRepository(
+    new SqlTransactionManager(new Pool(connection)),
+  );
+
+  const execution = await repository.withTransaction((tx) =>
+    repository.lockCurrentTranslationForPublish(
+      tx,
+      "tenant-1",
+      "translation-1",
+    ),
+  );
+
+  assert.equal(execution.translationId, "translation-1");
+  const sql = connection.queries[1];
+  assert.match(sql.text, /mm\.current_revision = te\.source_revision/);
+  assert.match(sql.text, /cm\.membership_version = te\.target_profile_version/);
+  assert.match(sql.text, /target_locale_override/);
+  assert.match(sql.text, /FOR UPDATE OF te, mm, cm/);
+});
+
+test("translation publish device query locks active devices with public material", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{
+        device_id: "device-b1",
+        credential_version: 7,
+        public_material_ref: "pub:b1",
+      }],
+      rowCount: 1,
+    },
+  ]);
+  const repository = new PostgresTranslationRepository(
+    new SqlTransactionManager(new Pool(connection)),
+  );
+
+  const devices = await repository.withTransaction((tx) =>
+    repository.listRecipientDevicesForPublish(tx, {
+      tenantId: "tenant-1",
+      recipientUserId: "user-b",
+    }),
+  );
+
+  assert.deepEqual(devices, [{
+    deviceId: "device-b1",
+    credentialVersion: 7,
+    publicMaterialRef: "pub:b1",
+  }]);
+  const sql = connection.queries[1];
+  assert.match(sql.text, /d\.status = 'ACTIVE'/);
+  assert.match(sql.text, /length\(d\.public_material_ref\) > 0/);
+  assert.match(sql.text, /FOR SHARE OF d/);
+});
+
+test("translation retry and terminal transitions are fenced by PENDING state", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 1 },
+    { rows: [], rowCount: 1 },
+    { rows: [], rowCount: 1 },
+    { rows: [], rowCount: 1 },
+  ]);
+  const repository = new PostgresTranslationRepository(
+    new SqlTransactionManager(new Pool(connection)),
+  );
+
+  await repository.withTransaction(async (tx) => {
+    assert.equal(
+      await repository.scheduleRetry(tx, {
+        tenantId: "tenant-1",
+        translationId: "translation-1",
+        nextAttemptAt: "2026-10-04T12:01:00.000Z",
+      }),
+      true,
+    );
+    assert.equal(
+      await repository.markReady(tx, {
+        tenantId: "tenant-1",
+        translationId: "translation-1",
+        readyAt: "2026-10-04T12:02:00.000Z",
+      }),
+      true,
+    );
+    assert.equal(
+      await repository.markFailed(tx, {
+        tenantId: "tenant-1",
+        translationId: "translation-2",
+      }),
+      true,
+    );
+    assert.equal(
+      await repository.markSuperseded(tx, {
+        tenantId: "tenant-1",
+        translationId: "translation-3",
+        supersededAt: "2026-10-04T12:03:00.000Z",
+      }),
+      true,
+    );
+  });
+
+  assert.match(connection.queries[1].text, /next_attempt_at = \$3/);
+  assert.match(connection.queries[1].text, /status = 'PENDING'/);
+  assert.match(connection.queries[2].text, /status = 'READY'/);
+  assert.match(connection.queries[3].text, /status = 'FAILED'/);
+  assert.match(connection.queries[4].text, /status = 'SUPERSEDED'/);
+});
