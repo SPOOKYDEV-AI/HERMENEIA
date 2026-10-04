@@ -1,0 +1,138 @@
+name: Persistent Core Qualification
+
+on:
+  push:
+    branches:
+      - main
+      - feat/persistent-send-service-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualification:
+    name: PostgreSQL + runtime qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    outputs:
+      lockfile_missing: ${{ steps.lock_state.outputs.missing }}
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: hermeneia_ci
+          POSTGRES_PASSWORD: hermeneia_ci
+          POSTGRES_DB: hermeneia_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hermeneia_ci -d hermeneia_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      HERMENEIA_TEST_DATABASE_URL: postgresql://hermeneia_ci:hermeneia_ci@127.0.0.1:5432/hermeneia_ci
+      DATABASE_URL: postgresql://hermeneia_ci:hermeneia_ci@127.0.0.1:5432/hermeneia_ci
+      SOURCE_FINGERPRINT_HMAC_KEY_VERSION: ci-v1
+      SOURCE_FINGERPRINT_VERIFICATION_KEYS_JSON: "[]"
+      TRANSLATION_WORKER_MODE: external
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Ensure PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+          psql --version
+
+      - name: Detect npm lockfile state
+        id: lock_state
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f package-lock.json ]]; then
+            echo "missing=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "missing=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install exact dependency graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f package-lock.json ]]; then
+            npm ci --ignore-scripts --no-audit --no-fund
+          else
+            npm install --ignore-scripts --no-audit --no-fund
+          fi
+
+      - name: Generate ephemeral source fingerprint key
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module -e "import { randomBytes } from 'node:crypto'; process.stdout.write('SOURCE_FINGERPRINT_HMAC_KEY_BASE64=' + randomBytes(32).toString('base64') + '\\n')" >> "$GITHUB_ENV"
+
+      - name: Run full local CI against live PostgreSQL
+        run: python scripts/local_ci.py
+
+      - name: Upload generated npm lockfile
+        if: steps.lock_state.outputs.missing == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-lockfile
+          path: package-lock.json
+          if-no-files-found: error
+          retention-days: 1
+
+  commit-lockfile:
+    name: Commit generated npm lockfile
+    needs: qualification
+    if: >-
+      needs.qualification.outputs.lockfile_missing == 'true' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/feat/persistent-send-service-v1'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout qualified commit
+        uses: actions/checkout@v4
+
+      - name: Download generated lockfile
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-lockfile
+          path: .
+
+      - name: Commit reproducible dependency lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f package-lock.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git diff --cached --exit-code >/dev/null && exit 0
+          git commit -m "chore: add npm dependency lockfile"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
