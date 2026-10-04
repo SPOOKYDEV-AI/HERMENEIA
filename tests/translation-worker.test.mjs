@@ -26,6 +26,7 @@ class FakeWorkerStore {
       attempts: [],
       envelopes: [],
       events: [],
+      controlDeviceQueries: [],
       inboxOffsets: new Map(),
     };
     this.fanoutPlan = {
@@ -254,7 +255,8 @@ class FakeWorkerStore {
       : undefined;
   }
 
-  async listRecipientControlDevices() {
+  async listRecipientControlDevices(_tx, input) {
+    this.state.controlDeviceQueries.push(clone(input));
     return this.current
       ? clone(this.controlDevices)
       : [];
@@ -564,6 +566,12 @@ test("missing transient source marks execution SOURCE_REQUIRED without provider 
   assert.equal(currentExecution(f).status, "SOURCE_REQUIRED");
   assert.equal(child.status, "DONE");
   assert.equal(f.providerCalls(), 0);
+  assert.deepEqual(f.store.state.controlDeviceQueries, [{
+    tenantId: "tenant-1",
+    recipientUserId: "user-b",
+    sourceMessageId: "message-1",
+    sourceRevision: 1,
+  }]);
 
   const controlEvents = f.store.state.events.filter(
     (event) => event.eventType === "translation.source_required",
