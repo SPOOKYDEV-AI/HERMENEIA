@@ -27,6 +27,19 @@ export interface RecipientDeliveryTarget {
   devices: RecipientDevice[];
 }
 
+export interface ManagedDeviceRecord {
+  deviceId: UUID;
+  userId: UUID;
+  status: "ACTIVE" | "REVOKED" | "LOST";
+  credentialVersion: number;
+  publicMaterialRef: string;
+  platform: "WEB" | "ANDROID" | "IOS" | "DESKTOP" | "OTHER";
+  revocationEpoch: number;
+  registeredAt: string;
+  revokedAt: string | null;
+  lastSeenAt: string | null;
+}
+
 export interface ExistingMessageAcceptance {
   messageId: UUID;
   conversationId: UUID;
@@ -80,6 +93,32 @@ export type {
   SyncCursorDecision,
 } from "../../delivery-service/src/index.js";
 
+function managedDevice(row: {
+  device_id: UUID;
+  user_id: UUID;
+  status: "ACTIVE" | "REVOKED" | "LOST";
+  credential_version: number;
+  public_material_ref: string;
+  platform: "WEB" | "ANDROID" | "IOS" | "DESKTOP" | "OTHER";
+  revocation_epoch: number;
+  registered_at: string;
+  revoked_at: string | null;
+  last_seen_at: string | null;
+}): ManagedDeviceRecord {
+  return {
+    deviceId: row.device_id,
+    userId: row.user_id,
+    status: row.status,
+    credentialVersion: Number(row.credential_version),
+    publicMaterialRef: row.public_material_ref,
+    platform: row.platform,
+    revocationEpoch: Number(row.revocation_epoch),
+    registeredAt: row.registered_at,
+    revokedAt: row.revoked_at,
+    lastSeenAt: row.last_seen_at,
+  };
+}
+
 function first<Row extends Record<string, unknown>>(
   result: SqlQueryResult<Row>,
 ): Row | undefined {
@@ -91,6 +130,288 @@ export class PostgresMessagingRepository {
 
   withTransaction<T>(work: (tx: SqlExecutor) => Promise<T>): Promise<T> {
     return this.transactions.withTransaction(work);
+  }
+
+  async actorCanManageDevices(
+    tx: SqlExecutor,
+    actor: ActorContext,
+  ): Promise<boolean> {
+    const result = await tx.query<{ found: boolean }>(
+      `SELECT TRUE AS found
+         FROM tenant_memberships tm
+         JOIN devices d
+           ON d.user_id = tm.user_id
+          AND d.device_id = $3
+          AND d.status = 'ACTIVE'
+        WHERE tm.tenant_id = $1
+          AND tm.user_id = $2
+          AND tm.status = 'ACTIVE'
+        LIMIT 1`,
+      [actor.tenantId, actor.userId, actor.deviceId],
+    );
+    return Boolean(first(result)?.found);
+  }
+
+  async lockDeviceForUser(
+    tx: SqlExecutor,
+    actor: ActorContext,
+    deviceId: UUID,
+  ): Promise<ManagedDeviceRecord | undefined> {
+    const result = await tx.query<{
+      device_id: UUID;
+      user_id: UUID;
+      status: "ACTIVE" | "REVOKED" | "LOST";
+      credential_version: number;
+      public_material_ref: string;
+      platform: "WEB" | "ANDROID" | "IOS" | "DESKTOP" | "OTHER";
+      revocation_epoch: number;
+      registered_at: string;
+      revoked_at: string | null;
+      last_seen_at: string | null;
+    }>(
+      `SELECT target.device_id,
+              target.user_id,
+              target.status,
+              target.credential_version,
+              target.public_material_ref,
+              target.platform,
+              target.revocation_epoch,
+              target.registered_at::text AS registered_at,
+              target.revoked_at::text AS revoked_at,
+              target.last_seen_at::text AS last_seen_at
+         FROM devices target
+         JOIN tenant_memberships tm
+           ON tm.tenant_id = $1
+          AND tm.user_id = $2
+          AND tm.status = 'ACTIVE'
+         JOIN devices actor_device
+           ON actor_device.device_id = $3
+          AND actor_device.user_id = $2
+          AND actor_device.status = 'ACTIVE'
+        WHERE target.device_id = $4
+          AND target.user_id = $2
+        FOR UPDATE OF target`,
+      [actor.tenantId, actor.userId, actor.deviceId, deviceId],
+    );
+    const row = first(result);
+    return row ? managedDevice(row) : undefined;
+  }
+
+  async insertDevice(
+    tx: SqlExecutor,
+    input: {
+      deviceId: UUID;
+      userId: UUID;
+      publicMaterialRef: string;
+      platform: "WEB" | "ANDROID" | "IOS" | "DESKTOP" | "OTHER";
+      registeredAt: string;
+    },
+  ): Promise<boolean> {
+    const result = await tx.query<{ device_id: UUID }>(
+      `INSERT INTO devices(
+         device_id, user_id, status, credential_version,
+         public_material_ref, platform, revocation_epoch,
+         registered_at
+       ) VALUES ($1,$2,'ACTIVE',1,$3,$4,0,$5)
+       ON CONFLICT (device_id) DO NOTHING
+       RETURNING device_id`,
+      [
+        input.deviceId,
+        input.userId,
+        input.publicMaterialRef,
+        input.platform,
+        input.registeredAt,
+      ],
+    );
+    return result.rowCount === 1;
+  }
+
+  async insertDeviceSyncState(
+    tx: SqlExecutor,
+    deviceId: UUID,
+  ): Promise<void> {
+    await tx.query(
+      `INSERT INTO device_sync_states(device_id)
+       VALUES ($1)
+       ON CONFLICT (device_id) DO NOTHING`,
+      [deviceId],
+    );
+  }
+
+  async listUserDevices(
+    tx: SqlExecutor,
+    actor: ActorContext,
+  ): Promise<ManagedDeviceRecord[]> {
+    const result = await tx.query<{
+      device_id: UUID;
+      user_id: UUID;
+      status: "ACTIVE" | "REVOKED" | "LOST";
+      credential_version: number;
+      public_material_ref: string;
+      platform: "WEB" | "ANDROID" | "IOS" | "DESKTOP" | "OTHER";
+      revocation_epoch: number;
+      registered_at: string;
+      revoked_at: string | null;
+      last_seen_at: string | null;
+    }>(
+      `SELECT target.device_id,
+              target.user_id,
+              target.status,
+              target.credential_version,
+              target.public_material_ref,
+              target.platform,
+              target.revocation_epoch,
+              target.registered_at::text AS registered_at,
+              target.revoked_at::text AS revoked_at,
+              target.last_seen_at::text AS last_seen_at
+         FROM tenant_memberships tm
+         JOIN devices actor_device
+           ON actor_device.user_id = tm.user_id
+          AND actor_device.device_id = $3
+          AND actor_device.status = 'ACTIVE'
+         JOIN devices target
+           ON target.user_id = tm.user_id
+        WHERE tm.tenant_id = $1
+          AND tm.user_id = $2
+          AND tm.status = 'ACTIVE'
+        ORDER BY target.registered_at, target.device_id`,
+      [actor.tenantId, actor.userId, actor.deviceId],
+    );
+    return result.rows.map(managedDevice);
+  }
+
+  async rotateDeviceMaterial(
+    tx: SqlExecutor,
+    input: {
+      deviceId: UUID;
+      userId: UUID;
+      expectedCredentialVersion: number;
+      publicMaterialRef: string;
+      now: string;
+    },
+  ): Promise<ManagedDeviceRecord | undefined> {
+    const result = await tx.query<{
+      device_id: UUID;
+      user_id: UUID;
+      status: "ACTIVE" | "REVOKED" | "LOST";
+      credential_version: number;
+      public_material_ref: string;
+      platform: "WEB" | "ANDROID" | "IOS" | "DESKTOP" | "OTHER";
+      revocation_epoch: number;
+      registered_at: string;
+      revoked_at: string | null;
+      last_seen_at: string | null;
+    }>(
+      `UPDATE devices
+          SET credential_version = credential_version + 1,
+              public_material_ref = $4,
+              last_seen_at = $5
+        WHERE device_id = $1
+          AND user_id = $2
+          AND status = 'ACTIVE'
+          AND credential_version = $3
+      RETURNING device_id,
+                user_id,
+                status,
+                credential_version,
+                public_material_ref,
+                platform,
+                revocation_epoch,
+                registered_at::text AS registered_at,
+                revoked_at::text AS revoked_at,
+                last_seen_at::text AS last_seen_at`,
+      [
+        input.deviceId,
+        input.userId,
+        input.expectedCredentialVersion,
+        input.publicMaterialRef,
+        input.now,
+      ],
+    );
+    const row = first(result);
+    return row ? managedDevice(row) : undefined;
+  }
+
+  async revokeDevice(
+    tx: SqlExecutor,
+    input: {
+      deviceId: UUID;
+      userId: UUID;
+      now: string;
+    },
+  ): Promise<ManagedDeviceRecord | undefined> {
+    const result = await tx.query<{
+      device_id: UUID;
+      user_id: UUID;
+      status: "ACTIVE" | "REVOKED" | "LOST";
+      credential_version: number;
+      public_material_ref: string;
+      platform: "WEB" | "ANDROID" | "IOS" | "DESKTOP" | "OTHER";
+      revocation_epoch: number;
+      registered_at: string;
+      revoked_at: string | null;
+      last_seen_at: string | null;
+    }>(
+      `UPDATE devices
+          SET status = 'REVOKED',
+              revocation_epoch = revocation_epoch + 1,
+              revoked_at = $3
+        WHERE device_id = $1
+          AND user_id = $2
+          AND status <> 'REVOKED'
+      RETURNING device_id,
+                user_id,
+                status,
+                credential_version,
+                public_material_ref,
+                platform,
+                revocation_epoch,
+                registered_at::text AS registered_at,
+                revoked_at::text AS revoked_at,
+                last_seen_at::text AS last_seen_at`,
+      [input.deviceId, input.userId, input.now],
+    );
+    const row = first(result);
+    return row ? managedDevice(row) : undefined;
+  }
+
+  async revokeActiveSessionsForDevice(
+    tx: SqlExecutor,
+    input: {
+      userId: UUID;
+      deviceId: UUID;
+      now: string;
+    },
+  ): Promise<number> {
+    const result = await tx.query(
+      `UPDATE sessions
+          SET status = 'REVOKED',
+              revoked_at = $3
+        WHERE user_id = $1
+          AND device_id = $2
+          AND status = 'ACTIVE'`,
+      [input.userId, input.deviceId, input.now],
+    );
+    return result.rowCount;
+  }
+
+  async revokePendingDeviceEnvelopes(
+    tx: SqlExecutor,
+    input: {
+      deviceId: UUID;
+      throughCredentialVersion: number;
+    },
+  ): Promise<number> {
+    const result = await tx.query(
+      `UPDATE delivery_envelopes
+          SET status = 'REVOKED',
+              protected_payload = decode('', 'hex')
+        WHERE recipient_device_id = $1
+          AND recipient_credential_version <= $2
+          AND status = 'PENDING'`,
+      [input.deviceId, input.throughCredentialVersion],
+    );
+    return result.rowCount;
   }
 
   async findCommandReceipt(
