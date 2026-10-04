@@ -17,6 +17,9 @@
     "pg": "8.23.1",
     "@hpke/core": "1.9.0"
   },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  },
   "overrides": {
     "@hpke/common": "1.10.1"
   }
