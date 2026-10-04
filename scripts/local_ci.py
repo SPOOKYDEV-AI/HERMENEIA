@@ -45,9 +45,7 @@ def main() -> int:
 
     package_json = ROOT / "package.json"
     if package_json.exists():
-        run("npm", "run", "typecheck")
-        run("npm", "run", "build")
-        run("npm", "test")
+        run("npm", "run", "verify")
 
     print("LOCAL_CI=PASS")
     return 0
