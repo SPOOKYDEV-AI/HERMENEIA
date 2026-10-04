@@ -792,7 +792,13 @@ export class PostgresMessagingRepository {
       envelopeId: UUID;
       ackedAt: string;
     },
-  ): Promise<"ACKED" | "ALREADY_ACKED" | "NOT_FOUND"> {
+  ): Promise<
+    "ACKED" |
+    "ALREADY_ACKED" |
+    "EXPIRED" |
+    "REVOKED" |
+    "NOT_FOUND"
+  > {
     const lookup = await tx.query<{
       status: "PENDING" | "ACKED" | "EXPIRED" | "REVOKED";
       inbox_epoch: number;
@@ -815,7 +821,8 @@ export class PostgresMessagingRepository {
     const row = first(lookup);
     if (!row) return "NOT_FOUND";
     if (row.status === "ACKED") return "ALREADY_ACKED";
-    if (row.status !== "PENDING") return "NOT_FOUND";
+    if (row.status === "EXPIRED") return "EXPIRED";
+    if (row.status === "REVOKED") return "REVOKED";
 
     await tx.query(
       `UPDATE delivery_envelopes
@@ -829,6 +836,56 @@ export class PostgresMessagingRepository {
       [input.tenantId, input.envelopeId, input.deviceId, input.ackedAt],
     );
 
+    const syncState = await tx.query<{
+      inbox_epoch: number;
+      next_offset: number;
+      last_acked_offset: number;
+    }>(
+      `SELECT inbox_epoch, next_offset, last_acked_offset
+         FROM device_sync_states
+        WHERE device_id = $1
+        FOR UPDATE`,
+      [input.deviceId],
+    );
+    const state = first(syncState);
+    if (!state || Number(state.inbox_epoch) !== Number(row.inbox_epoch)) {
+      throw new Error(
+        "Invariant violation: missing or mismatched device sync state",
+      );
+    }
+
+    const blocker = await tx.query<{
+      first_blocking_offset: number | null;
+    }>(
+      `SELECT MIN(die.offset_value) AS first_blocking_offset
+         FROM device_inbox_events die
+         LEFT JOIN delivery_envelopes de
+           ON de.tenant_id = die.tenant_id
+          AND de.envelope_id = die.envelope_id
+          AND de.recipient_device_id = die.device_id
+        WHERE die.device_id = $1
+          AND die.inbox_epoch = $2
+          AND die.offset_value > $3
+          AND die.envelope_id IS NOT NULL
+          AND (
+            de.envelope_id IS NULL
+            OR de.status = 'PENDING'
+          )`,
+      [
+        input.deviceId,
+        Number(state.inbox_epoch),
+        Number(state.last_acked_offset),
+      ],
+    );
+
+    const firstBlockingOffset =
+      first(blocker)?.first_blocking_offset;
+    const terminalPrefix =
+      firstBlockingOffset === null ||
+      firstBlockingOffset === undefined
+        ? Number(state.next_offset) - 1
+        : Number(firstBlockingOffset) - 1;
+
     await tx.query(
       `UPDATE device_sync_states
           SET last_acked_offset = GREATEST(last_acked_offset, $2),
@@ -837,9 +894,9 @@ export class PostgresMessagingRepository {
           AND inbox_epoch = $4`,
       [
         input.deviceId,
-        Number(row.offset_value),
+        terminalPrefix,
         input.ackedAt,
-        Number(row.inbox_epoch),
+        Number(state.inbox_epoch),
       ],
     );
 
