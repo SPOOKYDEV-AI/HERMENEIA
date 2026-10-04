@@ -66,6 +66,21 @@ function assertSafePositiveInteger(value: number, label: string): void {
   }
 }
 
+function assertUint32PositiveInteger(
+  value: number,
+  label: string,
+): void {
+  if (
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > 0xffff_ffff
+  ) {
+    throw new TypeError(
+      `${label} must be an unsigned 32-bit positive integer`,
+    );
+  }
+}
+
 function uuidBytes(value: string, label: string): Uint8Array {
   if (
     typeof value !== "string" ||
@@ -101,7 +116,8 @@ function uint16(value: number): Uint8Array {
   return out;
 }
 
-function uint32(value: number): Uint8Array {
+function uint32(value: number, label: string): Uint8Array {
+  assertUint32PositiveInteger(value, label);
   const out = new Uint8Array(4);
   new DataView(out.buffer).setUint32(0, value, false);
   return out;
@@ -209,13 +225,30 @@ function base64UrlDecode(value: string): Uint8Array {
 }
 
 export function buildEnvelopeAad(binding: EnvelopeBinding): Uint8Array {
-  assertSafePositiveInteger(binding.sourceRevision, "sourceRevision");
+  assertUint32PositiveInteger(
+    binding.sourceRevision,
+    "sourceRevision",
+  );
   assertSafePositiveInteger(
     binding.recipientCredentialVersion,
     "recipientCredentialVersion",
   );
 
   const rendition = renditionByte(binding.renditionType);
+
+  if (
+    binding.renditionType === "ORIGINAL" &&
+    (
+      binding.translationId !== undefined &&
+      binding.translationId !== null ||
+      binding.targetLanguageTag !== undefined &&
+      binding.targetLanguageTag !== null
+    )
+  ) {
+    throw new TypeError(
+      "ORIGINAL envelope binding must not contain translation fields",
+    );
+  }
   const translationId =
     binding.renditionType === "TRANSLATION"
       ? uuidBytes(
@@ -247,7 +280,7 @@ export function buildEnvelopeAad(binding: EnvelopeBinding): Uint8Array {
     uuidBytes(binding.tenantId, "tenantId"),
     uuidBytes(binding.conversationId, "conversationId"),
     uuidBytes(binding.messageId, "messageId"),
-    uint32(binding.sourceRevision),
+    uint32(binding.sourceRevision, "sourceRevision"),
     uuidBytes(binding.recipientUserId, "recipientUserId"),
     uuidBytes(binding.recipientDeviceId, "recipientDeviceId"),
     uint64(binding.recipientCredentialVersion),

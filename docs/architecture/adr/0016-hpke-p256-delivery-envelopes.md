@@ -99,6 +99,10 @@ Changing any bound value makes decryption fail.
 
 UUIDs are encoded as 16 bytes, source revision as unsigned 32-bit big endian and credential version as unsigned 64-bit big endian.
 
+The implementation MUST reject source revisions outside `1..0xffffffff` before binary encoding. Silent integer truncation/wrap is forbidden.
+
+For ORIGINAL envelopes, translation-only binding fields (`translation_id`, `target_language_tag`) are invalid rather than ignored. This prevents callers from believing data is authenticated when it is not part of the ORIGINAL AAD.
+
 ## Plaintext payload
 
 ORIGINAL payload:
@@ -144,14 +148,29 @@ This ADR does **not** claim:
 
 Those require separate work.
 
+## Dependency reproducibility gate
+
+Before any production crypto claim:
+
+- `@hpke/core` must remain exactly pinned to `1.9.0`;
+- `@hpke/common` must remain exactly pinned to `1.10.1`;
+- a committed npm `package-lock.json` with lockfileVersion >= 3 is required;
+- both resolved HPKE packages must carry npm-registry URLs and `sha512-` integrity entries;
+- `npm run verify:crypto-deps` must pass in the release environment.
+
+Direct version pins without a lockfile are not considered a reproducible cryptographic dependency set.
+
 ## Required verification before production crypto claim
 
-- install and execute the pinned package versions;
+- install and execute the pinned + locked package versions;
+- run malformed wire-header/truncation/public-key corpus;
+- run concurrent seal regression tests to detect context/nonce reuse regressions;
 - RFC 9180/interoperability vectors;
 - browser tests on supported Chrome/Firefox/Safari/WebView baselines;
 - native iOS and Android interop;
-- malformed-key corpus;
 - wrong-key/tamper/AAD-binding tests;
 - mobile latency and allocation benchmarks;
 - security review of key generation/storage, enrollment proof and recovery;
 - dependency/advisory scan.
+
+Passing the local malformed/concurrency suite is necessary but does not replace external cryptographic review.

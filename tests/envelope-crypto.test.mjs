@@ -8,6 +8,7 @@ import {
   createHpkeP256OriginalEnvelopeProtector,
   createHpkeP256TranslationEnvelopeProtector,
   generateHpkeP256DeviceKeyPair,
+  validateHpkeP256PublicMaterialSyntax,
 } from "../.build/packages/envelope-crypto/src/index.js";
 
 const IDS = {
@@ -315,4 +316,186 @@ test("suite constants match RFC 9180 P-256/HKDF-SHA256/AES-128-GCM", () => {
     aeadId: 0x0001,
     encapsulatedKeySize: 65,
   });
+});
+
+
+test("source revision is strictly bounded to unsigned 32-bit AAD encoding", () => {
+  assert.throws(
+    () => buildEnvelopeAad(originalBinding({ sourceRevision: 0 })),
+    /unsigned 32-bit positive integer/,
+  );
+  assert.throws(
+    () =>
+      buildEnvelopeAad(
+        originalBinding({ sourceRevision: 0x1_0000_0000 }),
+      ),
+    /unsigned 32-bit positive integer/,
+  );
+
+  assert.doesNotThrow(() =>
+    buildEnvelopeAad(
+      originalBinding({ sourceRevision: 0xffff_ffff }),
+    ),
+  );
+});
+
+test("ORIGINAL binding rejects translation-only fields instead of ignoring them", () => {
+  assert.throws(
+    () =>
+      buildEnvelopeAad(
+        originalBinding({ translationId: IDS.translationId }),
+      ),
+    /must not contain translation fields/,
+  );
+
+  assert.throws(
+    () =>
+      buildEnvelopeAad(
+        originalBinding({ targetLanguageTag: "es-CO" }),
+      ),
+    /must not contain translation fields/,
+  );
+});
+
+test("public material syntax rejects wrong prefix length marker and noncanonical base64url", () => {
+  assert.throws(
+    () => validateHpkeP256PublicMaterialSyntax("not-hpke-material"),
+    /must start with/,
+  );
+
+  const tooShort = Buffer.alloc(64, 0);
+  tooShort[0] = 0x04;
+  assert.throws(
+    () =>
+      validateHpkeP256PublicMaterialSyntax(
+        `hpke-p256-v1:${tooShort.toString("base64url")}`,
+      ),
+    /uncompressed P-256 key/,
+  );
+
+  const compressedMarker = Buffer.alloc(65, 0);
+  compressedMarker[0] = 0x03;
+  assert.throws(
+    () =>
+      validateHpkeP256PublicMaterialSyntax(
+        `hpke-p256-v1:${compressedMarker.toString("base64url")}`,
+      ),
+    /uncompressed P-256 key/,
+  );
+
+  const plausible = Buffer.alloc(65, 0);
+  plausible[0] = 0x04;
+  assert.throws(
+    () =>
+      validateHpkeP256PublicMaterialSyntax(
+        `hpke-p256-v1:${plausible.toString("base64url")}=`,
+      ),
+    /Invalid base64url value/,
+  );
+});
+
+test("wire parser rejects malformed version suite encapsulation length and truncation", async () => {
+  const recipient = await generateHpkeP256DeviceKeyPair();
+  const codec = createHpkeP256EnvelopeCodec();
+  const payload = await codec.seal({
+    binding: originalBinding(),
+    recipientPublicMaterialRef: recipient.publicMaterialRef,
+    plaintext: { v: 1, kind: "ORIGINAL", text: "wire-hardening" },
+  });
+
+  function mutate(index, value) {
+    const raw = Buffer.from(payload, "base64");
+    raw[index] = value;
+    return raw.toString("base64");
+  }
+
+  await assert.rejects(
+    () =>
+      codec.open({
+        binding: originalBinding(),
+        recipientPrivateKey: recipient.keyPair.privateKey,
+        protectedPayload: mutate(4, 0x02),
+      }),
+    /Unsupported protected envelope version/,
+  );
+
+  await assert.rejects(
+    () =>
+      codec.open({
+        binding: originalBinding(),
+        recipientPrivateKey: recipient.keyPair.privateKey,
+        protectedPayload: mutate(6, 0x11),
+      }),
+    /Unsupported HPKE cipher suite/,
+  );
+
+  await assert.rejects(
+    () =>
+      codec.open({
+        binding: originalBinding(),
+        recipientPrivateKey: recipient.keyPair.privateKey,
+        protectedPayload: mutate(12, 0x40),
+      }),
+    /encapsulated-key length/,
+  );
+
+  const truncated = Buffer.from(payload, "base64")
+    .subarray(0, 13 + 65 + 15)
+    .toString("base64");
+  await assert.rejects(
+    () =>
+      codec.open({
+        binding: originalBinding(),
+        recipientPrivateKey: recipient.keyPair.privateKey,
+        protectedPayload: truncated,
+      }),
+    /too short/,
+  );
+
+  await assert.rejects(
+    () =>
+      codec.open({
+        binding: originalBinding(),
+        recipientPrivateKey: recipient.keyPair.privateKey,
+        protectedPayload: payload.slice(0, -1),
+      }),
+    /Invalid base64 payload/,
+  );
+});
+
+test("concurrent HPKE seals create distinct envelopes and all decrypt correctly", async () => {
+  const recipient = await generateHpkeP256DeviceKeyPair();
+  const codec = createHpkeP256EnvelopeCodec();
+  const count = 24;
+
+  const payloads = await Promise.all(
+    Array.from({ length: count }, (_, index) =>
+      codec.seal({
+        binding: originalBinding(),
+        recipientPublicMaterialRef: recipient.publicMaterialRef,
+        plaintext: {
+          v: 1,
+          kind: "ORIGINAL",
+          text: `concurrent-${index}`,
+        },
+      }),
+    ),
+  );
+
+  assert.equal(new Set(payloads).size, count);
+
+  const opened = await Promise.all(
+    payloads.map((protectedPayload) =>
+      codec.open({
+        binding: originalBinding(),
+        recipientPrivateKey: recipient.keyPair.privateKey,
+        protectedPayload,
+      }),
+    ),
+  );
+
+  assert.deepEqual(
+    opened.map((item) => item.text),
+    Array.from({ length: count }, (_, index) => `concurrent-${index}`),
+  );
 });
