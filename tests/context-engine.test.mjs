@@ -686,3 +686,45 @@ test("correction and checkpoint candidates share one soft memory reserve", () =>
     "ADAPTIVE_UTILITY",
   );
 });
+
+
+test("cold context uses authoritative erasure epoch without fabricating ContextState", () => {
+  const engine = new ContextEngine();
+
+  const result = engine.build(input({
+    state: null,
+    erasureEpoch: 5,
+    candidates: [
+      candidate({
+        candidateId: "recent-current-epoch",
+        sourceSequence: 7,
+        content: "authorised transient recent source",
+        erasureEpoch: 5,
+      }),
+    ],
+    strategy: "T1",
+  }));
+
+  assert.equal(result.snapshot.erasureEpoch, 5);
+  assert.equal(result.snapshot.contextStateVersion, null);
+  assert.equal(result.snapshot.recoveryMode, "DEGRADED");
+  assert.deepEqual(
+    result.selected.map((item) => item.candidateId),
+    ["recent-current-epoch"],
+  );
+});
+
+test("derived ContextState from a stale erasure epoch is rejected", () => {
+  const engine = new ContextEngine();
+
+  assert.throws(
+    () =>
+      engine.build(input({
+        erasureEpoch: 3,
+        state: state({
+          erasureEpoch: 2,
+        }),
+      })),
+    /does not match authoritative erasureEpoch/,
+  );
+});
