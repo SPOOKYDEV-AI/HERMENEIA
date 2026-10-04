@@ -1599,3 +1599,65 @@ test("delete event devices use retained ORIGINAL envelope metadata without requi
   assert.doesNotMatch(query.text, /conversation_members/);
   assert.doesNotMatch(query.text, /tenant_memberships/);
 });
+
+
+test("translation execute job reactivation never resurrects SUPERSEDED work", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{
+        job_id: "job-1",
+        status: "SUPERSEDED",
+      }],
+      rowCount: 1,
+    },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const result = await repository.withTransaction((tx) =>
+    repository.reactivateTranslationExecuteJob(tx, {
+      tenantId: "tenant-1",
+      translationId: "translation-1",
+      availableAt: "2026-10-04T18:00:00.000Z",
+    }),
+  );
+
+  assert.equal(result, "SUPERSEDED");
+  assert.equal(connection.queries.length, 3);
+  assert.match(connection.queries[1].text, /FOR UPDATE/);
+  assert.match(connection.queries[1].text, /job_type = 'translation.execute'/);
+});
+
+test("manual translation retry reactivates DONE or DEAD execute work with fresh lease state", async () => {
+  for (const status of ["DONE", "DEAD"]) {
+    const connection = new ScriptedConnection([
+      {
+        rows: [{
+          job_id: `job-${status.toLowerCase()}`,
+          status,
+        }],
+        rowCount: 1,
+      },
+      { rows: [], rowCount: 1 },
+    ]);
+    const repository = new PostgresMessagingRepository(
+      new SqlTransactionManager(new SingleConnectionPool(connection)),
+    );
+
+    const result = await repository.withTransaction((tx) =>
+      repository.reactivateTranslationExecuteJob(tx, {
+        tenantId: "tenant-1",
+        translationId: "translation-1",
+        availableAt: "2026-10-04T18:00:00.000Z",
+      }),
+    );
+
+    assert.equal(result, "REACTIVATED");
+    const update = connection.queries[2];
+    assert.match(update.text, /status = 'AVAILABLE'/);
+    assert.match(update.text, /lease_until = NULL/);
+    assert.match(update.text, /attempt_count = 0/);
+    assert.match(update.text, /status IN \('DONE','DEAD'\)/);
+  }
+});
