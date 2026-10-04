@@ -84,6 +84,7 @@ class TransactionalFakeStore {
       },
     ];
     this.replyTargets = new Set(["reply-ok"]);
+    this.eventDevices = null;
     this.state = {
       nextMessageSeq: 1,
       nextOpSeq: 1,
@@ -266,6 +267,19 @@ class TransactionalFakeStore {
       }
     }
     return count;
+  }
+
+  async listConversationEventDevices() {
+    this.maybeFail("listConversationEventDevices");
+    if (this.eventDevices) {
+      return clone(this.eventDevices);
+    }
+    return this.targets.flatMap((target) =>
+      target.devices.map((device) => ({
+        userId: target.userId,
+        deviceId: device.deviceId,
+      })),
+    );
   }
 
   async replyTargetExists(_tx, _tenantId, _conversationId, messageId) {
@@ -1161,4 +1175,36 @@ test("delete is allowed even when an external recipient currently has no device"
 
   assert.equal(deleted.status, "DELETED");
   assert.equal(store.state.messages[0].status, "DELETED");
+});
+
+
+test("persistent delete reaches active event devices even when encrypted delivery is unavailable", async () => {
+  const store = new TransactionalFakeStore();
+  const { service } = createService(store);
+  const accepted = await service.sendMessage(actor, sendCommand());
+
+  store.targets = [
+    { userId: "user-a", devices: [] },
+    { userId: "user-b", devices: [] },
+  ];
+  store.eventDevices = [
+    { userId: "user-a", deviceId: "device-a2" },
+    { userId: "user-b", deviceId: "device-b-no-key" },
+  ];
+
+  const deleted = await service.deleteMessage(actor, {
+    protocol_version: 1,
+    command_id: "delete-no-key-device",
+    message_id: accepted.message_id,
+    expected_revision: 1,
+  });
+
+  assert.equal(deleted.status, "DELETED");
+  const deleteEvents = store.state.events.filter(
+    (row) => row.eventType === "message.deleted",
+  );
+  assert.deepEqual(
+    deleteEvents.map((row) => row.deviceId).sort(),
+    ["device-a2", "device-b-no-key"],
+  );
 });
