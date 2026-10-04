@@ -185,6 +185,7 @@ export function createHermeneiaHttpServer({
   mutationService = core,
   deliveryService = null,
   translationRecoveryService = null,
+  readinessService = null,
 }) {
   if (!sendService || typeof sendService.sendMessage !== "function") {
     throw new TypeError("sendService.sendMessage is required");
@@ -251,6 +252,17 @@ export function createHermeneiaHttpServer({
 
       if (req.method === "GET" && requestUrl.pathname === "/healthz") {
         return json(res, 200, { status: "ok" });
+      }
+
+      if (req.method === "GET" && requestUrl.pathname === "/readyz") {
+        const ready = readinessService
+          ? await readinessService.check()
+          : true;
+        return json(
+          res,
+          ready ? 200 : 503,
+          { status: ready ? "ready" : "not_ready" },
+        );
       }
 
       const actor = await authenticate(req);
