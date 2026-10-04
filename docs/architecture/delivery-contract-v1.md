@@ -128,7 +128,13 @@ A worker result can be published only if its source revision remains current and
 
 ## 8. Sync/recovery
 
-Each device receives ordered inbox events using a device-scoped cursor/offset.
+Each authenticated tenant/device pair receives ordered inbox events using a tenant-local cursor/offset.
+
+Cursor identity is scoped by:
+
+    tenant_id + device_id + inbox_epoch + offset
+
+The same physical device may therefore have offset 1 in two different tenants. Activity in one tenant must not advance, gap, or otherwise reveal the cursor sequence of another tenant.
 
 On reconnect:
 
