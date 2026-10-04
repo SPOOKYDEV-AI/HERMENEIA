@@ -214,7 +214,12 @@ class TransactionalFakeStore {
     if (!this.authorized) return undefined;
     const opSeq = this.state.nextOpSeq;
     this.state.nextOpSeq += 1;
-    return opSeq;
+    return {
+      opSeq,
+      membershipEpoch: 7,
+      erasureEpoch: 2,
+      policyVersion: 11,
+    };
   }
 
   async updateMessageRevisionPointer(_tx, input) {
@@ -985,6 +990,18 @@ test("persistent edit creates revision, revokes old envelopes and supersedes old
 
   assert.equal(store.state.jobs[0].status, "SUPERSEDED");
   assert.equal(store.state.jobs[1].status, "AVAILABLE");
+  assert.deepEqual(
+    {
+      membership_epoch: store.state.jobs[1].payloadRef.membership_epoch,
+      erasure_epoch: store.state.jobs[1].payloadRef.erasure_epoch,
+      policy_version: store.state.jobs[1].payloadRef.policy_version,
+    },
+    {
+      membership_epoch: 7,
+      erasure_epoch: 2,
+      policy_version: 11,
+    },
+  );
   assert.equal(
     store.state.events.filter((row) => row.eventType === "message.edited").length,
     3,
