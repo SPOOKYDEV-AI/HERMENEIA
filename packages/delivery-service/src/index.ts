@@ -13,12 +13,21 @@ export interface PersistentInboxEvent {
   inboxEpoch: number;
   offset: number;
   eventId: UUID;
-  eventType: "message.available" | "message.edited" | "message.deleted";
+  eventType:
+    | "message.available"
+    | "message.edited"
+    | "message.deleted"
+    | "translation.ready"
+    | "translation.failed"
+    | "translation.source_required"
+    | "translation.expired";
   tenantId: UUID;
   conversationId: UUID;
   messageId: UUID;
   envelopeId: UUID | null;
   sourceRevision: number;
+  translationId: UUID | null;
+  targetLanguageTag: string | null;
   protectedPayload: string | null;
   renditionType: "ORIGINAL" | "TRANSLATION" | null;
   expiresAt: string | null;
@@ -206,6 +215,16 @@ export class PersistentDeliveryService<Tx> {
         }
 
         if (
+          row.eventType === "translation.failed" ||
+          row.eventType === "translation.source_required" ||
+          row.eventType === "translation.expired"
+        ) {
+          events.push(normalizeTranslationControl(row));
+          nextOffset = row.offset;
+          continue;
+        }
+
+        if (
           !row.envelopeId ||
           !row.protectedPayload ||
           !row.renditionType ||
@@ -358,6 +377,26 @@ function normalizeDelete(row: PersistentInboxEvent): ServerEvent {
   };
 }
 
+function normalizeTranslationControl(
+  row: PersistentInboxEvent,
+): ServerEvent {
+  if (!row.translationId || !row.targetLanguageTag) {
+    throw new Error(
+      "Invariant violation: translation control event is missing metadata",
+    );
+  }
+
+  return {
+    ...baseEvent(row),
+    payload: {
+      message_id: row.messageId,
+      source_revision: row.sourceRevision,
+      translation_id: row.translationId,
+      target_language_tag: row.targetLanguageTag,
+    },
+  };
+}
+
 function normalizeContent(row: PersistentInboxEvent): ServerEvent {
   return {
     ...baseEvent(row),
@@ -368,6 +407,12 @@ function normalizeContent(row: PersistentInboxEvent): ServerEvent {
       rendition_type: row.renditionType,
       protected_payload: row.protectedPayload,
       expires_at: row.expiresAt,
+      ...(row.translationId
+        ? { translation_id: row.translationId }
+        : {}),
+      ...(row.targetLanguageTag
+        ? { target_language_tag: row.targetLanguageTag }
+        : {}),
     },
   };
 }
