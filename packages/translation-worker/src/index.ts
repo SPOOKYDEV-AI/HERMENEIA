@@ -530,17 +530,21 @@ export class TranslationWorkerService<Tx> {
     }
 
     if (!providerResult.ok) {
-      await this.deps.executions.completeProviderAttempt({
-        tenantId: execution.tenantId,
-        attemptId: attempt.attemptId,
-        status: providerResult.status,
-        inputTokens: providerResult.inputTokens ?? null,
-        outputTokens: providerResult.outputTokens ?? null,
-        billedCostMicrounits:
-          providerResult.billedCostMicrounits ?? null,
-        latencyMs: providerResult.latencyMs ?? null,
-        errorClass: providerResult.errorClass ?? null,
-      });
+      const completion =
+        await this.deps.executions.completeProviderAttempt({
+          tenantId: execution.tenantId,
+          attemptId: attempt.attemptId,
+          status: providerResult.status,
+          inputTokens: providerResult.inputTokens ?? null,
+          outputTokens: providerResult.outputTokens ?? null,
+          billedCostMicrounits:
+            providerResult.billedCostMicrounits ?? null,
+          latencyMs: providerResult.latencyMs ?? null,
+          errorClass: providerResult.errorClass ?? null,
+        });
+      if (completion === "STALE_ATTEMPT") {
+        return "SUPERSEDED";
+      }
 
       if (
         providerResult.retryable &&
@@ -555,26 +559,34 @@ export class TranslationWorkerService<Tx> {
     }
 
     if (!providerResult.text) {
-      await this.deps.executions.completeProviderAttempt({
-        tenantId: execution.tenantId,
-        attemptId: attempt.attemptId,
-        status: "FAILED",
-        errorClass: "EMPTY_TRANSLATION",
-      });
+      const completion =
+        await this.deps.executions.completeProviderAttempt({
+          tenantId: execution.tenantId,
+          attemptId: attempt.attemptId,
+          status: "FAILED",
+          errorClass: "EMPTY_TRANSLATION",
+        });
+      if (completion === "STALE_ATTEMPT") {
+        return "SUPERSEDED";
+      }
       return this.failExecution(lease, execution);
     }
 
-    await this.deps.executions.completeProviderAttempt({
-      tenantId: execution.tenantId,
-      attemptId: attempt.attemptId,
-      status: "SUCCEEDED",
-      inputTokens: providerResult.inputTokens ?? null,
-      outputTokens: providerResult.outputTokens ?? null,
-      billedCostMicrounits:
-        providerResult.billedCostMicrounits ?? null,
-      latencyMs: providerResult.latencyMs ?? null,
-      errorClass: null,
-    });
+    const completion =
+      await this.deps.executions.completeProviderAttempt({
+        tenantId: execution.tenantId,
+        attemptId: attempt.attemptId,
+        status: "SUCCEEDED",
+        inputTokens: providerResult.inputTokens ?? null,
+        outputTokens: providerResult.outputTokens ?? null,
+        billedCostMicrounits:
+          providerResult.billedCostMicrounits ?? null,
+        latencyMs: providerResult.latencyMs ?? null,
+        errorClass: null,
+      });
+    if (completion === "STALE_ATTEMPT") {
+      return "SUPERSEDED";
+    }
 
     try {
       const published = await this.publishTranslation(
