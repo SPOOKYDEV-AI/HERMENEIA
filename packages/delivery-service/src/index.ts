@@ -25,6 +25,12 @@ export interface PersistentInboxEvent {
   sourceRevision: number;
   protectedPayload: string | null;
   renditionType: "ORIGINAL" | "TRANSLATION" | null;
+  envelopeStatus:
+    | "PENDING"
+    | "ACKED"
+    | "EXPIRED"
+    | "REVOKED"
+    | null;
   expiresAt: string | null;
   translationId: UUID | null;
   sourceRef: string | null;
@@ -78,6 +84,7 @@ export interface PersistentDeliveryClock {
 export type SyncCursorDecision =
   | { kind: "CONTINUE"; afterOffset: number }
   | { kind: "RESET_EPOCH"; currentEpoch: number }
+  | { kind: "RESET_PURGED"; minimumRecoverableOffset: number }
   | { kind: "RESET_AHEAD"; maximumIssuedOffset: number };
 
 export function evaluateSyncCursor(
@@ -95,6 +102,13 @@ export function evaluateSyncCursor(
     return {
       kind: "RESET_EPOCH",
       currentEpoch: state.inboxEpoch,
+    };
+  }
+
+  if (requested.afterOffset < state.lastAckedOffset) {
+    return {
+      kind: "RESET_PURGED",
+      minimumRecoverableOffset: state.lastAckedOffset,
     };
   }
 
@@ -173,7 +187,9 @@ export class PersistentDeliveryService<Tx> {
         const resetOffset =
           decision.kind === "RESET_AHEAD"
             ? decision.maximumIssuedOffset
-            : 0;
+            : decision.kind === "RESET_PURGED"
+              ? decision.minimumRecoverableOffset
+              : 0;
         return resetResponse(state.inboxEpoch, resetOffset);
       }
 
@@ -213,6 +229,15 @@ export class PersistentDeliveryService<Tx> {
         }
 
         if (
+          row.envelopeStatus === "ACKED" ||
+          row.envelopeStatus === "REVOKED"
+        ) {
+          nextOffset = row.offset;
+          continue;
+        }
+
+        if (
+          row.envelopeStatus !== "PENDING" ||
           !row.envelopeId ||
           !row.protectedPayload ||
           !row.renditionType ||
