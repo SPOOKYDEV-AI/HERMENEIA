@@ -623,11 +623,14 @@ export class TranslationRecoveryService<Tx> {
           );
         }
         if (recovery.execution.status === "SUPERSEDED") {
-          return {
-            protocol_version: 1,
-            translation_id: command.translation_id,
-            status: "SUPERSEDED",
-          };
+          return this.completeSourceCommand(
+            tx,
+            actor,
+            command,
+            commandFingerprint,
+            now,
+            "SUPERSEDED",
+          );
         }
         if (recovery.execution.status === "READY") {
           return this.completeSourceCommand(
