@@ -22,6 +22,9 @@ import {
   createPostgresTranslationExecutionService,
 } from "../../.build/packages/runtime/src/persistent-translation.js";
 import {
+  createPostgresTranslationWorker,
+} from "../../.build/packages/runtime/src/persistent-translation-worker.js";
+import {
   InMemoryTransientSourceStore,
 } from "../../.build/packages/transient-source/src/index.js";
 import { createBearerAuthenticator } from "./session-auth.mjs";
@@ -161,12 +164,28 @@ export function persistentSendConfigFromEnv(env = process.env) {
       30,
       "OUTBOX_LEASE_SECONDS",
     ),
+    translation: {
+      strategyVersion:
+        env.TRANSLATION_STRATEGY_VERSION || "t0-v1",
+      maxProviderAttempts: positiveInteger(
+        env.TRANSLATION_MAX_PROVIDER_ATTEMPTS,
+        3,
+        "TRANSLATION_MAX_PROVIDER_ATTEMPTS",
+      ),
+      retryBaseSeconds: positiveInteger(
+        env.TRANSLATION_RETRY_BASE_SECONDS,
+        5,
+        "TRANSLATION_RETRY_BASE_SECONDS",
+      ),
+    },
   };
 }
 
 export async function createPersistentSendRuntime({
   env = process.env,
   envelopeProtector,
+  translationProvider = null,
+  translationEnvelopeProtector = null,
   pgModule,
   clock = {
     now() {
@@ -185,6 +204,17 @@ export async function createPersistentSendRuntime({
   ) {
     throw new TypeError(
       "A reviewed envelopeProtector.protect implementation is required",
+    );
+  }
+
+  const hasTranslationProvider = Boolean(translationProvider);
+  const hasTranslationProtector = Boolean(
+    translationEnvelopeProtector &&
+    typeof translationEnvelopeProtector.protect === "function",
+  );
+  if (hasTranslationProvider !== hasTranslationProtector) {
+    throw new TypeError(
+      "translationProvider and translationEnvelopeProtector must be configured together",
     );
   }
 
@@ -243,6 +273,28 @@ export async function createPersistentSendRuntime({
         clock,
       });
 
+    const translationWorker = hasTranslationProvider
+      ? createPostgresTranslationWorker({
+          messagingRepository: repository,
+          outboxRepository,
+          translationRepository,
+          outboxService,
+          translationService,
+          transientSources,
+          provider: translationProvider,
+          envelopeProtector: translationEnvelopeProtector,
+          ids,
+          clock,
+          strategyVersion:
+            config.translation.strategyVersion,
+          envelopeTtlSeconds: config.envelopeTtlSeconds,
+          maxProviderAttempts:
+            config.translation.maxProviderAttempts,
+          retryBaseSeconds:
+            config.translation.retryBaseSeconds,
+        })
+      : null;
+
     const authenticate = createBearerAuthenticator({
       sessionRegistry: {
         authenticateCredential(reference) {
@@ -262,6 +314,7 @@ export async function createPersistentSendRuntime({
       deliveryService,
       outboxService,
       translationService,
+      translationWorker,
       authenticate,
       repository,
       outboxRepository,
