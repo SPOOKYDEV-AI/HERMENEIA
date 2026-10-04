@@ -22,6 +22,7 @@ TRANSLATION_MIGRATION = ROOT / "db/migrations/0008_translation_execution.sql"
 SOURCE_REQUIRED_EVENT_MIGRATION = ROOT / "db/migrations/0009_translation_source_required_event.sql"
 DEVICE_TRUST_MIGRATION = ROOT / "db/migrations/0010_device_trust_lifecycle.sql"
 TENANT_LOCAL_SEQUENCE_MIGRATION = ROOT / "db/migrations/0011_tenant_local_inbox_sequence.sql"
+CONTEXT_SNAPSHOT_MIGRATION = ROOT / "db/migrations/0012_context_snapshots.sql"
 
 REQUIRED_TABLES = {
     "users",
@@ -83,6 +84,9 @@ def main() -> int:
     )
     device_trust_sql = DEVICE_TRUST_MIGRATION.read_text(encoding="utf-8")
     tenant_local_sequence_sql = TENANT_LOCAL_SEQUENCE_MIGRATION.read_text(
+        encoding="utf-8"
+    )
+    context_snapshot_sql = CONTEXT_SNAPSHOT_MIGRATION.read_text(
         encoding="utf-8"
     )
     upper = sql.upper()
@@ -318,6 +322,43 @@ def main() -> int:
         fail("tenant-local sequence migration must begin with BEGIN")
     if not tenant_local_sequence_sql.rstrip().endswith("COMMIT;"):
         fail("tenant-local sequence migration must end with COMMIT")
+
+    context_snapshot_required = [
+        "CREATE TABLE context_snapshots",
+        "PRIMARY KEY (tenant_id, snapshot_id)",
+        "selected_candidate_ids jsonb NOT NULL",
+        "selected_source_revision_refs jsonb NOT NULL",
+        "selected_claim_refs jsonb NOT NULL",
+        "processing_gap_refs jsonb NOT NULL",
+        "recovery_mode text NOT NULL",
+        "REFERENCES message_metadata(tenant_id, conversation_id, message_id)",
+        "translation_executions_context_snapshot_fk",
+        "REFERENCES context_snapshots(tenant_id, snapshot_id)",
+    ]
+    for snippet in context_snapshot_required:
+        if snippet not in context_snapshot_sql:
+            fail(f"context snapshot migration missing invariant: {snippet}")
+
+    if not context_snapshot_sql.lstrip().startswith("BEGIN;"):
+        fail("context snapshot migration must begin with BEGIN")
+    if not context_snapshot_sql.rstrip().endswith("COMMIT;"):
+        fail("context snapshot migration must end with COMMIT")
+
+    context_snapshot_lower = context_snapshot_sql.lower()
+    for forbidden in (
+        "source_text",
+        "message_text",
+        "raw_text",
+        "selected_context",
+        "context_payload",
+        "content_payload",
+        "plaintext",
+        "prompt_text",
+    ):
+        if forbidden in context_snapshot_lower:
+            fail(
+                f"context snapshot migration contains forbidden plaintext token: {forbidden}"
+            )
 
     command_lower = command_sql.lower()
     for forbidden in (
