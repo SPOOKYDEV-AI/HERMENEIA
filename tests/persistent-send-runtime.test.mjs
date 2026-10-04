@@ -348,3 +348,46 @@ test("persistent readiness returns false when PostgreSQL connect fails", async (
   assert.equal(await runtime.readinessService.check(), false);
   await runtime.close();
 });
+
+
+test("persistent readiness rejects reachable but incomplete schema", async () => {
+  class IncompleteClient {
+    async query(text) {
+      if (/has_message_metadata/.test(text)) {
+        return {
+          rows: [{
+            has_message_metadata: true,
+            has_tenant_sync: true,
+            has_translation_executions: false,
+            has_provider_executions: false,
+            has_command_fingerprint: true,
+            has_source_required_constraint: false,
+          }],
+          rowCount: 1,
+        };
+      }
+      return { rows: [], rowCount: 0 };
+    }
+    release() {}
+  }
+
+  class IncompletePool {
+    async connect() {
+      return new IncompleteClient();
+    }
+    async end() {}
+  }
+
+  const runtime = await createPersistentSendRuntime({
+    env: env(),
+    pgModule: { Pool: IncompletePool },
+    envelopeProtector: {
+      protect() {
+        return "unused";
+      },
+    },
+  });
+
+  assert.equal(await runtime.readinessService.check(), false);
+  await runtime.close();
+});
