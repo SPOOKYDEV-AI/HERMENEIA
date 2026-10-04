@@ -21,6 +21,7 @@ OUTBOX_LEASE_MIGRATION = ROOT / "db/migrations/0007_outbox_lease_shape.sql"
 TRANSLATION_MIGRATION = ROOT / "db/migrations/0008_translation_execution.sql"
 SOURCE_REQUIRED_EVENT_MIGRATION = ROOT / "db/migrations/0009_translation_source_required_event.sql"
 DEVICE_TRUST_MIGRATION = ROOT / "db/migrations/0010_device_trust_lifecycle.sql"
+TENANT_LOCAL_SEQUENCE_MIGRATION = ROOT / "db/migrations/0011_tenant_local_inbox_sequence.sql"
 
 REQUIRED_TABLES = {
     "users",
@@ -81,6 +82,9 @@ def main() -> int:
         encoding="utf-8"
     )
     device_trust_sql = DEVICE_TRUST_MIGRATION.read_text(encoding="utf-8")
+    tenant_local_sequence_sql = TENANT_LOCAL_SEQUENCE_MIGRATION.read_text(
+        encoding="utf-8"
+    )
     upper = sql.upper()
 
     if not upper.lstrip().startswith("BEGIN;"):
@@ -293,6 +297,27 @@ def main() -> int:
         fail("device trust migration must begin with BEGIN")
     if not device_trust_sql.rstrip().endswith("COMMIT;"):
         fail("device trust migration must end with COMMIT")
+
+    tenant_local_sequence_required = [
+        "ADD COLUMN next_offset bigint",
+        "tenant_device_sync_states_next_offset_check",
+        "PRIMARY KEY (",
+        "tenant_id,",
+        "device_id,",
+        "inbox_epoch,",
+        "offset_value",
+        "device_inbox_events_event_time_idx",
+    ]
+    for snippet in tenant_local_sequence_required:
+        if snippet not in tenant_local_sequence_sql:
+            fail(
+                f"tenant-local sequence migration missing invariant: {snippet}"
+            )
+
+    if not tenant_local_sequence_sql.lstrip().startswith("BEGIN;"):
+        fail("tenant-local sequence migration must begin with BEGIN")
+    if not tenant_local_sequence_sql.rstrip().endswith("COMMIT;"):
+        fail("tenant-local sequence migration must end with COMMIT")
 
     command_lower = command_sql.lower()
     for forbidden in (
