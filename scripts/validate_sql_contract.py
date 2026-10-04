@@ -20,6 +20,7 @@ OUTBOX_LIFECYCLE_MIGRATION = ROOT / "db/migrations/0006_outbox_superseded.sql"
 OUTBOX_LEASE_MIGRATION = ROOT / "db/migrations/0007_outbox_lease_shape.sql"
 TRANSLATION_MIGRATION = ROOT / "db/migrations/0008_translation_execution.sql"
 SOURCE_REQUIRED_EVENT_MIGRATION = ROOT / "db/migrations/0009_translation_source_required_event.sql"
+DEVICE_TRUST_MIGRATION = ROOT / "db/migrations/0010_device_trust_lifecycle.sql"
 
 REQUIRED_TABLES = {
     "users",
@@ -79,6 +80,7 @@ def main() -> int:
     source_required_event_sql = SOURCE_REQUIRED_EVENT_MIGRATION.read_text(
         encoding="utf-8"
     )
+    device_trust_sql = DEVICE_TRUST_MIGRATION.read_text(encoding="utf-8")
     upper = sql.upper()
 
     if not upper.lstrip().startswith("BEGIN;"):
@@ -270,6 +272,27 @@ def main() -> int:
         fail("source-required event migration must begin with BEGIN")
     if not source_required_event_sql.rstrip().endswith("COMMIT;"):
         fail("source-required event migration must end with COMMIT")
+
+    device_trust_required = [
+        "ADD COLUMN platform text NOT NULL DEFAULT 'OTHER'",
+        "devices_platform_check",
+        "WEB",
+        "ANDROID",
+        "IOS",
+        "DESKTOP",
+        "devices_public_material_ref_length_check",
+        "char_length(public_material_ref) BETWEEN 1 AND 4096",
+        "NOT VALID",
+        "devices_user_registered_idx",
+    ]
+    for snippet in device_trust_required:
+        if snippet not in device_trust_sql:
+            fail(f"device trust migration missing invariant: {snippet}")
+
+    if not device_trust_sql.lstrip().startswith("BEGIN;"):
+        fail("device trust migration must begin with BEGIN")
+    if not device_trust_sql.rstrip().endswith("COMMIT;"):
+        fail("device trust migration must end with COMMIT")
 
     command_lower = command_sql.lower()
     for forbidden in (
