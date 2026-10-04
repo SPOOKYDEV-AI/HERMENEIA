@@ -293,7 +293,11 @@ export class PersistentDeliveryService<Tx> {
           ackedAt,
         });
 
-        if (result === "ACKED" || result === "ALREADY_ACKED") {
+        if (
+          result === "ACKED" ||
+          result === "ALREADY_ACKED" ||
+          result === "REVOKED"
+        ) {
           continue;
         }
         if (result === "EXPIRED") {
