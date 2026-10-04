@@ -185,6 +185,7 @@ export function createHermeneiaHttpServer({
   mutationService = core,
   deliveryService = null,
   translationRecoveryService = null,
+  deviceService = null,
   readinessService = null,
 }) {
   if (!sendService || typeof sendService.sendMessage !== "function") {
@@ -214,6 +215,20 @@ export function createHermeneiaHttpServer({
   ) {
     throw new TypeError(
       "translationRecoveryService.resupplySource and retryTranslation are required",
+    );
+  }
+
+  if (
+    deviceService !== null &&
+    (
+      typeof deviceService.enrollDevice !== "function" ||
+      typeof deviceService.listDevices !== "function" ||
+      typeof deviceService.rotateMaterial !== "function" ||
+      typeof deviceService.revokeDevice !== "function"
+    )
+  ) {
+    throw new TypeError(
+      "deviceService enrollment/list/rotation/revocation methods are required",
     );
   }
 
@@ -268,6 +283,139 @@ export function createHermeneiaHttpServer({
       const actor = await authenticate(req);
       if (!actor) {
         throw new HttpError(401, "NOT_AUTHORIZED", "Authentication required");
+      }
+
+      if (
+        (req.method === "POST" || req.method === "GET") &&
+        requestUrl.pathname === "/v1/devices"
+      ) {
+        if (!deviceService) {
+          throw new HttpError(
+            503,
+            "DEVICE_SERVICE_UNAVAILABLE",
+            "Device trust service unavailable",
+            true,
+          );
+        }
+
+        if (req.method === "GET") {
+          return json(
+            res,
+            200,
+            await deviceService.listDevices(actor),
+          );
+        }
+
+        const body = await readJson(req);
+        requireProtocolV1(body);
+        if (
+          typeof body.command_id !== "string" ||
+          typeof body.device_id !== "string" ||
+          typeof body.public_material_ref !== "string" ||
+          body.public_material_ref.length > 4096 ||
+          body.public_material_ref.trim().length < 1 ||
+          (
+            body.platform !== undefined &&
+            !["WEB","ANDROID","IOS","DESKTOP","OTHER"].includes(body.platform)
+          )
+        ) {
+          throw new HttpError(
+            400,
+            "INVALID_COMMAND",
+            "Invalid device enrollment payload",
+          );
+        }
+
+        return json(
+          res,
+          201,
+          await deviceService.enrollDevice(actor, {
+            protocol_version: 1,
+            command_id: body.command_id,
+            device_id: body.device_id,
+            public_material_ref: body.public_material_ref,
+            ...(body.platform ? { platform: body.platform } : {}),
+          }),
+        );
+      }
+
+      const deviceMaterialMatch = matchPath(
+        requestUrl.pathname,
+        /^\/v1\/devices\/([^/]+)\/delivery-material$/,
+      );
+      if (req.method === "PATCH" && deviceMaterialMatch) {
+        if (!deviceService) {
+          throw new HttpError(
+            503,
+            "DEVICE_SERVICE_UNAVAILABLE",
+            "Device trust service unavailable",
+            true,
+          );
+        }
+        const body = await readJson(req);
+        requireProtocolV1(body);
+        if (
+          typeof body.command_id !== "string" ||
+          typeof body.expected_credential_version !== "number" ||
+          !Number.isInteger(body.expected_credential_version) ||
+          body.expected_credential_version < 1 ||
+          typeof body.public_material_ref !== "string" ||
+          body.public_material_ref.length > 4096 ||
+          body.public_material_ref.trim().length < 1
+        ) {
+          throw new HttpError(
+            400,
+            "INVALID_COMMAND",
+            "Invalid device material rotation payload",
+          );
+        }
+
+        return json(
+          res,
+          200,
+          await deviceService.rotateMaterial(actor, {
+            protocol_version: 1,
+            command_id: body.command_id,
+            device_id: deviceMaterialMatch[0],
+            expected_credential_version:
+              body.expected_credential_version,
+            public_material_ref: body.public_material_ref,
+          }),
+        );
+      }
+
+      const deviceRevokeMatch = matchPath(
+        requestUrl.pathname,
+        /^\/v1\/devices\/([^/]+)\/revoke$/,
+      );
+      if (req.method === "POST" && deviceRevokeMatch) {
+        if (!deviceService) {
+          throw new HttpError(
+            503,
+            "DEVICE_SERVICE_UNAVAILABLE",
+            "Device trust service unavailable",
+            true,
+          );
+        }
+        const body = await readJson(req);
+        requireProtocolV1(body);
+        if (typeof body.command_id !== "string") {
+          throw new HttpError(
+            400,
+            "INVALID_COMMAND",
+            "Invalid device revocation payload",
+          );
+        }
+
+        return json(
+          res,
+          200,
+          await deviceService.revokeDevice(actor, {
+            protocol_version: 1,
+            command_id: body.command_id,
+            device_id: deviceRevokeMatch[0],
+          }),
+        );
       }
 
       const commandStatusMatch = matchPath(
