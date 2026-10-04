@@ -60,6 +60,12 @@ export type PersistentCommandClaimResult =
 export interface PersistentMessagingStore<Tx> {
   withTransaction<T>(work: (tx: Tx) => Promise<T>): Promise<T>;
 
+  findCommandReceipt(
+    tx: Tx,
+    actor: ActorContext,
+    commandId: UUID,
+  ): Promise<PersistentCommandReceipt | undefined>;
+
   claimCommand(
     tx: Tx,
     input: {
@@ -274,6 +280,46 @@ export class PersistentMessagingService<Tx> {
       deps.envelopeTtlSeconds ?? 7 * 24 * 60 * 60;
     this.transientSourceTtlSeconds =
       deps.transientSourceTtlSeconds ?? 5 * 60;
+  }
+
+  async getCommandStatus(
+    actor: ActorContext,
+    commandId: UUID,
+  ): Promise<{
+    command_id: UUID;
+    status: "UNKNOWN" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED";
+    result?: Record<string, unknown>;
+  }> {
+    if (typeof commandId !== "string" || !commandId) {
+      throw new DomainError(
+        "INVALID_COMMAND",
+        "command_id is required",
+      );
+    }
+
+    return this.deps.store.withTransaction(async (tx) => {
+      const receipt = await this.deps.store.findCommandReceipt(
+        tx,
+        actor,
+        commandId,
+      );
+
+      if (!receipt) {
+        return {
+          command_id: commandId,
+          status: "UNKNOWN",
+        };
+      }
+
+      return {
+        command_id: commandId,
+        status: receipt.status,
+        ...(receipt.status === "SUCCEEDED" ||
+        receipt.status === "FAILED"
+          ? { result: structuredClone(receipt.result) }
+          : {}),
+      };
+    });
   }
 
   async sendMessage(
