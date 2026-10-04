@@ -5,6 +5,7 @@ import {
   SqlTransactionManager,
 } from "../.build/packages/persistence/src/index.js";
 import {
+  PostgresContextPlanningRepository,
   PostgresContextSnapshotRepository,
 } from "../.build/packages/persistence-postgres/src/context.js";
 
@@ -276,6 +277,139 @@ test("PostgreSQL context snapshot lookup rejects malformed JSON metadata", async
         ),
       ),
     /Invalid context snapshot JSON field/,
+  );
+
+  assert.equal(
+    connection.queries.at(-1).text,
+    "ROLLBACK",
+  );
+});
+
+
+test("PostgreSQL context planner loads current sequence/erasure epoch and recent refs without content", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{
+        message_seq: 8,
+        erasure_epoch: 3,
+      }],
+      rowCount: 1,
+    },
+    {
+      rows: [
+        {
+          message_id: "message-7",
+          current_revision: 2,
+          message_seq: 7,
+          accepted_at: "2026-10-04 19:59:58+00",
+        },
+        {
+          message_id: "message-6",
+          current_revision: 1,
+          message_seq: 6,
+          accepted_at: "2026-10-04 19:59:55+00",
+        },
+      ],
+      rowCount: 2,
+    },
+  ]);
+
+  const repository =
+    new PostgresContextPlanningRepository(
+      new SqlTransactionManager(
+        new SingleConnectionPool(connection),
+      ),
+    );
+
+  const result = await repository.withTransaction((tx) =>
+    repository.loadPlanningFrame(
+      tx,
+      {
+        tenantId: "tenant-1",
+        conversationId: "conversation-1",
+        sourceMessageId: "message-8",
+        sourceRevision: 1,
+        recipientUserId: "user-b",
+      },
+      6,
+    ),
+  );
+
+  assert.deepEqual(result, {
+    currentSequence: 8,
+    erasureEpoch: 3,
+    recentMessages: [
+      {
+        messageId: "message-7",
+        sourceRevision: 2,
+        sequence: 7,
+        acceptedAt: "2026-10-04 19:59:58+00",
+      },
+      {
+        messageId: "message-6",
+        sourceRevision: 1,
+        sequence: 6,
+        acceptedAt: "2026-10-04 19:59:55+00",
+      },
+    ],
+  });
+
+  const currentQuery = connection.queries[1];
+  assert.match(currentQuery.text, /c\.erasure_epoch/);
+  assert.match(currentQuery.text, /mm\.current_revision = \$4/);
+  assert.match(currentQuery.text, /cm\.user_id = \$5/);
+  assert.doesNotMatch(
+    currentQuery.text,
+    /source_text|protected_payload|translated_text/,
+  );
+
+  const recentQuery = connection.queries[2];
+  assert.match(recentQuery.text, /message_seq < \$3/);
+  assert.match(recentQuery.text, /ORDER BY message_seq DESC/);
+  assert.match(recentQuery.text, /LIMIT \$4/);
+  assert.doesNotMatch(
+    recentQuery.text,
+    /source_text|protected_payload|translated_text/,
+  );
+  assert.deepEqual(recentQuery.params, [
+    "tenant-1",
+    "conversation-1",
+    8,
+    6,
+  ]);
+});
+
+test("PostgreSQL context planner fails closed for stale source or inactive recipient", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [],
+      rowCount: 0,
+    },
+  ]);
+
+  const repository =
+    new PostgresContextPlanningRepository(
+      new SqlTransactionManager(
+        new SingleConnectionPool(connection),
+      ),
+    );
+
+  await assert.rejects(
+    () =>
+      repository.withTransaction((tx) =>
+        repository.loadPlanningFrame(
+          tx,
+          {
+            tenantId: "tenant-1",
+            conversationId: "conversation-1",
+            sourceMessageId: "message-8",
+            sourceRevision: 1,
+            recipientUserId: "user-b",
+          },
+          6,
+        ),
+      ),
+    /not current or recipient is not active/,
   );
 
   assert.equal(
