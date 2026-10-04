@@ -233,7 +233,7 @@ test("cold state can use a sanitised recovery checkpoint without fabricating his
         causalThroughSequence: 7,
         content: "validated terminology handles only",
         privacyScope: "CHECKPOINT",
-        erasureEpoch: 0,
+        erasureEpoch: 2,
         semanticScore: 0.7,
         temporalScore: 0.8,
         confidence: 0.95,
