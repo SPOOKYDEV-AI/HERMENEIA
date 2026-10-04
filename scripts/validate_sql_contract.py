@@ -16,6 +16,7 @@ SESSION_MIGRATION = ROOT / "db/migrations/0002_session_access_credential.sql"
 RUNTIME_MIGRATION = ROOT / "db/migrations/0003_runtime_alignment.sql"
 COMMAND_MIGRATION = ROOT / "db/migrations/0004_command_fingerprint.sql"
 TENANT_SYNC_MIGRATION = ROOT / "db/migrations/0005_tenant_device_sync_state.sql"
+OUTBOX_LIFECYCLE_MIGRATION = ROOT / "db/migrations/0006_outbox_superseded.sql"
 
 REQUIRED_TABLES = {
     "users",
@@ -69,6 +70,7 @@ def main() -> int:
     runtime_sql = RUNTIME_MIGRATION.read_text(encoding="utf-8")
     command_sql = COMMAND_MIGRATION.read_text(encoding="utf-8")
     tenant_sync_sql = TENANT_SYNC_MIGRATION.read_text(encoding="utf-8")
+    outbox_lifecycle_sql = OUTBOX_LIFECYCLE_MIGRATION.read_text(encoding="utf-8")
     upper = sql.upper()
 
     if not upper.lstrip().startswith("BEGIN;"):
@@ -171,6 +173,23 @@ def main() -> int:
         fail("tenant sync migration must begin with BEGIN")
     if not tenant_sync_sql.rstrip().endswith("COMMIT;"):
         fail("tenant sync migration must end with COMMIT")
+
+    outbox_required = [
+        "outbox_jobs_status_check",
+        "'SUPERSEDED'",
+        "outbox_jobs_message_revision_idx",
+        "payload_ref->>'message_id'",
+        "payload_ref->>'source_revision'",
+        "WHERE job_type = 'translation.request'",
+    ]
+    for snippet in outbox_required:
+        if snippet not in outbox_lifecycle_sql:
+            fail(f"outbox lifecycle migration missing invariant: {snippet}")
+
+    if not outbox_lifecycle_sql.lstrip().startswith("BEGIN;"):
+        fail("outbox lifecycle migration must begin with BEGIN")
+    if not outbox_lifecycle_sql.rstrip().endswith("COMMIT;"):
+        fail("outbox lifecycle migration must end with COMMIT")
 
     command_lower = command_sql.lower()
     for forbidden in (
