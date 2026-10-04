@@ -24,6 +24,13 @@ export interface PersistentConversationAllocation {
   policyVersion: number;
 }
 
+export interface PersistentOperationAllocation {
+  opSeq: number;
+  membershipEpoch: number;
+  erasureEpoch: number;
+  policyVersion: number;
+}
+
 export interface PersistentRecipientDevice {
   userId: UUID;
   deviceId: UUID;
@@ -130,7 +137,7 @@ export interface PersistentMessagingStore<Tx> {
     tx: Tx,
     actor: ActorContext,
     conversationId: UUID,
-  ): Promise<number | undefined>;
+  ): Promise<PersistentOperationAllocation | undefined>;
 
   updateMessageRevisionPointer(
     tx: Tx,
@@ -883,12 +890,13 @@ export class PersistentMessagingService<Tx> {
           );
         }
 
-        const opSeq = await this.deps.store.allocateOperationSequence(
-          tx,
-          actor,
-          message.conversationId,
-        );
-        if (!opSeq) {
+        const allocation =
+          await this.deps.store.allocateOperationSequence(
+            tx,
+            actor,
+            message.conversationId,
+          );
+        if (!allocation) {
           throw new DomainError(
             "NOT_AUTHORIZED",
             "Conversation is not available to actor",
@@ -946,7 +954,7 @@ export class PersistentMessagingService<Tx> {
           conversationId: message.conversationId,
           messageId: command.message_id,
           revision: newRevision,
-          opSeq,
+          opSeq: allocation.opSeq,
           mutationType: "EDITED",
           actorUserId: actor.userId,
           sourceHash: sourceFingerprint,
@@ -1051,6 +1059,9 @@ export class PersistentMessagingService<Tx> {
             source_hash: sourceFingerprint,
             source_buffer_key:
               `${actor.tenantId}:${command.message_id}:${newRevision}`,
+            membership_epoch: allocation.membershipEpoch,
+            erasure_epoch: allocation.erasureEpoch,
+            policy_version: allocation.policyVersion,
           },
           priority: 10,
           availableAt: now,
@@ -1059,7 +1070,7 @@ export class PersistentMessagingService<Tx> {
         const mutationResult: MessageRevisionResult = {
           message_id: command.message_id,
           revision: newRevision,
-          op_seq: opSeq,
+          op_seq: allocation.opSeq,
           status: "ACTIVE",
         };
 
@@ -1188,12 +1199,13 @@ export class PersistentMessagingService<Tx> {
         );
       }
 
-      const opSeq = await this.deps.store.allocateOperationSequence(
-        tx,
-        actor,
-        message.conversationId,
-      );
-      if (!opSeq) {
+      const allocation =
+        await this.deps.store.allocateOperationSequence(
+          tx,
+          actor,
+          message.conversationId,
+        );
+      if (!allocation) {
         throw new DomainError(
           "NOT_AUTHORIZED",
           "Conversation is not available to actor",
@@ -1213,7 +1225,7 @@ export class PersistentMessagingService<Tx> {
         conversationId: message.conversationId,
         messageId: command.message_id,
         revision: newRevision,
-        opSeq,
+        opSeq: allocation.opSeq,
         mutationType: "DELETED",
         actorUserId: actor.userId,
         sourceHash: null,
@@ -1275,7 +1287,7 @@ export class PersistentMessagingService<Tx> {
       const mutationResult: MessageRevisionResult = {
         message_id: command.message_id,
         revision: newRevision,
-        op_seq: opSeq,
+        op_seq: allocation.opSeq,
         status: "DELETED",
       };
 
