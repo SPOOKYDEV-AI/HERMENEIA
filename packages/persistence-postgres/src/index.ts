@@ -708,17 +708,17 @@ export class PostgresMessagingRepository {
       public_material_ref: string;
     }>(
       `SELECT DISTINCT d.user_id,
-                       die.device_id,
+                       de.recipient_device_id AS device_id,
                        d.credential_version,
                        d.public_material_ref
-         FROM device_inbox_events die
+         FROM delivery_envelopes de
          JOIN devices d
-           ON d.device_id = die.device_id
+           ON d.device_id = de.recipient_device_id
           AND d.status = 'ACTIVE'
           AND length(d.public_material_ref) > 0
          JOIN message_metadata mm
-           ON mm.tenant_id = die.tenant_id
-          AND mm.message_id = die.message_id
+           ON mm.tenant_id = de.tenant_id
+          AND mm.message_id = de.message_id
          JOIN conversation_members cm
            ON cm.tenant_id = mm.tenant_id
           AND cm.conversation_id = mm.conversation_id
@@ -728,14 +728,11 @@ export class PostgresMessagingRepository {
            ON tm.tenant_id = mm.tenant_id
           AND tm.user_id = d.user_id
           AND tm.status = 'ACTIVE'
-        WHERE die.tenant_id = $1
-          AND die.message_id = $2
-          AND die.device_id <> $3
-          AND die.event_type IN (
-            'message.available',
-            'message.edited'
-          )
-        ORDER BY d.user_id, die.device_id`,
+        WHERE de.tenant_id = $1
+          AND de.message_id = $2
+          AND de.recipient_device_id <> $3
+          AND de.rendition_type = 'ORIGINAL'
+        ORDER BY d.user_id, de.recipient_device_id`,
       [actor.tenantId, messageId, actor.deviceId],
     );
 
@@ -766,19 +763,16 @@ export class PostgresMessagingRepository {
       device_id: UUID;
     }>(
       `SELECT DISTINCT d.user_id,
-                       die.device_id
-         FROM device_inbox_events die
+                       de.recipient_device_id AS device_id
+         FROM delivery_envelopes de
          JOIN devices d
-           ON d.device_id = die.device_id
+           ON d.device_id = de.recipient_device_id
           AND d.status = 'ACTIVE'
-        WHERE die.tenant_id = $1
-          AND die.message_id = $2
-          AND die.device_id <> $3
-          AND die.event_type IN (
-            'message.available',
-            'message.edited'
-          )
-        ORDER BY d.user_id, die.device_id`,
+        WHERE de.tenant_id = $1
+          AND de.message_id = $2
+          AND de.recipient_device_id <> $3
+          AND de.rendition_type = 'ORIGINAL'
+        ORDER BY d.user_id, de.recipient_device_id`,
       [actor.tenantId, messageId, actor.deviceId],
     );
 
