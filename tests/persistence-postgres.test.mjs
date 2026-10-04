@@ -147,7 +147,7 @@ test("message sequence allocation is parameterized and membership-scoped", async
   ]);
 });
 
-test("ACK purges protected payload and advances last acknowledged device offset", async () => {
+test("ACK purges protected payload and advances only the contiguous terminal prefix", async () => {
   const connection = new ScriptedConnection([
     {
       rows: [{
@@ -158,6 +158,18 @@ test("ACK purges protected payload and advances last acknowledged device offset"
       rowCount: 1,
     },
     { rows: [], rowCount: 1 },
+    {
+      rows: [{
+        inbox_epoch: 4,
+        next_offset: 20,
+        last_acked_offset: 17,
+      }],
+      rowCount: 1,
+    },
+    {
+      rows: [{ first_blocking_offset: null }],
+      rowCount: 1,
+    },
     { rows: [], rowCount: 1 },
   ]);
   const repository = new PostgresMessagingRepository(
@@ -178,14 +190,70 @@ test("ACK purges protected payload and advances last acknowledged device offset"
   const queryTexts = connection.queries.map((query) => query.text);
   assert.match(queryTexts[2], /protected_payload/);
   assert.match(queryTexts[2], /status = 'ACKED'/);
-  assert.match(queryTexts[3], /last_acked_offset = GREATEST/);
+  assert.match(queryTexts[3], /device_sync_states/);
+  assert.match(queryTexts[3], /FOR UPDATE/);
+  assert.match(queryTexts[4], /MIN\(die\.offset_value\)/);
+  assert.match(queryTexts[5], /last_acked_offset = GREATEST/);
   assert.deepEqual(connection.queries[2].params, [
     "tenant-1",
     "envelope-1",
     "device-1",
     "2026-10-03T22:30:00.000Z",
   ]);
+  assert.deepEqual(connection.queries[5].params, [
+    "device-1",
+    19,
+    "2026-10-03T22:30:00.000Z",
+    4,
+  ]);
   assert.equal(queryTexts.at(-1), "COMMIT");
+});
+
+test("out-of-order ACK cannot skip an earlier pending inbox event", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{
+        status: "PENDING",
+        inbox_epoch: 4,
+        offset_value: 19,
+      }],
+      rowCount: 1,
+    },
+    { rows: [], rowCount: 1 },
+    {
+      rows: [{
+        inbox_epoch: 4,
+        next_offset: 20,
+        last_acked_offset: 17,
+      }],
+      rowCount: 1,
+    },
+    {
+      rows: [{ first_blocking_offset: 18 }],
+      rowCount: 1,
+    },
+    { rows: [], rowCount: 1 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const result = await repository.withTransaction((tx) =>
+    repository.acknowledgeEnvelope(tx, {
+      tenantId: "tenant-1",
+      deviceId: "device-1",
+      envelopeId: "envelope-19",
+      ackedAt: "2026-10-03T22:30:00.000Z",
+    }),
+  );
+
+  assert.equal(result, "ACKED");
+  assert.deepEqual(connection.queries[5].params, [
+    "device-1",
+    17,
+    "2026-10-03T22:30:00.000Z",
+    4,
+  ]);
 });
 
 test("already ACKed envelope is idempotent and does not re-run purge updates", async () => {
