@@ -20,7 +20,7 @@ The PostgreSQL package implements messaging/session queries against the canonica
 
 The current Node runtime adapter is `apps/api/postgres-pool.mjs`, backed by the pinned `pg` dependency. It adapts `pg.Pool` to the internal ports without leaking driver concepts into domain/application packages.
 
-The persistent Send composition root is `apps/api/persistent-send-runtime.mjs`. It wires:
+The persistent messaging runtime is composed by `apps/api/persistent-send-runtime.mjs`, while `apps/api/persistent-server.mjs` creates the pure persistent HTTP profile. Together they wire:
 
 - node-postgres pool;
 - transaction manager;
@@ -129,9 +129,17 @@ a client cannot request recoverable payload history from an offset earlier than 
     RESET_EPOCH
     RESET_PURGED
 
-A future persistent sync service must apply this rule before querying old events.
+The implemented persistent delivery service applies this rule before querying old events. Replay is filtered by authenticated tenant and device.
 
-## 9. No live PostgreSQL claim yet
+The purge/replay watermark is stored in `tenant_device_sync_states`; global device offsets remain monotonic in `device_sync_states`. ACK advancement scans for the first non-terminal envelope-bearing event and never jumps over it.
+
+## 9. Mutation lifecycle
+
+Migration `0006_outbox_superseded.sql` adds the explicit `SUPERSEDED` lifecycle for translation outbox jobs. Edit/delete mark AVAILABLE or LEASED jobs from stale source revisions as superseded and purge pending protected delivery payloads in the same transaction.
+
+A running worker must still fence publication against current source revision/message status; changing the job row alone cannot cancel provider work already executing outside PostgreSQL.
+
+## 10. No live PostgreSQL claim yet
 
 The current repository now declares a pinned `pg` runtime dependency and contains the concrete pool adapter/composition root.
 
@@ -155,9 +163,9 @@ When available:
     HERMENEIA_TEST_DATABASE_URL=...
     python scripts/postgres_integration.py
 
-must apply migrations 0001 -> 0002 -> 0003 and smoke tests successfully before production persistence is considered validated.
+must apply migrations 0001 -> 0002 -> 0003 -> 0004 -> 0005 -> 0006 and smoke tests successfully before production persistence is considered validated.
 
-## 10. Sandbox evidence
+## 11. Sandbox evidence
 
 Executed:
 
