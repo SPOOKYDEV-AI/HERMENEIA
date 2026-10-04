@@ -171,9 +171,16 @@ function matchPath(pathname, regex) {
   return match ? match.slice(1).map(decodeURIComponent) : null;
 }
 
-export function createHermeneiaHttpServer({ core, authenticate }) {
+export function createHermeneiaHttpServer({
+  core,
+  authenticate,
+  sendService = core,
+}) {
   if (!core) {
     throw new TypeError("core is required");
+  }
+  if (!sendService || typeof sendService.sendMessage !== "function") {
+    throw new TypeError("sendService.sendMessage is required");
   }
   if (typeof authenticate !== "function") {
     throw new TypeError("authenticate(req) dependency is required");
@@ -221,7 +228,7 @@ export function createHermeneiaHttpServer({ core, authenticate }) {
           throw new HttpError(400, "INVALID_COMMAND", "Invalid send payload");
         }
 
-        const accepted = await core.sendMessage(actor, {
+        const accepted = await sendService.sendMessage(actor, {
           protocol_version: 1,
           command_id: body.command_id,
           client_message_id: body.client_message_id,
