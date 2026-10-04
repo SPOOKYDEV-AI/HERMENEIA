@@ -90,12 +90,21 @@ export interface InboxEventRow {
   inboxEpoch: number;
   offset: number;
   eventId: UUID;
-  eventType: "message.available" | "message.edited" | "message.deleted";
+  eventType:
+    | "message.available"
+    | "message.edited"
+    | "message.deleted"
+    | "translation.ready"
+    | "translation.failed"
+    | "translation.source_required"
+    | "translation.expired";
   tenantId: UUID;
   conversationId: UUID;
   messageId: UUID;
   envelopeId: UUID | null;
   sourceRevision: number;
+  translationId: UUID | null;
+  targetLanguageTag: string | null;
   protectedPayload: string | null;
   renditionType: "ORIGINAL" | "TRANSLATION" | null;
   expiresAt: string | null;
@@ -1006,6 +1015,8 @@ export class PostgresMessagingRepository {
       message_id: UUID;
       envelope_id: UUID | null;
       source_revision: number;
+      translation_id: UUID | null;
+      target_language_tag: string | null;
       protected_payload_b64: string | null;
       rendition_type: "ORIGINAL" | "TRANSLATION" | null;
       expires_at: string | null;
@@ -1023,6 +1034,12 @@ export class PostgresMessagingRepository {
                 de.source_revision,
                 (die.metadata->>'source_revision')::integer
               ) AS source_revision,
+              COALESCE(
+                de.translation_id,
+                NULLIF(die.metadata->>'translation_id','')::uuid
+              ) AS translation_id,
+              die.metadata->>'target_language_tag'
+                AS target_language_tag,
               CASE
                 WHEN de.status = 'PENDING'
                 THEN encode(de.protected_payload,'base64')
@@ -1069,6 +1086,8 @@ export class PostgresMessagingRepository {
       messageId: row.message_id,
       envelopeId: row.envelope_id,
       sourceRevision: Number(row.source_revision),
+      translationId: row.translation_id,
+      targetLanguageTag: row.target_language_tag,
       protectedPayload: row.protected_payload_b64,
       renditionType: row.rendition_type,
       expiresAt: row.expires_at,
