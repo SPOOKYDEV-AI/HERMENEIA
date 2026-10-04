@@ -25,6 +25,8 @@ CREATE TABLE conversation_context_states (
   tenant_id uuid NOT NULL,
   conversation_id uuid NOT NULL,
   state_version bigint NOT NULL CHECK (state_version >= 1),
+  causal_floor_sequence bigint NOT NULL DEFAULT 0
+    CHECK (causal_floor_sequence >= 0),
   processed_prefix_sequence bigint NOT NULL DEFAULT 0
     CHECK (processed_prefix_sequence >= 0),
   pending_operations jsonb NOT NULL DEFAULT '[]'::jsonb,
@@ -52,12 +54,19 @@ CREATE TABLE conversation_context_states (
     ),
   state_schema_version integer NOT NULL DEFAULT 1
     CHECK (state_schema_version = 1),
+  recovery_mode text NOT NULL DEFAULT 'FULL'
+    CHECK (recovery_mode IN ('FULL','DEGRADED_BASELINE')),
   status text NOT NULL DEFAULT 'ACTIVE'
     CHECK (status IN ('ACTIVE','DEGRADED')),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, conversation_id),
   FOREIGN KEY (tenant_id, conversation_id)
     REFERENCES conversations(tenant_id, conversation_id),
+  CHECK (processed_prefix_sequence >= causal_floor_sequence),
+  CHECK (
+    recovery_mode <> 'DEGRADED_BASELINE'
+    OR status = 'DEGRADED'
+  ),
   CHECK (jsonb_typeof(pending_operations) = 'array'),
   CHECK (jsonb_typeof(active_episode_state) = 'object'),
   CHECK (jsonb_typeof(terminology_claim_refs) = 'array'),
