@@ -160,6 +160,7 @@ test("persistent Send config decodes active and verification HMAC keys", () => {
     TRANSIENT_SOURCE_MAX_ENTRIES: "50",
     TRANSIENT_SOURCE_MAX_APPROX_BYTES: "4096",
     DELIVERY_ENVELOPE_TTL_SECONDS: "600",
+    OUTBOX_LEASE_SECONDS: "45",
   }));
 
   assert.equal(config.sourceFingerprint.keyVersion, "k2");
@@ -175,6 +176,7 @@ test("persistent Send config decodes active and verification HMAC keys", () => {
     maxApproxBytes: 4096,
   });
   assert.equal(config.envelopeTtlSeconds, 600);
+  assert.equal(config.outboxLeaseSeconds, 45);
 });
 
 test("persistent Send config rejects malformed or weak HMAC material", () => {
@@ -271,6 +273,10 @@ test("persistent Send runtime composes PostgreSQL service and persistent bearer 
   assert.equal(typeof runtime.mutationService.deleteMessage, "function");
   assert.equal(typeof runtime.deliveryService.sync, "function");
   assert.equal(typeof runtime.deliveryService.acknowledge, "function");
+  assert.equal(typeof runtime.outboxService.leaseNext, "function");
+  assert.equal(typeof runtime.outboxService.complete, "function");
+  assert.equal(typeof runtime.outboxService.retry, "function");
+  assert.equal(typeof runtime.outboxService.deadLetter, "function");
   assert.equal(typeof runtime.authenticate, "function");
 
   const authenticated = await runtime.authenticate({
