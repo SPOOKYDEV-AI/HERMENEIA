@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import {
   ContextStateConflictError,
   applyContextDerivation,
-  completedTailRefs,
   createDegradedContextStateFromFloor,
   createInitialContextState,
   decideDurableCorrection,
@@ -53,10 +52,38 @@ function result(state, opSeq, operationId, overrides = {}) {
   };
 }
 
-test("out-of-order completion never advances the causal prefix through a gap", () => {
+test("out-of-order reducer publication is rejected until the causal gap closes", () => {
   let state = initial();
   state = registerContextOperation(state, operation(11, "op-11"));
   state = registerContextOperation(state, operation(12, "op-12"));
+
+  assert.throws(
+    () =>
+      applyContextDerivation(
+        state,
+        result(state, 12, "op-12", {
+          patch: {
+            entityHandles: ["entity:bug-cache"],
+          },
+        }),
+      ),
+    (error) =>
+      error instanceof ContextStateConflictError &&
+      error.code === "CAUSAL_GAP",
+  );
+
+  assert.equal(state.processedPrefixOpSeq, 10);
+  assert.deepEqual(
+    processingGapRefs(state).map((item) => item.opSeq),
+    [11, 12],
+  );
+  assert.deepEqual(state.entityHandles, []);
+
+  state = applyContextDerivation(
+    state,
+    result(state, 11, "op-11"),
+  );
+  assert.equal(state.processedPrefixOpSeq, 11);
 
   state = applyContextDerivation(
     state,
@@ -65,26 +92,6 @@ test("out-of-order completion never advances the causal prefix through a gap", (
         entityHandles: ["entity:bug-cache"],
       },
     }),
-  );
-
-  assert.equal(state.processedPrefixOpSeq, 10);
-  assert.deepEqual(
-    processingGapRefs(state).map((item) => item.opSeq),
-    [11],
-  );
-  assert.deepEqual(
-    completedTailRefs(state).map((item) => item.opSeq),
-    [12],
-  );
-  assert.deepEqual(
-    state.entityHandles,
-    [],
-    "future op12 patch must stay invisible while op11 is unresolved",
-  );
-
-  state = applyContextDerivation(
-    state,
-    result(state, 11, "op-11"),
   );
 
   assert.equal(state.processedPrefixOpSeq, 12);
