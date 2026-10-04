@@ -14,6 +14,9 @@ import {
   createPostgresMessagingService,
 } from "../../.build/packages/runtime/src/persistent-messaging.js";
 import {
+  createPostgresDeliveryService,
+} from "../../.build/packages/runtime/src/persistent-delivery.js";
+import {
   InMemoryTransientSourceStore,
 } from "../../.build/packages/transient-source/src/index.js";
 import { createBearerAuthenticator } from "./session-auth.mjs";
@@ -212,6 +215,11 @@ export async function createPersistentSendRuntime({
       transientSources,
       envelopeTtlSeconds: config.envelopeTtlSeconds,
       transientSourceTtlSeconds: config.transientSource.ttlSeconds,
+    });
+
+    const deliveryService = createPostgresDeliveryService({
+      repository,
+      clock,
     });
 
     const authenticate = createBearerAuthenticator({
