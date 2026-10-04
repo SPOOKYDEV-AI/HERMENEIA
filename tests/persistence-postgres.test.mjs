@@ -1664,3 +1664,149 @@ test("manual translation retry reactivates DONE or DEAD execute work with fresh 
     assert.match(update.text, /status IN \('DONE','DEAD'\)/);
   }
 });
+
+
+test("ORIGINAL envelope persistence is fenced by active membership device and credential version", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 1 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  await repository.withTransaction((tx) =>
+    repository.insertDeliveryEnvelope(tx, {
+      tenantId: "tenant-1",
+      envelopeId: "envelope-original-1",
+      conversationId: "conversation-1",
+      messageId: "message-1",
+      sourceRevision: 2,
+      recipientUserId: "user-b",
+      recipientDeviceId: "device-b1",
+      credentialVersion: 4,
+      protectedPayload: "YWJj",
+      createdAt: "2026-10-04T12:00:00.000Z",
+      expiresAt: "2026-10-11T12:00:00.000Z",
+    }),
+  );
+
+  const query = connection.queries[1];
+  assert.match(query.text, /INSERT INTO delivery_envelopes/);
+  assert.match(query.text, /SELECT/);
+  assert.match(query.text, /FROM devices d/);
+  assert.match(query.text, /JOIN conversation_members cm/);
+  assert.match(query.text, /JOIN tenant_memberships tm/);
+  assert.match(query.text, /cm\.status = 'ACTIVE'/);
+  assert.match(query.text, /tm\.status = 'ACTIVE'/);
+  assert.match(query.text, /d\.status = 'ACTIVE'/);
+  assert.match(query.text, /d\.credential_version = \$8/);
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "envelope-original-1",
+    "conversation-1",
+    "message-1",
+    2,
+    "user-b",
+    "device-b1",
+    4,
+    "YWJj",
+    "2026-10-04T12:00:00.000Z",
+    "2026-10-11T12:00:00.000Z",
+  ]);
+});
+
+test("ORIGINAL envelope persistence fails if membership device or credential changed after target selection", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 0 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  await assert.rejects(
+    () =>
+      repository.withTransaction((tx) =>
+        repository.insertDeliveryEnvelope(tx, {
+          tenantId: "tenant-1",
+          envelopeId: "envelope-original-stale",
+          conversationId: "conversation-1",
+          messageId: "message-1",
+          sourceRevision: 2,
+          recipientUserId: "user-b",
+          recipientDeviceId: "device-b1",
+          credentialVersion: 4,
+          protectedPayload: "YWJj",
+          createdAt: "2026-10-04T12:00:00.000Z",
+          expiresAt: "2026-10-11T12:00:00.000Z",
+        }),
+      ),
+    /Delivery target changed before ORIGINAL envelope persistence/,
+  );
+
+  assert.equal(connection.queries.at(-1).text, "ROLLBACK");
+});
+
+test("TRANSLATION envelope persistence is fenced by active device user and credential version", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 1 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  await repository.withTransaction((tx) =>
+    repository.insertTranslationDeliveryEnvelope(tx, {
+      tenantId: "tenant-1",
+      envelopeId: "envelope-translation-fenced",
+      conversationId: "conversation-1",
+      messageId: "message-1",
+      sourceRevision: 2,
+      translationId: "translation-1",
+      recipientUserId: "user-b",
+      recipientDeviceId: "device-b1",
+      credentialVersion: 4,
+      protectedPayload: "YWJj",
+      createdAt: "2026-10-04T12:00:00.000Z",
+      expiresAt: "2026-10-11T12:00:00.000Z",
+    }),
+  );
+
+  const query = connection.queries[1];
+  assert.match(query.text, /FROM devices d/);
+  assert.match(query.text, /d\.device_id = \$8/);
+  assert.match(query.text, /d\.user_id = \$7/);
+  assert.match(query.text, /d\.status = 'ACTIVE'/);
+  assert.match(query.text, /d\.credential_version = \$9/);
+});
+
+test("TRANSLATION envelope persistence fails after device rotation or revocation", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 0 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  await assert.rejects(
+    () =>
+      repository.withTransaction((tx) =>
+        repository.insertTranslationDeliveryEnvelope(tx, {
+          tenantId: "tenant-1",
+          envelopeId: "envelope-translation-stale",
+          conversationId: "conversation-1",
+          messageId: "message-1",
+          sourceRevision: 2,
+          translationId: "translation-1",
+          recipientUserId: "user-b",
+          recipientDeviceId: "device-b1",
+          credentialVersion: 4,
+          protectedPayload: "YWJj",
+          createdAt: "2026-10-04T12:00:00.000Z",
+          expiresAt: "2026-10-11T12:00:00.000Z",
+        }),
+      ),
+    /Delivery target changed before TRANSLATION envelope persistence/,
+  );
+
+  assert.equal(connection.queries.at(-1).text, "ROLLBACK");
+});
