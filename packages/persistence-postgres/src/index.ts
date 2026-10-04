@@ -52,6 +52,40 @@ export type CommandClaimResult =
   | { claimed: true }
   | { claimed: false; existing: CommandReceiptRow };
 
+export interface TranslationJobLease {
+  jobId: UUID;
+  tenantId: UUID;
+  businessKey: string;
+  payloadRef: Record<string, unknown>;
+  fencingToken: number;
+  attemptCount: number;
+  leaseUntil: string;
+}
+
+export interface TranslationPublicationState {
+  conversationId: UUID;
+  messageStatus: "ACTIVE" | "DELETED";
+  currentRevision: number;
+  sourceHash: string | null;
+  membershipEpoch: number;
+  erasureEpoch: number;
+  policyVersion: number;
+  recipientMembershipStatus: "ACTIVE" | "LEFT" | "REMOVED" | "BLOCKED";
+  targetLanguageTag: string | null;
+  targetProfileVersion: number;
+}
+
+export interface TranslationExecutionRow {
+  translationId: UUID;
+  status:
+    | "PENDING"
+    | "READY"
+    | "FAILED"
+    | "SOURCE_REQUIRED"
+    | "EXPIRED"
+    | "SUPERSEDED";
+}
+
 export interface InboxEventRow {
   inboxEpoch: number;
   offset: number;
@@ -1170,6 +1204,644 @@ export class PostgresMessagingRepository {
 
     return "ACKED";
   }
+  async leaseTranslationJobs(
+    tx: SqlExecutor,
+    input: {
+      now: string;
+      leaseUntil: string;
+      limit: number;
+    },
+  ): Promise<TranslationJobLease[]> {
+    const result = await tx.query<{
+      job_id: UUID;
+      tenant_id: UUID;
+      business_key: string;
+      payload_ref: Record<string, unknown>;
+      fencing_token: number;
+      attempt_count: number;
+      lease_until: string;
+    }>(
+      `WITH candidates AS (
+         SELECT job_id
+           FROM outbox_jobs
+          WHERE job_type = 'translation.request'
+            AND available_at <= $1
+            AND (
+              status = 'AVAILABLE'
+              OR (
+                status = 'LEASED'
+                AND lease_until IS NOT NULL
+                AND lease_until <= $1
+              )
+            )
+          ORDER BY priority ASC, available_at ASC, created_at ASC
+          FOR UPDATE SKIP LOCKED
+          LIMIT $2
+       )
+       UPDATE outbox_jobs j
+          SET status = 'LEASED',
+              lease_until = $3,
+              fencing_token = j.fencing_token + 1,
+              attempt_count = j.attempt_count + 1
+         FROM candidates c
+        WHERE j.job_id = c.job_id
+      RETURNING j.job_id,
+                j.tenant_id,
+                j.business_key,
+                j.payload_ref,
+                j.fencing_token,
+                j.attempt_count,
+                j.lease_until::text AS lease_until`,
+      [input.now, input.limit, input.leaseUntil],
+    );
+
+    return result.rows.map((row) => ({
+      jobId: row.job_id,
+      tenantId: row.tenant_id,
+      businessKey: row.business_key,
+      payloadRef: row.payload_ref,
+      fencingToken: Number(row.fencing_token),
+      attemptCount: Number(row.attempt_count),
+      leaseUntil: row.lease_until,
+    }));
+  }
+
+  async lockTranslationJobLease(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      jobId: UUID;
+      fencingToken: number;
+      now: string;
+    },
+  ): Promise<boolean> {
+    const result = await tx.query<{ found: boolean }>(
+      `SELECT TRUE AS found
+         FROM outbox_jobs
+        WHERE tenant_id = $1
+          AND job_id = $2
+          AND job_type = 'translation.request'
+          AND status = 'LEASED'
+          AND fencing_token = $3
+          AND lease_until IS NOT NULL
+          AND lease_until > $4
+        FOR UPDATE`,
+      [
+        input.tenantId,
+        input.jobId,
+        input.fencingToken,
+        input.now,
+      ],
+    );
+    return Boolean(first(result)?.found);
+  }
+
+  async finishTranslationJob(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      jobId: UUID;
+      fencingToken: number;
+      status: "DONE" | "DEAD" | "SUPERSEDED";
+      now: string;
+    },
+  ): Promise<boolean> {
+    const result = await tx.query(
+      `UPDATE outbox_jobs
+          SET status = $4,
+              lease_until = NULL,
+              completed_at = $5
+        WHERE tenant_id = $1
+          AND job_id = $2
+          AND fencing_token = $3
+          AND status = 'LEASED'`,
+      [
+        input.tenantId,
+        input.jobId,
+        input.fencingToken,
+        input.status,
+        input.now,
+      ],
+    );
+    return result.rowCount === 1;
+  }
+
+  async rescheduleTranslationJob(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      jobId: UUID;
+      fencingToken: number;
+      availableAt: string;
+    },
+  ): Promise<boolean> {
+    const result = await tx.query(
+      `UPDATE outbox_jobs
+          SET status = 'AVAILABLE',
+              lease_until = NULL,
+              available_at = $4
+        WHERE tenant_id = $1
+          AND job_id = $2
+          AND fencing_token = $3
+          AND status = 'LEASED'`,
+      [
+        input.tenantId,
+        input.jobId,
+        input.fencingToken,
+        input.availableAt,
+      ],
+    );
+    return result.rowCount === 1;
+  }
+
+  async loadTranslationPublicationState(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      messageId: UUID;
+      sourceRevision: number;
+      recipientUserId: UUID;
+    },
+  ): Promise<TranslationPublicationState | undefined> {
+    const result = await tx.query<{
+      conversation_id: UUID;
+      message_status: "ACTIVE" | "DELETED";
+      current_revision: number;
+      source_hash: string | null;
+      membership_epoch: number;
+      erasure_epoch: number;
+      policy_version: number;
+      recipient_membership_status:
+        | "ACTIVE"
+        | "LEFT"
+        | "REMOVED"
+        | "BLOCKED";
+      target_language_tag: string | null;
+      target_profile_version: number;
+    }>(
+      `SELECT mm.conversation_id,
+              mm.status AS message_status,
+              mm.current_revision,
+              mr.source_hash,
+              c.membership_epoch,
+              c.erasure_epoch,
+              c.policy_version,
+              cm.status AS recipient_membership_status,
+              COALESCE(cm.target_language_tag, u.default_language_tag)
+                AS target_language_tag,
+              cm.target_profile_version
+         FROM message_metadata mm
+         JOIN message_revisions mr
+           ON mr.tenant_id = mm.tenant_id
+          AND mr.message_id = mm.message_id
+          AND mr.revision = $3
+         JOIN conversations c
+           ON c.tenant_id = mm.tenant_id
+          AND c.conversation_id = mm.conversation_id
+         JOIN conversation_members cm
+           ON cm.tenant_id = mm.tenant_id
+          AND cm.conversation_id = mm.conversation_id
+          AND cm.user_id = $4
+         JOIN tenant_memberships tm
+           ON tm.tenant_id = cm.tenant_id
+          AND tm.user_id = cm.user_id
+         JOIN users u
+           ON u.user_id = cm.user_id
+        WHERE mm.tenant_id = $1
+          AND mm.message_id = $2`,
+      [
+        input.tenantId,
+        input.messageId,
+        input.sourceRevision,
+        input.recipientUserId,
+      ],
+    );
+    const row = first(result);
+    return row
+      ? {
+          conversationId: row.conversation_id,
+          messageStatus: row.message_status,
+          currentRevision: Number(row.current_revision),
+          sourceHash: row.source_hash,
+          membershipEpoch: Number(row.membership_epoch),
+          erasureEpoch: Number(row.erasure_epoch),
+          policyVersion: Number(row.policy_version),
+          recipientMembershipStatus:
+            row.recipient_membership_status,
+          targetLanguageTag: row.target_language_tag,
+          targetProfileVersion: Number(
+            row.target_profile_version,
+          ),
+        }
+      : undefined;
+  }
+
+  async listTranslationRecipientDevices(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+      recipientUserId: UUID;
+    },
+  ): Promise<RecipientDevice[]> {
+    const result = await tx.query<{
+      user_id: UUID;
+      device_id: UUID;
+      credential_version: number;
+      public_material_ref: string;
+    }>(
+      `SELECT d.user_id,
+              d.device_id,
+              d.credential_version,
+              d.public_material_ref
+         FROM conversation_members cm
+         JOIN tenant_memberships tm
+           ON tm.tenant_id = cm.tenant_id
+          AND tm.user_id = cm.user_id
+          AND tm.status = 'ACTIVE'
+         JOIN devices d
+           ON d.user_id = cm.user_id
+          AND d.status = 'ACTIVE'
+          AND length(d.public_material_ref) > 0
+        WHERE cm.tenant_id = $1
+          AND cm.conversation_id = $2
+          AND cm.user_id = $3
+          AND cm.status = 'ACTIVE'
+        ORDER BY d.device_id`,
+      [
+        input.tenantId,
+        input.conversationId,
+        input.recipientUserId,
+      ],
+    );
+    return result.rows.map((row) => ({
+      userId: row.user_id,
+      deviceId: row.device_id,
+      credentialVersion: Number(row.credential_version),
+      publicMaterialRef: row.public_material_ref,
+    }));
+  }
+
+  async getOrCreateTranslationExecution(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      proposedTranslationId: UUID;
+      conversationId: UUID;
+      messageId: UUID;
+      sourceRevision: number;
+      recipientUserId: UUID;
+      targetLanguageTag: string;
+      targetProfileVersion: number;
+      contextSnapshotId?: UUID | null;
+      strategyVersion: string;
+      initialStatus:
+        | "PENDING"
+        | "SOURCE_REQUIRED";
+      now: string;
+    },
+  ): Promise<TranslationExecutionRow> {
+    await tx.query(
+      `INSERT INTO translation_executions(
+         tenant_id,
+         translation_id,
+         conversation_id,
+         source_message_id,
+         source_revision,
+         recipient_user_id,
+         target_language_tag,
+         target_profile_version,
+         context_snapshot_id,
+         strategy_version,
+         status,
+         created_at
+       ) VALUES (
+         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+       )
+       ON CONFLICT DO NOTHING`,
+      [
+        input.tenantId,
+        input.proposedTranslationId,
+        input.conversationId,
+        input.messageId,
+        input.sourceRevision,
+        input.recipientUserId,
+        input.targetLanguageTag,
+        input.targetProfileVersion,
+        input.contextSnapshotId ?? null,
+        input.strategyVersion,
+        input.initialStatus,
+        input.now,
+      ],
+    );
+
+    const result = await tx.query<{
+      translation_id: UUID;
+      status: TranslationExecutionRow["status"];
+    }>(
+      `SELECT translation_id, status
+         FROM translation_executions
+        WHERE tenant_id = $1
+          AND source_message_id = $2
+          AND source_revision = $3
+          AND recipient_user_id = $4
+          AND target_profile_version = $5
+          AND context_snapshot_id IS NOT DISTINCT FROM $6
+          AND strategy_version = $7
+        FOR UPDATE`,
+      [
+        input.tenantId,
+        input.messageId,
+        input.sourceRevision,
+        input.recipientUserId,
+        input.targetProfileVersion,
+        input.contextSnapshotId ?? null,
+        input.strategyVersion,
+      ],
+    );
+    const row = first(result);
+    if (!row) {
+      throw new Error(
+        "Translation execution was not created or found",
+      );
+    }
+    return {
+      translationId: row.translation_id,
+      status: row.status,
+    };
+  }
+
+  async startProviderExecution(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      attemptId: UUID;
+      translationId: UUID;
+      providerId: string;
+      modelId: string;
+      providerRegion?: string | null;
+      startedAt: string;
+    },
+  ): Promise<number> {
+    await tx.query(
+      `SELECT translation_id
+         FROM translation_executions
+        WHERE tenant_id = $1
+          AND translation_id = $2
+        FOR UPDATE`,
+      [input.tenantId, input.translationId],
+    );
+
+    const next = await tx.query<{ attempt_no: number }>(
+      `SELECT COALESCE(MAX(attempt_no), 0) + 1 AS attempt_no
+         FROM provider_executions
+        WHERE tenant_id = $1
+          AND translation_id = $2`,
+      [input.tenantId, input.translationId],
+    );
+    const attemptNo = Number(first(next)?.attempt_no ?? 1);
+
+    await tx.query(
+      `INSERT INTO provider_executions(
+         tenant_id,
+         attempt_id,
+         translation_id,
+         attempt_no,
+         provider_id,
+         model_id,
+         provider_region,
+         status,
+         started_at
+       ) VALUES (
+         $1,$2,$3,$4,$5,$6,$7,'STARTED',$8
+       )`,
+      [
+        input.tenantId,
+        input.attemptId,
+        input.translationId,
+        attemptNo,
+        input.providerId,
+        input.modelId,
+        input.providerRegion ?? null,
+        input.startedAt,
+      ],
+    );
+    return attemptNo;
+  }
+
+  async finishProviderExecution(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      attemptId: UUID;
+      status:
+        | "SUCCEEDED"
+        | "FAILED"
+        | "TIMED_OUT"
+        | "RATE_LIMITED"
+        | "CANCELLED_LOGICALLY";
+      inputTokens?: number | null;
+      outputTokens?: number | null;
+      billedCostMicrounits?: number | null;
+      latencyMs?: number | null;
+      errorClass?: string | null;
+      completedAt: string;
+    },
+  ): Promise<void> {
+    const result = await tx.query(
+      `UPDATE provider_executions
+          SET status = $3,
+              input_tokens = $4,
+              output_tokens = $5,
+              billed_cost_microunits = $6,
+              latency_ms = $7,
+              error_class = $8,
+              completed_at = $9
+        WHERE tenant_id = $1
+          AND attempt_id = $2
+          AND status = 'STARTED'`,
+      [
+        input.tenantId,
+        input.attemptId,
+        input.status,
+        input.inputTokens ?? null,
+        input.outputTokens ?? null,
+        input.billedCostMicrounits ?? null,
+        input.latencyMs ?? null,
+        input.errorClass ?? null,
+        input.completedAt,
+      ],
+    );
+    if (result.rowCount !== 1) {
+      throw new Error(
+        "Provider execution was not in STARTED state",
+      );
+    }
+  }
+
+  async updateTranslationExecutionStatus(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      translationId: UUID;
+      status:
+        | "PENDING"
+        | "READY"
+        | "FAILED"
+        | "SOURCE_REQUIRED"
+        | "EXPIRED"
+        | "SUPERSEDED";
+      nextAttemptAt?: string | null;
+      now: string;
+    },
+  ): Promise<void> {
+    const result = await tx.query(
+      `UPDATE translation_executions
+          SET status = $3,
+              next_attempt_at = $4,
+              ready_at = CASE
+                WHEN $3 = 'READY' THEN COALESCE(ready_at, $5)
+                ELSE ready_at
+              END,
+              superseded_at = CASE
+                WHEN $3 = 'SUPERSEDED'
+                THEN COALESCE(superseded_at, $5)
+                ELSE superseded_at
+              END
+        WHERE tenant_id = $1
+          AND translation_id = $2`,
+      [
+        input.tenantId,
+        input.translationId,
+        input.status,
+        input.nextAttemptAt ?? null,
+        input.now,
+      ],
+    );
+    if (result.rowCount !== 1) {
+      throw new Error(
+        "Translation execution status update missed row",
+      );
+    }
+  }
+
+  async insertTranslationDeliveryEnvelope(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      envelopeId: UUID;
+      conversationId: UUID;
+      messageId: UUID;
+      sourceRevision: number;
+      translationId: UUID;
+      recipientUserId: UUID;
+      recipientDeviceId: UUID;
+      credentialVersion: number;
+      protectedPayload: string;
+      createdAt: string;
+      expiresAt: string;
+    },
+  ): Promise<void> {
+    await tx.query(
+      `INSERT INTO delivery_envelopes(
+         tenant_id,
+         envelope_id,
+         conversation_id,
+         message_id,
+         source_revision,
+         translation_id,
+         recipient_user_id,
+         recipient_device_id,
+         recipient_credential_version,
+         rendition_type,
+         protected_payload,
+         status,
+         created_at,
+         expires_at
+       ) VALUES (
+         $1,$2,$3,$4,$5,$6,$7,$8,$9,
+         'TRANSLATION',decode($10,'base64'),'PENDING',$11,$12
+       )
+       ON CONFLICT DO NOTHING`,
+      [
+        input.tenantId,
+        input.envelopeId,
+        input.conversationId,
+        input.messageId,
+        input.sourceRevision,
+        input.translationId,
+        input.recipientUserId,
+        input.recipientDeviceId,
+        input.credentialVersion,
+        input.protectedPayload,
+        input.createdAt,
+        input.expiresAt,
+      ],
+    );
+  }
+
+  async insertTranslationInboxEvent(
+    tx: SqlExecutor,
+    input: {
+      deviceId: UUID;
+      inboxEpoch: number;
+      offset: number;
+      eventId: UUID;
+      eventType:
+        | "translation.ready"
+        | "translation.failed"
+        | "translation.source_required"
+        | "translation.expired";
+      tenantId: UUID;
+      conversationId: UUID;
+      messageId: UUID;
+      envelopeId?: UUID | null;
+      sourceRevision: number;
+      translationId: UUID;
+      targetLanguageTag: string;
+      createdAt: string;
+    },
+  ): Promise<void> {
+    await tx.query(
+      `INSERT INTO device_inbox_events(
+         device_id,
+         inbox_epoch,
+         offset_value,
+         event_id,
+         event_type,
+         tenant_id,
+         conversation_id,
+         message_id,
+         envelope_id,
+         metadata,
+         created_at
+       ) VALUES (
+         $1,$2,$3,$4,$5,$6,$7,$8,$9,
+         jsonb_build_object(
+           'source_revision',$10,
+           'translation_id',$11,
+           'target_language_tag',$12
+         ),
+         $13
+       )`,
+      [
+        input.deviceId,
+        input.inboxEpoch,
+        input.offset,
+        input.eventId,
+        input.eventType,
+        input.tenantId,
+        input.conversationId,
+        input.messageId,
+        input.envelopeId ?? null,
+        input.sourceRevision,
+        input.translationId,
+        input.targetLanguageTag,
+        input.createdAt,
+      ],
+    );
+  }
+
 }
 
 export class PostgresSessionRepository {
