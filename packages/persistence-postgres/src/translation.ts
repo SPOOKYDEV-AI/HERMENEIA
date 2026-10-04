@@ -484,19 +484,33 @@ export class PostgresTranslationRepository {
     input: {
       tenantId: UUID;
       recipientUserId: UUID;
+      sourceMessageId: UUID;
+      sourceRevision: number;
     },
   ): Promise<UUID[]> {
     const result = await tx.query<{ device_id: UUID }>(
-      `SELECT d.device_id
-         FROM devices d
-         JOIN tenant_memberships tm
-           ON tm.tenant_id = $1
-          AND tm.user_id = d.user_id
-          AND tm.status = 'ACTIVE'
-        WHERE d.user_id = $2
+      `SELECT DISTINCT d.device_id
+         FROM delivery_envelopes de
+         JOIN devices d
+           ON d.device_id = de.recipient_device_id
+          AND d.user_id = de.recipient_user_id
           AND d.status = 'ACTIVE'
+         JOIN tenant_memberships tm
+           ON tm.tenant_id = de.tenant_id
+          AND tm.user_id = de.recipient_user_id
+          AND tm.status = 'ACTIVE'
+        WHERE de.tenant_id = $1
+          AND de.recipient_user_id = $2
+          AND de.message_id = $3
+          AND de.source_revision = $4
+          AND de.rendition_type = 'ORIGINAL'
         ORDER BY d.device_id`,
-      [input.tenantId, input.recipientUserId],
+      [
+        input.tenantId,
+        input.recipientUserId,
+        input.sourceMessageId,
+        input.sourceRevision,
+      ],
     );
     return result.rows.map((row) => row.device_id);
   }
