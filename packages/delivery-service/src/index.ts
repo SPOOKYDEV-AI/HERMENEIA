@@ -49,6 +49,15 @@ export interface PersistentDeliveryStore<Tx> {
     lastAckedOffset: number;
   } | undefined>;
 
+  expirePendingDeviceEnvelopes(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      deviceId: UUID;
+      now: string;
+    },
+  ): Promise<number>;
+
   listInboxEvents(
     tx: Tx,
     input: {
@@ -154,6 +163,11 @@ export class PersistentDeliveryService<Tx> {
       );
     }
 
+    const now = this.clock.now();
+    if (!Number.isFinite(Date.parse(now))) {
+      throw new Error("Clock returned an invalid timestamp");
+    }
+
     return this.store.withTransaction(async (tx) => {
       const state = await this.store.getDeviceSyncState(tx, actor);
       if (!state) {
@@ -162,6 +176,12 @@ export class PersistentDeliveryService<Tx> {
           "Device sync state is not available to actor",
         );
       }
+
+      await this.store.expirePendingDeviceEnvelopes(tx, {
+        tenantId: actor.tenantId,
+        deviceId: actor.deviceId,
+        now,
+      });
 
       const requested = parseCursor(
         input.cursor,
