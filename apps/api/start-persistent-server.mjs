@@ -5,6 +5,9 @@ import process from "node:process";
 import {
   createPersistentHermeneiaHttpRuntime,
 } from "./persistent-server.mjs";
+import {
+  createBuiltinEnvelopeSecurity,
+} from "./builtin-envelope-security.mjs";
 
 function positivePort(value) {
   const parsed = Number(value ?? 3000);
@@ -43,6 +46,8 @@ export function persistentServerProcessConfigFromEnv(
     port: positivePort(env.PORT),
     securityModulePath:
       env.HERMENEIA_SECURITY_MODULE || null,
+    translationProviderModulePath:
+      env.HERMENEIA_TRANSLATION_PROVIDER_MODULE || null,
   };
 }
 
@@ -52,7 +57,7 @@ export async function loadSecurityRuntimeModule({
 } = {}) {
   if (typeof modulePath !== "string" || !modulePath.trim()) {
     throw new TypeError(
-      "HERMENEIA_SECURITY_MODULE is required",
+      "HERMENEIA_SECURITY_MODULE must be a non-empty local path",
     );
   }
 
@@ -74,25 +79,25 @@ export async function loadSecurityRuntimeModule({
     );
   }
 
-  const hasTranslationProvider = Boolean(
-    loaded.translationProvider,
-  );
-  const hasTranslationProtector = Boolean(
+  if (
     loaded.translationEnvelopeProtector &&
-    typeof loaded.translationEnvelopeProtector.protect === "function",
-  );
-
-  if (hasTranslationProvider !== hasTranslationProtector) {
+    typeof loaded.translationEnvelopeProtector.protect !== "function"
+  ) {
     throw new TypeError(
-      "Security module translationProvider and translationEnvelopeProtector must be exported together",
+      "translationEnvelopeProtector.protect must be a function",
+    );
+  }
+
+  if (loaded.translationProvider) {
+    throw new TypeError(
+      "Translation providers must be loaded through HERMENEIA_TRANSLATION_PROVIDER_MODULE",
     );
   }
 
   return {
     envelopeProtector: loaded.envelopeProtector,
-    ...(hasTranslationProvider
+    ...(loaded.translationEnvelopeProtector
       ? {
-          translationProvider: loaded.translationProvider,
           translationEnvelopeProtector:
             loaded.translationEnvelopeProtector,
         }
@@ -100,9 +105,46 @@ export async function loadSecurityRuntimeModule({
   };
 }
 
+export async function loadTranslationProviderModule({
+  modulePath,
+  cwd = process.cwd(),
+} = {}) {
+  if (typeof modulePath !== "string" || !modulePath.trim()) {
+    throw new TypeError(
+      "HERMENEIA_TRANSLATION_PROVIDER_MODULE must be a non-empty local path",
+    );
+  }
+
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(modulePath)) {
+    throw new TypeError(
+      "HERMENEIA_TRANSLATION_PROVIDER_MODULE must be a local filesystem path",
+    );
+  }
+
+  const absolutePath = path.resolve(cwd, modulePath);
+  const loaded = await import(pathToFileURL(absolutePath).href);
+  const provider = loaded.translationProvider;
+
+  if (
+    !provider ||
+    typeof provider.providerId !== "string" ||
+    !provider.providerId ||
+    typeof provider.modelId !== "string" ||
+    !provider.modelId ||
+    typeof provider.translate !== "function"
+  ) {
+    throw new TypeError(
+      "Translation provider module must export translationProvider with providerId, modelId and translate",
+    );
+  }
+
+  return provider;
+}
+
 export async function startPersistentServerProcess({
   env = process.env,
   securityRuntime = null,
+  translationProviderRuntime = null,
   pgModule,
   clock,
   ids,
@@ -128,15 +170,38 @@ export async function startPersistentServerProcess({
       "port override must be an integer between 0 and 65535",
     );
   }
-  const security =
+  const builtinSecurity = createBuiltinEnvelopeSecurity();
+  const securityOverride =
     securityRuntime ??
-    await loadSecurityRuntimeModule({
-      modulePath: config.securityModulePath,
-    });
+    (config.securityModulePath
+      ? await loadSecurityRuntimeModule({
+          modulePath: config.securityModulePath,
+        })
+      : null);
+
+  const security = {
+    ...builtinSecurity,
+    ...(securityOverride ?? {}),
+  };
+
+  const translationProvider =
+    translationProviderRuntime ??
+    (config.translationProviderModulePath
+      ? await loadTranslationProviderModule({
+          modulePath: config.translationProviderModulePath,
+        })
+      : null);
 
   const app = await createPersistentHermeneiaHttpRuntime({
     env,
-    ...security,
+    envelopeProtector: security.envelopeProtector,
+    ...(translationProvider
+      ? {
+          translationProvider,
+          translationEnvelopeProtector:
+            security.translationEnvelopeProtector,
+        }
+      : {}),
     pgModule,
     ...(clock ? { clock } : {}),
     ...(ids ? { ids } : {}),
