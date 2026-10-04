@@ -250,6 +250,23 @@ def main() -> int:
         if forbidden in translation_lower:
             fail(f"translation migration contains forbidden token: {forbidden}")
 
+    source_required_event_required = [
+        "'translation.source_required'",
+        "device_inbox_events_translation_source_required_check",
+        "metadata ? 'translation_id'",
+        "metadata ? 'source_revision'",
+        "metadata ? 'source_ref'",
+        "event_type IN ('message.deleted','translation.source_required')",
+    ]
+    for snippet in source_required_event_required:
+        if snippet not in source_required_event_sql:
+            fail(f"source-required event migration missing invariant: {snippet}")
+
+    if not source_required_event_sql.lstrip().startswith("BEGIN;"):
+        fail("source-required event migration must begin with BEGIN")
+    if not source_required_event_sql.rstrip().endswith("COMMIT;"):
+        fail("source-required event migration must end with COMMIT")
+
     command_lower = command_sql.lower()
     for forbidden in (
         "source_text",
