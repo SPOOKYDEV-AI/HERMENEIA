@@ -368,6 +368,187 @@ export class PostgresMessagingRepository {
     return [...targets.values()];
   }
 
+  async lockMessageForAuthorMutation(
+    tx: SqlExecutor,
+    actor: ActorContext,
+    messageId: UUID,
+  ): Promise<{
+    conversationId: UUID;
+    messageSeq: number;
+    currentRevision: number;
+    status: "ACTIVE" | "DELETED";
+  } | undefined> {
+    const result = await tx.query<{
+      conversation_id: UUID;
+      message_seq: number;
+      current_revision: number;
+      status: "ACTIVE" | "DELETED";
+    }>(
+      `SELECT mm.conversation_id,
+              mm.message_seq,
+              mm.current_revision,
+              mm.status
+         FROM message_metadata mm
+         JOIN conversation_members cm
+           ON cm.tenant_id = mm.tenant_id
+          AND cm.conversation_id = mm.conversation_id
+          AND cm.user_id = $3
+          AND cm.status = 'ACTIVE'
+         JOIN tenant_memberships tm
+           ON tm.tenant_id = mm.tenant_id
+          AND tm.user_id = $3
+          AND tm.status = 'ACTIVE'
+         JOIN devices d
+           ON d.device_id = $4
+          AND d.user_id = $3
+          AND d.status = 'ACTIVE'
+        WHERE mm.tenant_id = $1
+          AND mm.message_id = $2
+          AND mm.author_user_id = $3
+        FOR UPDATE OF mm`,
+      [
+        actor.tenantId,
+        messageId,
+        actor.userId,
+        actor.deviceId,
+      ],
+    );
+    const row = first(result);
+    return row
+      ? {
+          conversationId: row.conversation_id,
+          messageSeq: Number(row.message_seq),
+          currentRevision: Number(row.current_revision),
+          status: row.status,
+        }
+      : undefined;
+  }
+
+  async allocateOperationSequence(
+    tx: SqlExecutor,
+    actor: ActorContext,
+    conversationId: UUID,
+  ): Promise<number | undefined> {
+    const result = await tx.query<{ op_seq: number }>(
+      `UPDATE conversations c
+          SET next_op_seq = c.next_op_seq + 1
+         FROM conversation_members cm
+         JOIN tenant_memberships tm
+           ON tm.tenant_id = cm.tenant_id
+          AND tm.user_id = cm.user_id
+          AND tm.status = 'ACTIVE'
+         JOIN devices actor_device
+           ON actor_device.device_id = $4
+          AND actor_device.user_id = cm.user_id
+          AND actor_device.status = 'ACTIVE'
+        WHERE c.tenant_id = $1
+          AND c.conversation_id = $2
+          AND c.status = 'ACTIVE'
+          AND cm.tenant_id = c.tenant_id
+          AND cm.conversation_id = c.conversation_id
+          AND cm.user_id = $3
+          AND cm.status = 'ACTIVE'
+      RETURNING c.next_op_seq - 1 AS op_seq`,
+      [
+        actor.tenantId,
+        conversationId,
+        actor.userId,
+        actor.deviceId,
+      ],
+    );
+    const row = first(result);
+    return row ? Number(row.op_seq) : undefined;
+  }
+
+  async updateMessageRevisionPointer(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      messageId: UUID;
+      expectedRevision: number;
+      newRevision: number;
+      status: "ACTIVE" | "DELETED";
+      deletedAt?: string | null;
+    },
+  ): Promise<void> {
+    const result = await tx.query(
+      `UPDATE message_metadata
+          SET current_revision = $4,
+              status = $5,
+              deleted_at = $6
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND current_revision = $3`,
+      [
+        input.tenantId,
+        input.messageId,
+        input.expectedRevision,
+        input.newRevision,
+        input.status,
+        input.deletedAt ?? null,
+      ],
+    );
+    if (result.rowCount !== 1) {
+      throw new Error(
+        "Message revision pointer changed despite mutation lock",
+      );
+    }
+  }
+
+  async revokePendingMessageEnvelopes(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      messageId: UUID;
+      throughRevision: number;
+    },
+  ): Promise<number> {
+    const result = await tx.query(
+      `UPDATE delivery_envelopes
+          SET status = 'REVOKED',
+              protected_payload = decode('', 'hex')
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND source_revision <= $3
+          AND status = 'PENDING'`,
+      [
+        input.tenantId,
+        input.messageId,
+        input.throughRevision,
+      ],
+    );
+    return result.rowCount;
+  }
+
+  async supersedeTranslationJobs(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      messageId: UUID;
+      throughRevision: number;
+      now: string;
+    },
+  ): Promise<number> {
+    const result = await tx.query(
+      `UPDATE outbox_jobs
+          SET status = 'SUPERSEDED',
+              completed_at = $4,
+              lease_until = NULL
+        WHERE tenant_id = $1
+          AND job_type = 'translation.request'
+          AND payload_ref->>'message_id' = $2
+          AND (payload_ref->>'source_revision')::integer <= $3
+          AND status IN ('AVAILABLE','LEASED')`,
+      [
+        input.tenantId,
+        input.messageId,
+        input.throughRevision,
+        input.now,
+      ],
+    );
+    return result.rowCount;
+  }
+
   async replyTargetExists(
     tx: SqlExecutor,
     tenantId: UUID,
