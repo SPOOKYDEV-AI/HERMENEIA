@@ -120,6 +120,11 @@ export interface BuildContextInput {
   targetLanguageTag: string;
   targetProfileVersion: number;
   currentSequence: number;
+  /**
+   * Authoritative conversation erasure epoch. This value exists even when
+   * the derived ConversationContextState cache is absent.
+   */
+  erasureEpoch: number;
   now: string;
   strategy: ContextStrategy;
   state: ConversationContextState | null;
@@ -222,7 +227,7 @@ export class ContextEngine {
   build(input: BuildContextInput): ContextBuildResult {
     validateInput(input);
 
-    const erasureEpoch = input.state?.erasureEpoch ?? 0;
+    const erasureEpoch = input.erasureEpoch;
     const processedPrefixSequence =
       input.state?.processedPrefixSequence ?? 0;
     const processingGapRefs =
@@ -626,6 +631,14 @@ function validateInput(input: BuildContextInput): void {
       "currentSequence must be a positive integer",
     );
   }
+  if (
+    !Number.isInteger(input.erasureEpoch) ||
+    input.erasureEpoch < 0
+  ) {
+    throw new TypeError(
+      "erasureEpoch must be a non-negative integer",
+    );
+  }
   if (!Number.isFinite(Date.parse(input.now))) {
     throw new TypeError("now must be a valid timestamp");
   }
@@ -668,7 +681,14 @@ function validateInput(input: BuildContextInput): void {
       input.state.erasureEpoch < 0
     ) {
       throw new TypeError(
-        "erasureEpoch must be a non-negative integer",
+        "ContextState erasureEpoch must be a non-negative integer",
+      );
+    }
+    if (
+      input.state.erasureEpoch !== input.erasureEpoch
+    ) {
+      throw new TypeError(
+        "ContextState erasureEpoch does not match authoritative erasureEpoch",
       );
     }
 
