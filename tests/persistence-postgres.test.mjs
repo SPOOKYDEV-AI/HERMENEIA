@@ -1495,3 +1495,107 @@ test("device list query never exposes another user's devices", async () => {
     "device-1",
   ]);
 });
+
+
+test("edit delivery targets come only from retained ORIGINAL envelope exposure metadata", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [
+        {
+          user_id: "user-a",
+          device_id: "device-a2",
+          credential_version: 2,
+          public_material_ref: "pub:a2",
+        },
+        {
+          user_id: "user-b",
+          device_id: "device-b1",
+          credential_version: 3,
+          public_material_ref: "pub:b1",
+        },
+      ],
+      rowCount: 2,
+    },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const targets = await repository.withTransaction((tx) =>
+    repository.listMessageEditDeliveryTargets(
+      tx,
+      actor(),
+      "message-1",
+    ),
+  );
+
+  assert.deepEqual(targets, [
+    {
+      userId: "user-a",
+      devices: [{
+        userId: "user-a",
+        deviceId: "device-a2",
+        credentialVersion: 2,
+        publicMaterialRef: "pub:a2",
+      }],
+    },
+    {
+      userId: "user-b",
+      devices: [{
+        userId: "user-b",
+        deviceId: "device-b1",
+        credentialVersion: 3,
+        publicMaterialRef: "pub:b1",
+      }],
+    },
+  ]);
+
+  const query = connection.queries[1];
+  assert.match(query.text, /FROM delivery_envelopes de/);
+  assert.match(query.text, /de\.rendition_type = 'ORIGINAL'/);
+  assert.match(query.text, /cm\.status = 'ACTIVE'/);
+  assert.match(query.text, /tm\.status = 'ACTIVE'/);
+  assert.match(query.text, /d\.status = 'ACTIVE'/);
+  assert.match(query.text, /length\(d\.public_material_ref\) > 0/);
+  assert.doesNotMatch(query.text, /FROM device_inbox_events/);
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "message-1",
+    "device-1",
+  ]);
+});
+
+test("delete event devices use retained ORIGINAL envelope metadata without requiring current membership", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [
+        { user_id: "user-b", device_id: "device-b1" },
+        { user_id: "user-c", device_id: "device-c1" },
+      ],
+      rowCount: 2,
+    },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const devices = await repository.withTransaction((tx) =>
+    repository.listMessageDeletionEventDevices(
+      tx,
+      actor(),
+      "message-1",
+    ),
+  );
+
+  assert.deepEqual(devices, [
+    { userId: "user-b", deviceId: "device-b1" },
+    { userId: "user-c", deviceId: "device-c1" },
+  ]);
+
+  const query = connection.queries[1];
+  assert.match(query.text, /FROM delivery_envelopes de/);
+  assert.match(query.text, /de\.rendition_type = 'ORIGINAL'/);
+  assert.match(query.text, /d\.status = 'ACTIVE'/);
+  assert.doesNotMatch(query.text, /conversation_members/);
+  assert.doesNotMatch(query.text, /tenant_memberships/);
+});
