@@ -294,13 +294,12 @@ test("already ACKed envelope is idempotent and does not re-run purge updates", a
   );
 });
 
-test("inbox offset allocation creates tenant-scoped sync state", async () => {
+test("inbox offset allocation is tenant-local and never consumes the global device counter", async () => {
   const connection = new ScriptedConnection([
     {
       rows: [{ inbox_epoch: 3, offset_value: 12 }],
       rowCount: 1,
     },
-    { rows: [], rowCount: 1 },
   ]);
   const repository = new PostgresMessagingRepository(
     new SqlTransactionManager(new SingleConnectionPool(connection)),
@@ -318,14 +317,22 @@ test("inbox offset allocation creates tenant-scoped sync state", async () => {
     inboxEpoch: 3,
     offset: 12,
   });
+
+  const query = connection.queries[1];
+  assert.match(query.text, /INSERT INTO tenant_device_sync_states/);
   assert.match(
-    connection.queries[2].text,
-    /INSERT INTO tenant_device_sync_states/,
+    query.text,
+    /ON CONFLICT \(tenant_id, device_id\)/,
   );
-  assert.deepEqual(connection.queries[2].params, [
+  assert.match(
+    query.text,
+    /next_offset = tenant_device_sync_states\.next_offset \+ 1/,
+  );
+  assert.match(query.text, /FOR UPDATE OF d/);
+  assert.doesNotMatch(query.text, /UPDATE device_sync_states/);
+  assert.deepEqual(query.params, [
     "tenant-1",
     "device-1",
-    3,
   ]);
 });
 
@@ -356,7 +363,9 @@ test("device sync state is authorised and isolated by tenant", async () => {
 
   const sql = connection.queries[1];
   assert.match(sql.text, /tenant_memberships/);
-  assert.match(sql.text, /tenant_device_sync_states/);
+  assert.match(sql.text, /INSERT INTO tenant_device_sync_states/);
+  assert.match(sql.text, /RETURNING inbox_epoch/);
+  assert.doesNotMatch(sql.text, /FROM device_sync_states/);
   assert.deepEqual(sql.params, [
     "tenant-1",
     "user-1",
@@ -1773,4 +1782,36 @@ test("TRANSLATION envelope persistence fails after device rotation or revocation
   );
 
   assert.equal(connection.queries.at(-1).text, "ROLLBACK");
+});
+
+
+test("tenant-local inbox sequence permits the same logical offset for different tenants on one device", async () => {
+  for (const tenantId of ["tenant-a", "tenant-b"]) {
+    const connection = new ScriptedConnection([
+      {
+        rows: [{ inbox_epoch: 1, offset_value: 1 }],
+        rowCount: 1,
+      },
+    ]);
+    const repository = new PostgresMessagingRepository(
+      new SqlTransactionManager(new SingleConnectionPool(connection)),
+    );
+
+    const allocated = await repository.withTransaction((tx) =>
+      repository.allocateDeviceInboxOffset(
+        tx,
+        tenantId,
+        "shared-device",
+      ),
+    );
+
+    assert.deepEqual(allocated, {
+      inboxEpoch: 1,
+      offset: 1,
+    });
+    assert.deepEqual(connection.queries[1].params, [
+      tenantId,
+      "shared-device",
+    ]);
+  }
 });
