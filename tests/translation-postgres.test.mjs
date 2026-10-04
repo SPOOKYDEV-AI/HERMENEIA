@@ -336,6 +336,8 @@ test("translation publish device query locks active devices with public material
     repository.listRecipientDevicesForPublish(tx, {
       tenantId: "tenant-1",
       recipientUserId: "user-b",
+      sourceMessageId: "message-1",
+      sourceRevision: 2,
     }),
   );
 
@@ -345,9 +347,20 @@ test("translation publish device query locks active devices with public material
     publicMaterialRef: "pub:b1",
   }]);
   const sql = connection.queries[1];
+  assert.match(sql.text, /FROM delivery_envelopes de/);
+  assert.match(sql.text, /de\.recipient_user_id = \$2/);
+  assert.match(sql.text, /de\.message_id = \$3/);
+  assert.match(sql.text, /de\.source_revision = \$4/);
+  assert.match(sql.text, /de\.rendition_type = 'ORIGINAL'/);
   assert.match(sql.text, /d\.status = 'ACTIVE'/);
   assert.match(sql.text, /length\(d\.public_material_ref\) > 0/);
   assert.match(sql.text, /FOR SHARE OF d/);
+  assert.deepEqual(sql.params, [
+    "tenant-1",
+    "user-b",
+    "message-1",
+    2,
+  ]);
 });
 
 test("translation retry and terminal transitions are fenced by PENDING state", async () => {
