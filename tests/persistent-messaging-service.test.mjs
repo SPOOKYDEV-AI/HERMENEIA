@@ -261,7 +261,10 @@ class TransactionalFakeStore {
     for (const job of this.state.jobs) {
       if (
         job.tenantId === input.tenantId &&
-        job.jobType === "translation.request" &&
+        (
+          job.jobType === "translation.request" ||
+          job.jobType === "translation.execute"
+        ) &&
         job.payloadRef.message_id === input.messageId &&
         Number(job.payloadRef.source_revision) <= input.throughRevision &&
         (job.status === "AVAILABLE" || job.status === "LEASED")
@@ -272,6 +275,11 @@ class TransactionalFakeStore {
       }
     }
     return count;
+  }
+
+  async supersedeTranslationExecutions() {
+    this.maybeFail("supersedeTranslationExecutions");
+    return 0;
   }
 
   async listConversationEventDevices() {
