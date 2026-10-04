@@ -910,6 +910,40 @@ test("message mutation revokes pending envelopes and purges protected payload", 
   assert.match(query.text, /source_revision <= \$3/);
 });
 
+test("message mutation supersedes current translation executions including READY", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 3 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const count = await repository.withTransaction((tx) =>
+    repository.supersedeTranslationExecutions(tx, {
+      tenantId: "tenant-1",
+      messageId: "message-1",
+      throughRevision: 2,
+      now: "2026-10-04T10:00:00.000Z",
+    }),
+  );
+
+  assert.equal(count, 3);
+  const query = connection.queries[1];
+  assert.match(query.text, /UPDATE translation_executions/);
+  assert.match(query.text, /status = 'SUPERSEDED'/);
+  assert.match(
+    query.text,
+    /status IN \('PENDING','SOURCE_REQUIRED','READY'\)/,
+  );
+  assert.match(query.text, /source_revision <= \$3/);
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "message-1",
+    2,
+    "2026-10-04T10:00:00.000Z",
+  ]);
+});
+
 test("message mutation supersedes available or leased translation jobs", async () => {
   const connection = new ScriptedConnection([
     { rows: [], rowCount: 2 },
