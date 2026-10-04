@@ -414,6 +414,7 @@ function fixture({
     latencyMs: 120,
   },
   maxProviderAttempts = 3,
+  onProviderTranslate = null,
 } = {}) {
   const store = new FakeWorkerStore();
   store.seedRootJob();
@@ -444,6 +445,9 @@ function fixture({
     async translate(input) {
       providerCalls += 1;
       assert.equal(input.targetLanguageTag, "es-CO");
+      if (typeof onProviderTranslate === "function") {
+        await onProviderTranslate({ store, input });
+      }
       return clone(providerResult);
     },
   };
@@ -639,6 +643,59 @@ test("successful provider result publishes encrypted translation and marks execu
   assert.equal(
     f.store.state.events[0].eventType,
     "message.available",
+  );
+});
+
+test("provider attempt cancelled by a concurrent message mutation stops before publish", async () => {
+  const f = fixture({
+    onProviderTranslate({ store }) {
+      const attempt = store.state.attempts[0];
+      attempt.status = "CANCELLED_LOGICALLY";
+      attempt.completedAt = "2026-10-04T12:00:00.000Z";
+
+      const execution = store.state.executions[0];
+      execution.status = "SUPERSEDED";
+      execution.supersededAt = "2026-10-04T12:00:00.000Z";
+
+      const child = store.state.jobs.find(
+        (job) => job.jobType === "translation.execute",
+      );
+      child.status = "SUPERSEDED";
+      child.leaseUntil = null;
+      child.completedAt = "2026-10-04T12:00:00.000Z";
+      child.fencingToken += 1;
+    },
+  });
+  await fanoutOne(f);
+  f.transientSources.put({
+    tenantId: "tenant-1",
+    messageId: "message-1",
+    sourceRevision: 1,
+    sourceHash: "source-hash-1",
+    source: { text: "Bonjour" },
+    createdAt: f.time.now(),
+    expiresAt: "2026-10-04T12:05:00.000Z",
+  });
+
+  assert.equal(
+    await f.worker.runExecuteOnce(),
+    "SUPERSEDED",
+  );
+  assert.equal(f.providerCalls(), 1);
+  assert.equal(
+    f.store.state.attempts[0].status,
+    "CANCELLED_LOGICALLY",
+  );
+  assert.equal(
+    f.store.state.executions[0].status,
+    "SUPERSEDED",
+  );
+  assert.equal(f.store.state.envelopes.length, 0);
+  assert.equal(
+    f.store.state.events.some(
+      (event) => event.eventType === "message.available",
+    ),
+    false,
   );
 });
 
