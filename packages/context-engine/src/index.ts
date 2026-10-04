@@ -686,10 +686,11 @@ function validateInput(input: BuildContextInput): void {
 
     if (
       candidate.candidateType === "CORRECTION_MEMORY" &&
-      candidate.causalThroughSequence === undefined
+      (candidate.causalThroughSequence === undefined ||
+        candidate.causalThroughSequence === null)
     ) {
       throw new TypeError(
-        "Correction memory must declare causalThroughSequence or null explicitly",
+        "Correction memory requires causalThroughSequence",
       );
     }
 
