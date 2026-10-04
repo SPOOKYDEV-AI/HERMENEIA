@@ -214,15 +214,19 @@ export class ContextEngine {
   build(input: BuildContextInput): ContextBuildResult {
     validateInput(input);
 
-    const recoveryMode = deriveRecoveryMode(input.state);
     const erasureEpoch = input.state?.erasureEpoch ?? 0;
     const processedPrefixSequence =
       input.state?.processedPrefixSequence ?? 0;
     const processingGapRefs =
       normaliseGaps(
         input.state?.processingGaps ?? [],
+        processedPrefixSequence,
         input.currentSequence,
       );
+    const recoveryMode = deriveRecoveryMode(
+      input.state,
+      processingGapRefs,
+    );
 
     const eligible = input.candidates.filter((candidate) =>
       isEligible(candidate, input, erasureEpoch),
@@ -614,6 +618,18 @@ function validateInput(input: BuildContextInput): void {
         "erasureEpoch must be a non-negative integer",
       );
     }
+
+    for (const gap of input.state.processingGaps) {
+      if (
+        !Number.isInteger(gap) ||
+        gap <= input.state.processedPrefixSequence ||
+        gap >= input.currentSequence
+      ) {
+        throw new TypeError(
+          "processingGaps must be strictly after the processed prefix and before currentSequence",
+        );
+      }
+    }
   }
 
   const ids = new Set<string>();
@@ -786,9 +802,10 @@ function assertConfig(config: ContextEngineConfig): void {
 
 function deriveRecoveryMode(
   state: ConversationContextState | null,
+  processingGaps: number[],
 ): ContextRecoveryMode {
   if (!state) return "DEGRADED";
-  return state.processingGaps.length > 0
+  return processingGaps.length > 0
     ? "PARTIAL"
     : "FAST";
 }
@@ -941,13 +958,14 @@ function reorderPayload(
 
 function normaliseGaps(
   gaps: number[],
+  processedPrefixSequence: number,
   currentSequence: number,
 ): number[] {
   return unique(
     gaps.filter(
       (value) =>
         Number.isInteger(value) &&
-        value > 0 &&
+        value > processedPrefixSequence &&
         value < currentSequence,
     ),
   ).sort((left, right) => left - right);
