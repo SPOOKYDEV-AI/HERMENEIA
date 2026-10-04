@@ -172,16 +172,13 @@ function matchPath(pathname, regex) {
 }
 
 export function createHermeneiaHttpServer({
-  core,
+  core = null,
   authenticate,
   sendService = core,
   commandService = core,
   mutationService = core,
   deliveryService = null,
 }) {
-  if (!core) {
-    throw new TypeError("core is required");
-  }
   if (!sendService || typeof sendService.sendMessage !== "function") {
     throw new TypeError("sendService.sendMessage is required");
   }
@@ -209,6 +206,20 @@ export function createHermeneiaHttpServer({
   ) {
     throw new TypeError(
       "deliveryService.sync and deliveryService.acknowledge are required",
+    );
+  }
+  if (
+    deliveryService === null &&
+    (
+      !core ||
+      typeof core.getDeviceSyncPosition !== "function" ||
+      typeof core.syncDevice !== "function" ||
+      typeof core.getEnvelopeForDevice !== "function" ||
+      typeof core.acknowledgeEnvelope !== "function"
+    )
+  ) {
+    throw new TypeError(
+      "deliveryService is required when no in-memory delivery core is provided",
     );
   }
   if (typeof authenticate !== "function") {
