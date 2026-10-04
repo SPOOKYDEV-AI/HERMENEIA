@@ -1243,6 +1243,20 @@ export class PersistentMessagingService<Tx> {
 
       const previousRevision = message.currentRevision;
       const newRevision = previousRevision + 1;
+
+      const nextErasureEpoch =
+        await this.deps.store.bumpConversationErasureEpoch(
+          tx,
+          actor,
+          message.conversationId,
+        );
+      if (nextErasureEpoch === undefined) {
+        throw new DomainError(
+          "NOT_AUTHORIZED",
+          "Conversation is not available to actor",
+        );
+      }
+
       previousTransientKey = {
         tenantId: actor.tenantId,
         messageId: command.message_id,
