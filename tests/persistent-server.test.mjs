@@ -110,6 +110,27 @@ test("pure persistent HTTP runtime starts without an in-memory Core", async () =
     status: "UNKNOWN",
   });
 
+  assert.equal(
+    typeof app.runtime.translationRecoveryService.resupplySource,
+    "function",
+  );
+
+  const recovery = await fetch(
+    `${base}/v1/translations/translation-1/source`,
+    {
+      method: "POST",
+      headers: {
+        authorization: "Bearer opaque-session-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        protocol_version: 1,
+      }),
+    },
+  );
+  assert.equal(recovery.status, 400);
+  assert.equal((await recovery.json()).code, "INVALID_COMMAND");
+
   const pool = FakePool.instances[0];
   assert.equal(pool.ended, false);
 
