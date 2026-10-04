@@ -64,6 +64,7 @@ export function translationWorkerRunnerConfigFromEnv(
 export function createTranslationWorkerRunner({
   worker,
   config = {},
+  onError = null,
 }) {
   if (
     !worker ||
@@ -102,9 +103,61 @@ export function createTranslationWorkerRunner({
     ),
   };
 
+  if (onError !== null && typeof onError !== "function") {
+    throw new TypeError("onError must be a function when provided");
+  }
+
   let controller = null;
   let loopPromise = null;
   let cyclePromise = null;
+  let processedTotal = 0;
+  let consecutiveErrors = 0;
+  let lastCycleAt = null;
+  let lastSuccessAt = null;
+  let lastErrorAt = null;
+  let lastErrorName = null;
+
+  function timestamp() {
+    return new Date().toISOString();
+  }
+
+  async function notifyError(error) {
+    lastCycleAt = timestamp();
+    lastErrorAt = lastCycleAt;
+    lastErrorName =
+      error instanceof Error
+        ? error.name || "Error"
+        : "UnknownError";
+    consecutiveErrors += 1;
+
+    if (onError) {
+      try {
+        await onError(error, status());
+      } catch {
+        // Observability must never break the worker loop.
+      }
+    }
+  }
+
+  function recordSuccess(cycle) {
+    lastCycleAt = timestamp();
+    lastSuccessAt = lastCycleAt;
+    lastErrorName = null;
+    consecutiveErrors = 0;
+    processedTotal += cycle.processed;
+  }
+
+  function status() {
+    return {
+      running: Boolean(loopPromise),
+      processedTotal,
+      consecutiveErrors,
+      lastCycleAt,
+      lastSuccessAt,
+      lastErrorAt,
+      lastErrorName,
+    };
+  }
 
   async function runCycle() {
     if (cyclePromise) {
@@ -142,7 +195,12 @@ export function createTranslationWorkerRunner({
     })();
 
     try {
-      return await cyclePromise;
+      const cycle = await cyclePromise;
+      recordSuccess(cycle);
+      return cycle;
+    } catch (error) {
+      await notifyError(error);
+      throw error;
     } finally {
       cyclePromise = null;
     }
@@ -208,6 +266,8 @@ export function createTranslationWorkerRunner({
       controller?.abort();
       await loopPromise;
     },
+
+    status,
 
     get running() {
       return Boolean(loopPromise);
