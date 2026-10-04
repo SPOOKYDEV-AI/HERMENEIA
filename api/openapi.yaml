@@ -223,6 +223,10 @@ paths:
       responses:
         '202':
           description: Exact source revision accepted for retry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslationRecoveryResult'
         '409':
           $ref: '#/components/responses/Conflict'
         '403':
@@ -235,7 +239,11 @@ paths:
         - $ref: '#/components/parameters/TranslationId'
       responses:
         '202':
-          description: Retry admitted.
+          description: Retry admitted or translation already terminal/current.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslationRecoveryResult'
         '409':
           $ref: '#/components/responses/Conflict'
         '429':
@@ -598,8 +606,22 @@ components:
           type: string
           minLength: 16
           maxLength: 256
+          description: Opaque server-issued source fingerprint reference echoed from translation.source_required. Clients do not compute it.
         source:
           $ref: '#/components/schemas/SourceContent'
+    TranslationRecoveryResult:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, translation_id, status]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        translation_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [PENDING, SOURCE_REQUIRED, READY, FAILED, SUPERSEDED]
     LanguagePreferenceRequest:
       type: object
       additionalProperties: false
