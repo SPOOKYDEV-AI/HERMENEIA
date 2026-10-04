@@ -405,7 +405,13 @@ test("invalid ACK timestamps and batch sizes are rejected before persistence", a
 
 
 test("sync normalizes translation.source_required control event without an envelope", async () => {
-  const store = new FakeDeliveryStore();
+  const store = new FakeDeliveryStore({
+    state: {
+      inboxEpoch: 1,
+      nextOffset: 2,
+      lastAckedOffset: 0,
+    },
+  });
   store.events.push({
     inboxEpoch: 1,
     offset: 1,
