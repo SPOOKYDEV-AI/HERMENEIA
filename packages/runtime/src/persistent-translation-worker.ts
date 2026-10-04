@@ -84,6 +84,17 @@ export function createPostgresTranslationWorker(
         translationId,
       ),
 
+    listRecipientControlDevices: (
+      tx: SqlExecutor,
+      input: Parameters<
+        PostgresTranslationRepository["listRecipientControlDevices"]
+      >[1],
+    ) =>
+      deps.translationRepository.listRecipientControlDevices(
+        tx,
+        input,
+      ),
+
     listRecipientDevicesForPublish: (
       tx: SqlExecutor,
       input: Parameters<
