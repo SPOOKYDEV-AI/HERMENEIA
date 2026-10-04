@@ -1168,7 +1168,25 @@ export class PostgresMessagingRepository {
     },
   ): Promise<void> {
     const result = await tx.query(
-      `INSERT INTO delivery_envelopes(
+      `WITH eligible_target AS (
+         SELECT d.device_id
+           FROM devices d
+           JOIN conversation_members cm
+             ON cm.tenant_id = $1
+            AND cm.conversation_id = $3
+            AND cm.user_id = $6
+            AND cm.status = 'ACTIVE'
+           JOIN tenant_memberships tm
+             ON tm.tenant_id = $1
+            AND tm.user_id = $6
+            AND tm.status = 'ACTIVE'
+          WHERE d.device_id = $7
+            AND d.user_id = $6
+            AND d.status = 'ACTIVE'
+            AND d.credential_version = $8
+          FOR UPDATE OF d, cm, tm
+       )
+       INSERT INTO delivery_envelopes(
          tenant_id, envelope_id, conversation_id, message_id,
          source_revision, recipient_user_id, recipient_device_id,
          recipient_credential_version, rendition_type,
@@ -1177,20 +1195,7 @@ export class PostgresMessagingRepository {
        SELECT
          $1,$2,$3,$4,$5,$6,$7,$8,'ORIGINAL',
          decode($9,'base64'),'PENDING',$10,$11
-         FROM devices d
-         JOIN conversation_members cm
-           ON cm.tenant_id = $1
-          AND cm.conversation_id = $3
-          AND cm.user_id = $6
-          AND cm.status = 'ACTIVE'
-         JOIN tenant_memberships tm
-           ON tm.tenant_id = $1
-          AND tm.user_id = $6
-          AND tm.status = 'ACTIVE'
-        WHERE d.device_id = $7
-          AND d.user_id = $6
-          AND d.status = 'ACTIVE'
-          AND d.credential_version = $8`,
+         FROM eligible_target`,
       [
         input.tenantId,
         input.envelopeId,
@@ -1231,7 +1236,16 @@ export class PostgresMessagingRepository {
     },
   ): Promise<void> {
     const result = await tx.query(
-      `INSERT INTO delivery_envelopes(
+      `WITH eligible_device AS (
+         SELECT d.device_id
+           FROM devices d
+          WHERE d.device_id = $8
+            AND d.user_id = $7
+            AND d.status = 'ACTIVE'
+            AND d.credential_version = $9
+          FOR UPDATE OF d
+       )
+       INSERT INTO delivery_envelopes(
          tenant_id, envelope_id, conversation_id, message_id,
          source_revision, translation_id,
          recipient_user_id, recipient_device_id,
@@ -1241,11 +1255,7 @@ export class PostgresMessagingRepository {
        SELECT
          $1,$2,$3,$4,$5,$6,$7,$8,$9,'TRANSLATION',
          decode($10,'base64'),'PENDING',$11,$12
-         FROM devices d
-        WHERE d.device_id = $8
-          AND d.user_id = $7
-          AND d.status = 'ACTIVE'
-          AND d.credential_version = $9`,
+         FROM eligible_device`,
       [
         input.tenantId,
         input.envelopeId,
