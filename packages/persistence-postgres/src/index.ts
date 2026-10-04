@@ -55,7 +55,11 @@ export interface InboxEventRow {
   inboxEpoch: number;
   offset: number;
   eventId: UUID;
-  eventType: "message.available" | "message.edited" | "message.deleted";
+  eventType:
+    | "message.available"
+    | "message.edited"
+    | "message.deleted"
+    | "translation.source_required";
   tenantId: UUID;
   conversationId: UUID;
   messageId: UUID;
@@ -64,6 +68,8 @@ export interface InboxEventRow {
   protectedPayload: string | null;
   renditionType: "ORIGINAL" | "TRANSLATION" | null;
   expiresAt: string | null;
+  translationId: UUID | null;
+  sourceRef: string | null;
   createdAt: string;
 }
 
@@ -868,12 +874,18 @@ export class PostgresMessagingRepository {
       inboxEpoch: number;
       offset: number;
       eventId: UUID;
-      eventType: "message.available" | "message.edited" | "message.deleted";
+      eventType:
+        | "message.available"
+        | "message.edited"
+        | "message.deleted"
+        | "translation.source_required";
       tenantId: UUID;
       conversationId: UUID;
       messageId: UUID;
       envelopeId?: UUID | null;
       sourceRevision: number;
+      translationId?: UUID | null;
+      sourceRef?: string | null;
       createdAt: string;
     },
   ): Promise<void> {
@@ -884,7 +896,14 @@ export class PostgresMessagingRepository {
          metadata, created_at
        ) VALUES (
          $1,$2,$3,$4,$5,$6,$7,$8,$9,
-         jsonb_build_object('source_revision',$10),$11
+         jsonb_strip_nulls(
+           jsonb_build_object(
+             'source_revision',$10,
+             'translation_id',$11,
+             'source_ref',$12
+           )
+         ),
+         $13
        )`,
       [
         input.deviceId,
@@ -897,6 +916,8 @@ export class PostgresMessagingRepository {
         input.messageId,
         input.envelopeId ?? null,
         input.sourceRevision,
+        input.translationId ?? null,
+        input.sourceRef ?? null,
         input.createdAt,
       ],
     );
@@ -1038,6 +1059,8 @@ export class PostgresMessagingRepository {
       protected_payload_b64: string | null;
       rendition_type: "ORIGINAL" | "TRANSLATION" | null;
       expires_at: string | null;
+      translation_id: UUID | null;
+      source_ref: string | null;
       created_at: string;
     }>(
       `SELECT die.inbox_epoch,
@@ -1067,6 +1090,8 @@ export class PostgresMessagingRepository {
                 THEN de.expires_at::text
                 ELSE NULL
               END AS expires_at,
+              die.metadata->>'translation_id' AS translation_id,
+              die.metadata->>'source_ref' AS source_ref,
               die.created_at::text AS created_at
          FROM device_inbox_events die
          LEFT JOIN delivery_envelopes de
@@ -1101,6 +1126,8 @@ export class PostgresMessagingRepository {
       protectedPayload: row.protected_payload_b64,
       renditionType: row.rendition_type,
       expiresAt: row.expires_at,
+      translationId: row.translation_id,
+      sourceRef: row.source_ref,
       createdAt: row.created_at,
     }));
   }
