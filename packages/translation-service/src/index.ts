@@ -308,9 +308,21 @@ export class TranslationExecutionService<Tx> {
     const now = this.clock.now();
     assertTimestamp(now, "Clock");
 
+    const terminalStatus: Exclude<
+      ProviderExecutionStatus,
+      "STARTED"
+    > = input.status;
+
     const completed = await this.store.withTransaction((tx) =>
       this.store.completeProviderExecution(tx, {
-        ...input,
+        tenantId: input.tenantId,
+        attemptId: input.attemptId,
+        status: terminalStatus,
+        inputTokens: input.inputTokens,
+        outputTokens: input.outputTokens,
+        billedCostMicrounits: input.billedCostMicrounits,
+        latencyMs: input.latencyMs,
+        errorClass: input.errorClass,
         completedAt: now,
       }),
     );
