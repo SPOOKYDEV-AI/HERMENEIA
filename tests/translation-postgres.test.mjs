@@ -246,6 +246,7 @@ test("fanout plan resolves locale override and membership version without source
       rows: [{
         conversation_id: "conversation-1",
         declared_source_language: "fr-FR",
+        source_hash: "hmac-sha256:k1:" + "a".repeat(64),
       }],
       rowCount: 1,
     },
@@ -273,6 +274,7 @@ test("fanout plan resolves locale override and membership version without source
   assert.deepEqual(plan, {
     conversationId: "conversation-1",
     sourceLanguageTag: "fr-FR",
+    sourceHash: "hmac-sha256:k1:" + "a".repeat(64),
     targets: [{
       recipientUserId: "user-b",
       targetLanguageTag: "es-CO",
@@ -281,6 +283,8 @@ test("fanout plan resolves locale override and membership version without source
   });
 
   assert.match(connection.queries[1].text, /mm\.current_revision = \$3/);
+  assert.match(connection.queries[1].text, /mr\.source_hash/);
+  assert.match(connection.queries[1].text, /mr\.source_hash IS NOT NULL/);
   assert.match(connection.queries[2].text, /target_locale_override/);
   assert.match(connection.queries[2].text, /membership_version/);
   assert.doesNotMatch(
