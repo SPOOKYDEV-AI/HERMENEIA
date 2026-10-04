@@ -418,6 +418,7 @@ function fixture({
   },
   maxProviderAttempts = 3,
   onProviderTranslate = null,
+  contextBridge = undefined,
 } = {}) {
   const store = new FakeWorkerStore();
   store.seedRootJob();
@@ -441,12 +442,14 @@ function fixture({
   });
 
   let providerCalls = 0;
+  const providerInputs = [];
   const provider = {
     providerId: "provider-a",
     modelId: "model-a",
     providerRegion: "eu-west",
     async translate(input) {
       providerCalls += 1;
+      providerInputs.push(clone(input));
       assert.equal(input.targetLanguageTag, "es-CO");
       if (typeof onProviderTranslate === "function") {
         await onProviderTranslate({ store, input });
@@ -469,6 +472,7 @@ function fixture({
         ).toString("base64");
       },
     },
+    contextBridge,
     ids: idFactory,
     clock: time,
     strategyVersion: "t0-v1",
@@ -486,6 +490,7 @@ function fixture({
     providerCalls() {
       return providerCalls;
     },
+    providerInputs,
     worker,
   };
 }
@@ -502,6 +507,127 @@ async function fanoutOne(f) {
 function currentExecution(f) {
   return [...f.store.state.executions.values()][0];
 }
+
+test("context-aware fanout binds snapshot and provider receives resolved transient context", async () => {
+  const bridgeCalls = [];
+  const f = fixture({
+    contextBridge: {
+      async prepare(input) {
+        bridgeCalls.push({ type: "prepare", input: clone(input) });
+        return {
+          contextSnapshotId: "context-snapshot-1",
+          strategyVersion: "adaptive-context-v1",
+        };
+      },
+      async resolve(input) {
+        bridgeCalls.push({ type: "resolve", input: clone(input) });
+        return {
+          status: "READY",
+          selected: [{
+            candidateId: "recent-1",
+            candidateType: "IMMEDIATE_MESSAGE",
+            content: "Previous private context",
+            selectionReason: "IMMEDIATE_CONTEXT",
+          }],
+        };
+      },
+    },
+  });
+
+  await fanoutOne(f);
+  const execution = currentExecution(f);
+  assert.equal(execution.contextSnapshotId, "context-snapshot-1");
+  assert.equal(execution.strategyVersion, "adaptive-context-v1");
+
+  f.transientSources.put({
+    tenantId: "tenant-1",
+    messageId: "message-1",
+    sourceRevision: 1,
+    sourceHash: "source-hash-1",
+    source: { text: "Bonjour" },
+    createdAt: f.time.now(),
+    expiresAt: "2026-10-04T12:05:00.000Z",
+  });
+
+  assert.equal(
+    await f.worker.runExecuteOnce(),
+    "EXECUTION_DONE",
+  );
+
+  assert.equal(f.providerCalls(), 1);
+  assert.equal(
+    f.providerInputs[0].contextSnapshotId,
+    "context-snapshot-1",
+  );
+  assert.deepEqual(f.providerInputs[0].contextItems, [{
+    candidateId: "recent-1",
+    candidateType: "IMMEDIATE_MESSAGE",
+    content: "Previous private context",
+    selectionReason: "IMMEDIATE_CONTEXT",
+  }]);
+  assert.deepEqual(
+    bridgeCalls.map((call) => call.type),
+    ["prepare", "resolve"],
+  );
+});
+
+test("expired contextual payload supersedes T2 execution and replans T0 without provider call", async () => {
+  const f = fixture({
+    contextBridge: {
+      async prepare() {
+        return {
+          contextSnapshotId: "context-snapshot-lost",
+          strategyVersion: "adaptive-context-v1",
+        };
+      },
+      async resolve() {
+        return {
+          status: "PAYLOAD_UNAVAILABLE",
+        };
+      },
+    },
+  });
+
+  const originalChild = await fanoutOne(f);
+  const originalExecution = currentExecution(f);
+
+  f.transientSources.put({
+    tenantId: "tenant-1",
+    messageId: "message-1",
+    sourceRevision: 1,
+    sourceHash: "source-hash-1",
+    source: { text: "Bonjour" },
+    createdAt: f.time.now(),
+    expiresAt: "2026-10-04T12:05:00.000Z",
+  });
+
+  assert.equal(
+    await f.worker.runExecuteOnce(),
+    "CONTEXT_FALLBACK",
+  );
+
+  assert.equal(f.providerCalls(), 0);
+  assert.equal(originalExecution.status, "SUPERSEDED");
+  assert.equal(originalChild.status, "DONE");
+
+  const executions = [...f.store.state.executions.values()];
+  assert.equal(executions.length, 2);
+  const fallback = executions.find(
+    (item) => item.translationId !== originalExecution.translationId,
+  );
+  assert.ok(fallback);
+  assert.equal(fallback.contextSnapshotId, null);
+  assert.equal(fallback.strategyVersion, "t0-v1");
+  assert.equal(fallback.status, "PENDING");
+
+  const fallbackJob = f.store.state.jobs.find(
+    (job) =>
+      job.jobType === "translation.execute" &&
+      job.businessKey === fallback.translationId,
+  );
+  assert.ok(fallbackJob);
+  assert.equal(fallbackJob.status, "AVAILABLE");
+});
 
 test("fanout creates one child execution per target and skips exact same-language target", async () => {
   const f = fixture();
