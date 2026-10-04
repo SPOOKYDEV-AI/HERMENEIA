@@ -90,6 +90,13 @@ jobs:
             npm install --ignore-scripts --no-audit --no-fund
           fi
 
+      - name: Assert committed npm lockfile is stable
+        if: steps.lock_state.outputs.missing == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- package-lock.json
+
       - name: Generate ephemeral source fingerprint key
         shell: bash
         run: |
