@@ -63,7 +63,7 @@ A new Send performs, in one PostgreSQL transaction:
 8. persist MessageMetadata;
 9. persist immutable source revision metadata and opaque source fingerprint;
 10. persist one protected ORIGINAL envelope per target device;
-11. allocate one device inbox offset and event per envelope;
+11. allocate one tenant-local device inbox offset and event per envelope;
 12. persist a plaintext-free translation outbox job;
 13. persist the exact `ACCEPTED` result in the command receipt;
 14. COMMIT;
@@ -230,7 +230,11 @@ Delete:
 - emits content-free `message.deleted` control events to active devices with retained ORIGINAL-envelope exposure metadata, without requiring current conversation membership or delivery-key material;
 - is not blocked merely because a recipient currently has no active encryption-capable device.
 
-Sync state uses a globally monotonic device inbox offset but a **tenant + device** purge/replay watermark. This prevents a multi-tenant session from using another tenant's ACK state. ACK watermark advancement is restricted to the contiguous terminal envelope prefix, so an out-of-order ACK cannot skip an earlier PENDING envelope.
+Sync state is fully scoped by **tenant + device**. Each tenant/device pair owns its own inbox epoch, next offset and ACK payload-purge watermark.
+
+This prevents both state corruption and cross-tenant activity leakage through cursor gaps or offset growth. The same physical device may legitimately use the same numeric offset in two tenants.
+
+ACK watermark advancement is restricted to the contiguous terminal envelope prefix, so an out-of-order ACK cannot skip an earlier PENDING envelope. The ACK watermark is not a generic replay floor: content-free control events such as `message.deleted` remain replayable, while ACKED/REVOKED content-envelope events can be skipped safely because their payloads are already terminal.
 
 ## 11. Translation independence
 
