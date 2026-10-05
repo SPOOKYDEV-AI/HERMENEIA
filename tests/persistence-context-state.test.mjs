@@ -147,6 +147,7 @@ test("PostgreSQL ConversationState load validates durable JSON and maps operatio
     processedPrefixOperationSequence: 7,
     processingGapOperationSequences: [8],
     erasureEpoch: 2,
+    policyVersion: 1,
     activeEpisodeId: "episode-1",
     activeEpisodeVersion: 2,
     terminologyClaimRefs: ["claim:term-1"],
