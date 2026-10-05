@@ -218,6 +218,34 @@ paths:
           $ref: '#/components/responses/Conflict'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /v1/conversations/{conversation_id}/repairs/{repair_event_id}/review:
+    post:
+      tags: [Translation]
+      operationId: reviewPendingRepair
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+        - name: repair_event_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorrectionReviewRequest'
+      responses:
+        '202':
+          description: Pending repair reviewed. Approval promotes only a supported structured conversation correction.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CorrectionReviewResult'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/conversations/{conversation_id}/corrections/{claim_id}/revoke:
     post:
       tags: [Translation]
@@ -694,6 +722,52 @@ components:
             - type: string
               enum: [CONVERSATION, TENANT]
             - type: 'null'
+        claim_id:
+          anyOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        claim_version:
+          anyOf:
+            - type: integer
+              minimum: 1
+            - type: 'null'
+    CorrectionReviewRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - command_id
+        - decision
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        decision:
+          type: string
+          enum: [APPROVE, REJECT]
+    CorrectionReviewResult:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - repair_event_id
+        - review_event_id
+        - status
+        - claim_id
+        - claim_version
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        repair_event_id:
+          $ref: '#/components/schemas/Uuid'
+        review_event_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [APPLIED, REJECTED]
         claim_id:
           anyOf:
             - $ref: '#/components/schemas/Uuid'
