@@ -11,6 +11,8 @@ import {
   replaceConfirmedCorrectionClaim,
   rebaseContextStateAuthority,
   unlinkConfirmedCorrectionClaim,
+  setConversationSpeakerStyle,
+  clearConversationSpeakerStyle,
   decideDurableCorrection,
   processingGapRefs,
   registerContextOperation,
@@ -397,7 +399,15 @@ test("authority rebase is monotone and clears derived semantic material", () => 
   value.correctionClaimRefs = ["claim:correction-old"];
   value.entityHandles = ["entity:old"];
   value.unresolvedReferenceHandles = ["entity:unresolved-old"];
-  value.styleState = { formality: "HIGH", confidence: 0.8 };
+  value.styleState = {
+    profiles: [{
+      speakerUserId: "speaker-a",
+      preferredRegister: "FORMAL",
+      sourceRepairEventId: "repair-style-1",
+      confidence: 1,
+      updatedAt: "2026-10-04T18:10:00.000Z",
+    }],
+  };
   value.pragmaticState = { stance: "FORMAL", confidence: 0.8 };
 
   const rebased = rebaseContextStateAuthority(value, {
@@ -613,4 +623,101 @@ test("correction unlink removes a revoked ref and is idempotent when already abs
   );
   assert.deepEqual(replay, revoked);
   assert.notEqual(replay, revoked);
+});
+
+
+test("speaker style profile upserts by speaker and DEFAULT-style clear removes only that speaker", () => {
+  let state = initial();
+
+  state = setConversationSpeakerStyle(
+    state,
+    {
+      speakerUserId: "speaker-a",
+      preferredRegister: "FORMAL",
+      sourceRepairEventId: "repair-style-a1",
+      now: "2026-10-04T18:30:00.000Z",
+    },
+  );
+  state = setConversationSpeakerStyle(
+    state,
+    {
+      speakerUserId: "speaker-b",
+      preferredRegister: "INFORMAL",
+      sourceRepairEventId: "repair-style-b1",
+      now: "2026-10-04T18:31:00.000Z",
+    },
+  );
+  state = setConversationSpeakerStyle(
+    state,
+    {
+      speakerUserId: "speaker-a",
+      preferredRegister: "NEUTRAL",
+      sourceRepairEventId: "repair-style-a2",
+      now: "2026-10-04T18:32:00.000Z",
+    },
+  );
+
+  assert.deepEqual(
+    state.styleState.profiles.map(
+      (profile) => ({
+        speaker: profile.speakerUserId,
+        register: profile.preferredRegister,
+        repair: profile.sourceRepairEventId,
+      }),
+    ),
+    [
+      {
+        speaker: "speaker-a",
+        register: "NEUTRAL",
+        repair: "repair-style-a2",
+      },
+      {
+        speaker: "speaker-b",
+        register: "INFORMAL",
+        repair: "repair-style-b1",
+      },
+    ],
+  );
+
+  const cleared = clearConversationSpeakerStyle(
+    state,
+    {
+      speakerUserId: "speaker-a",
+      now: "2026-10-04T18:33:00.000Z",
+    },
+  );
+
+  assert.deepEqual(
+    cleared.styleState.profiles.map(
+      (profile) => profile.speakerUserId,
+    ),
+    ["speaker-b"],
+  );
+});
+
+test("speaker style validation fails closed on duplicate speaker profiles", () => {
+  const state = initial();
+  state.styleState = {
+    profiles: [
+      {
+        speakerUserId: "speaker-a",
+        preferredRegister: "FORMAL",
+        sourceRepairEventId: "repair-style-1",
+        confidence: 1,
+        updatedAt: "2026-10-04T18:30:00.000Z",
+      },
+      {
+        speakerUserId: "speaker-a",
+        preferredRegister: "INFORMAL",
+        sourceRepairEventId: "repair-style-2",
+        confidence: 1,
+        updatedAt: "2026-10-04T18:31:00.000Z",
+      },
+    ],
+  };
+
+  assert.throws(
+    () => cloneValidatedContextState(state),
+    /duplicate speakers/,
+  );
 });
