@@ -243,9 +243,141 @@ export function createPostgresTranslationContextRuntime(
                   }]
                 : [];
 
+            const episodeCandidates = [];
+            const episodeStart =
+              state.activeEpisodeStartOperationSequence;
+            const episodeLast =
+              state.activeEpisodeLastOperationSequence;
+            const episodeStartedAt =
+              state.activeEpisodeStartedAt;
+            const episodeLastActivityAt =
+              state.activeEpisodeLastActivityAt;
+            const episodeConfidence =
+              state.activeEpisodeContinuityConfidence;
+
+            if (
+              state.activeEpisodeId &&
+              state.activeEpisodeVersion &&
+              episodeStart !== undefined &&
+              episodeStart !== null &&
+              episodeLast !== undefined &&
+              episodeLast !== null &&
+              episodeStartedAt &&
+              episodeLastActivityAt &&
+              episodeConfidence !== undefined &&
+              episodeConfidence !== null &&
+              episodeLast <
+                frame.currentOperationSequence &&
+              Date.parse(episodeLastActivityAt) <
+                Date.parse(asOf)
+            ) {
+              const tailRefs = frame.recentMessages
+                .slice(3)
+                .filter(
+                  (ref) =>
+                    ref.operationSequence >=
+                      episodeStart &&
+                    ref.operationSequence <=
+                      episodeLast,
+                );
+
+              const episodeMessages = [];
+              let episodeChars = 0;
+
+              for (const ref of tailRefs) {
+                if (episodeMessages.length >= 3) {
+                  break;
+                }
+
+                let source;
+                try {
+                  source =
+                    await deps.transientSources.get({
+                      tenantId: input.tenantId,
+                      messageId: ref.messageId,
+                      sourceRevision:
+                        ref.sourceRevision,
+                    });
+                } catch {
+                  source = undefined;
+                }
+
+                const text =
+                  source?.source?.text;
+                if (
+                  typeof text !== "string" ||
+                  !text ||
+                  text.length > 768 ||
+                  episodeChars + text.length >
+                    3_000
+                ) {
+                  continue;
+                }
+
+                episodeChars += text.length;
+                episodeMessages.push({
+                  ref,
+                  text,
+                });
+              }
+
+              if (episodeMessages.length > 0) {
+                episodeMessages.reverse();
+                const content = JSON.stringify({
+                  kind:
+                    "trusted_active_episode_tail",
+                  episode_version:
+                    state.activeEpisodeVersion,
+                  continuity_confidence:
+                    episodeConfidence,
+                  messages: episodeMessages.map(
+                    (message) => ({
+                      source_text: message.text,
+                    }),
+                  ),
+                });
+
+                episodeCandidates.push({
+                  candidateId:
+                    `episode:${state.activeEpisodeId}:${state.activeEpisodeVersion}`,
+                  candidateType:
+                    "ACTIVE_EPISODE" as const,
+                  content,
+                  causalThroughOperationSequence:
+                    episodeLast,
+                  sourceRevisionRefs:
+                    episodeMessages.map(
+                      (message) =>
+                        `${message.ref.messageId}:${message.ref.sourceRevision}`,
+                    ),
+                  claimRefs: [],
+                  semanticScore: 0,
+                  temporalScore: 1,
+                  confidence:
+                    episodeConfidence,
+                  importance: 0.6,
+                  explicitReference: false,
+                  activeEpisode: true,
+                  tokenEstimate: Math.max(
+                    1,
+                    Math.ceil(
+                      content.length / 4,
+                    ),
+                  ),
+                  privacyScope:
+                    "EPISODE" as const,
+                  erasureEpoch:
+                    state.erasureEpoch,
+                  validUntil: null,
+                  correctionTrigger: null,
+                });
+              }
+            }
+
             return [
               ...claimCandidates,
               ...styleCandidates,
+              ...episodeCandidates,
             ];
           },
         }
