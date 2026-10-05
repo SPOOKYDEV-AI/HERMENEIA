@@ -4,8 +4,10 @@ import assert from "node:assert/strict";
 import {
   ContextStateConflictError,
   applyContextDerivation,
+  cloneValidatedContextState,
   createDegradedContextStateFromFloor,
   createInitialContextState,
+  rebaseContextStateAuthority,
   decideDurableCorrection,
   processingGapRefs,
   registerContextOperation,
@@ -379,6 +381,80 @@ test("restricted textual correction requires stronger confirmation before durabl
   });
 });
 
+
+test("authority rebase is monotone and clears derived semantic material", () => {
+  let value = initial();
+  value.activeEpisode = {
+    episodeId: "episode-old",
+    episodeVersion: 3,
+    continuityConfidence: 0.8,
+  };
+  value.terminologyClaimRefs = ["claim:term-old"];
+  value.lexicalClaimRefs = ["claim:lex-old"];
+  value.correctionClaimRefs = ["claim:correction-old"];
+  value.entityHandles = ["entity:old"];
+  value.unresolvedReferenceHandles = ["entity:unresolved-old"];
+  value.styleState = { formality: "HIGH", confidence: 0.8 };
+  value.pragmaticState = { stance: "FORMAL", confidence: 0.8 };
+
+  const rebased = rebaseContextStateAuthority(value, {
+    membershipEpoch: value.membershipEpoch,
+    erasureEpoch: value.erasureEpoch + 1,
+    policyVersion: value.policyVersion,
+    now: "2026-10-04T18:20:00.000Z",
+  });
+
+  assert.equal(rebased.erasureEpoch, value.erasureEpoch + 1);
+  assert.equal(rebased.stateVersion, value.stateVersion + 1);
+  assert.equal(rebased.status, "DEGRADED");
+  assert.equal(rebased.activeEpisode, undefined);
+  assert.deepEqual(rebased.terminologyClaimRefs, []);
+  assert.deepEqual(rebased.lexicalClaimRefs, []);
+  assert.deepEqual(rebased.correctionClaimRefs, []);
+  assert.deepEqual(rebased.entityHandles, []);
+  assert.deepEqual(rebased.unresolvedReferenceHandles, []);
+  assert.deepEqual(rebased.styleState, {});
+  assert.deepEqual(rebased.pragmaticState, {});
+
+  assert.equal(value.erasureEpoch, 3);
+  assert.equal(value.activeEpisode.episodeId, "episode-old");
+});
+
+test("authority rebase rejects epoch regression and exact no-op preserves version", () => {
+  const value = initial();
+
+  const unchanged = rebaseContextStateAuthority(value, {
+    membershipEpoch: value.membershipEpoch,
+    erasureEpoch: value.erasureEpoch,
+    policyVersion: value.policyVersion,
+    now: "2026-10-04T18:20:00.000Z",
+  });
+  assert.deepEqual(unchanged, value);
+  assert.notEqual(unchanged, value);
+
+  assert.throws(
+    () =>
+      rebaseContextStateAuthority(value, {
+        membershipEpoch: value.membershipEpoch,
+        erasureEpoch: value.erasureEpoch - 1,
+        policyVersion: value.policyVersion,
+        now: "2026-10-04T18:20:00.000Z",
+      }),
+    (error) =>
+      error instanceof ContextStateConflictError &&
+      error.code === "EPOCH_MISMATCH",
+  );
+});
+
+test("durable state validation returns an isolated clone", () => {
+  const value = initial();
+  const clone = cloneValidatedContextState(value);
+
+  assert.deepEqual(clone, value);
+  assert.notEqual(clone, value);
+  clone.entityHandles.push("entity:new");
+  assert.deepEqual(value.entityHandles, []);
+});
 
 test("cold recovery starts at an explicit causal floor and stays degraded", () => {
   let state = createDegradedContextStateFromFloor({
