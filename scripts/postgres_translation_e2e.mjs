@@ -513,6 +513,10 @@ async function cleanup() {
         tenant,
       );
       await db.query(
+        "DELETE FROM recovery_checkpoints WHERE tenant_id = $1",
+        tenant,
+      );
+      await db.query(
         "DELETE FROM conversation_context_states WHERE tenant_id = $1",
         tenant,
       );
