@@ -14,6 +14,7 @@ import {
   setConversationSpeakerStyle,
   clearConversationSpeakerStyle,
   decideDurableCorrection,
+  deriveTemporalEpisodePatch,
   processingGapRefs,
   registerContextOperation,
 } from "../.build/packages/context-state/src/index.js";
@@ -719,5 +720,166 @@ test("speaker style validation fails closed on duplicate speaker profiles", () =
   assert.throws(
     () => cloneValidatedContextState(state),
     /duplicate speakers/,
+  );
+});
+
+
+test("temporal episode derivation starts continues and rolls after the bounded continuity gap", () => {
+  let state = initial();
+
+  const first = operation(11, "episode-op-11", {
+    registeredAt:
+      "2026-10-04T18:00:00.000Z",
+  });
+  const firstPatch =
+    deriveTemporalEpisodePatch(
+      state,
+      first,
+    );
+  assert.deepEqual(
+    firstPatch?.activeEpisode,
+    {
+      episodeId: "episode-op-11",
+      episodeVersion: 1,
+      continuityConfidence: 1,
+      startOperationSequence: 11,
+      lastOperationSequence: 11,
+      startedAt:
+        "2026-10-04T18:00:00.000Z",
+      lastActivityAt:
+        "2026-10-04T18:00:00.000Z",
+    },
+  );
+
+  state = registerContextOperation(
+    state,
+    first,
+  );
+  state = applyContextDerivation(
+    state,
+    result(state, 11, first.operationId, {
+      patch: firstPatch,
+      completedAt:
+        "2026-10-04T18:00:01.000Z",
+    }),
+  );
+
+  const second = operation(
+    12,
+    "episode-op-12",
+    {
+      registeredAt:
+        "2026-10-04T18:05:00.000Z",
+    },
+  );
+  const secondPatch =
+    deriveTemporalEpisodePatch(
+      state,
+      second,
+    );
+  assert.equal(
+    secondPatch.activeEpisode.episodeId,
+    "episode-op-11",
+  );
+  assert.equal(
+    secondPatch.activeEpisode.episodeVersion,
+    2,
+  );
+  assert.equal(
+    secondPatch.activeEpisode.startOperationSequence,
+    11,
+  );
+  assert.equal(
+    secondPatch.activeEpisode.lastOperationSequence,
+    12,
+  );
+  assert.ok(
+    secondPatch.activeEpisode.continuityConfidence >
+      0.6,
+  );
+
+  state = registerContextOperation(
+    state,
+    second,
+  );
+  state = applyContextDerivation(
+    state,
+    result(state, 12, second.operationId, {
+      patch: secondPatch,
+      completedAt:
+        "2026-10-04T18:05:01.000Z",
+    }),
+  );
+
+  const later = operation(
+    13,
+    "episode-op-13",
+    {
+      registeredAt:
+        "2026-10-04T18:26:00.000Z",
+    },
+  );
+  const laterPatch =
+    deriveTemporalEpisodePatch(
+      state,
+      later,
+    );
+
+  assert.deepEqual(
+    laterPatch.activeEpisode,
+    {
+      episodeId: "episode-op-13",
+      episodeVersion: 1,
+      continuityConfidence: 1,
+      startOperationSequence: 13,
+      lastOperationSequence: 13,
+      startedAt:
+        "2026-10-04T18:26:00.000Z",
+      lastActivityAt:
+        "2026-10-04T18:26:00.000Z",
+    },
+  );
+});
+
+test("temporal episode derivation ignores non-created operations and fails closed on clock regression", () => {
+  let state = initial();
+  state.activeEpisode = {
+    episodeId: "episode-existing",
+    episodeVersion: 4,
+    continuityConfidence: 0.8,
+    startOperationSequence: 4,
+    lastOperationSequence: 10,
+    startedAt:
+      "2026-10-04T17:50:00.000Z",
+    lastActivityAt:
+      "2026-10-04T18:00:00.000Z",
+  };
+
+  assert.equal(
+    deriveTemporalEpisodePatch(
+      state,
+      operation(11, "edit-op", {
+        kind: "MESSAGE_EDITED",
+      }),
+    ),
+    undefined,
+  );
+
+  const regressed =
+    deriveTemporalEpisodePatch(
+      state,
+      operation(11, "clock-regressed", {
+        registeredAt:
+          "2026-10-04T17:59:59.000Z",
+      }),
+    );
+
+  assert.equal(
+    regressed.activeEpisode.episodeId,
+    "clock-regressed",
+  );
+  assert.equal(
+    regressed.activeEpisode.continuityConfidence,
+    0.5,
   );
 });
