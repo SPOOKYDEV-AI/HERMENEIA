@@ -322,7 +322,7 @@ Qualified by the `Persistent Core Qualification` workflow:
 Still required before a production claim:
 
 - complete independent cryptographic review plus browser/native interoperability and private-key storage validation;
-- validate the full translation provider/publication path against a real provider adapter;
-- run the persistent process under its actual deployment target and verify signal handling, crash/failure recovery and operational observability.
+- run the first-party OpenAI Responses adapter against controlled live credentials/model access and verify the full provider/publication path;
+- run the persistent process under its actual deployment target and verify crash/failure recovery and operational observability. Linux process startup, readiness and graceful SIGTERM shutdown are already exercised in CI.
 
 Do not silently fall back to the in-memory Core in a production profile.

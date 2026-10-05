@@ -98,7 +98,7 @@ The Context Engine is the main research and engineering differentiator. Messagin
 
 ## Repository status
 
-**Persistent Core V1 execution is active: Send, command recovery, edit/delete, tenant-scoped sync/ACK, session/device trust, translation outbox/recovery/worker orchestration and a fail-closed persistent API process are implemented behind PostgreSQL ports. Live PostgreSQL migration/runtime qualification and a reproducible npm dependency lock are now enforced in CI. The built-in RFC 9180 HPKE P-256 envelope path also rejects invalid public points before device persistence. Independent cryptographic/platform review, a real translation-provider adapter and target-runtime failure recovery remain open production gates.**
+**Persistent Core V1 execution is active: Send, command recovery, edit/delete, tenant-scoped sync/ACK, session/device trust, translation outbox/recovery/worker orchestration and a fail-closed persistent API process are implemented behind PostgreSQL ports. Live PostgreSQL migration/runtime qualification and a reproducible npm dependency lock are now enforced in CI. The built-in RFC 9180 HPKE P-256 envelope path also rejects invalid public points before device persistence. Independent cryptographic/platform review, live external-provider qualification with controlled credentials, and target-deployment failure recovery remain open production gates.**
 
 The repository now contains executable messaging and translation control-plane code as well as the architecture/research contracts. The next major implementation focus is the context engine and its measurable T0/T1/T2 behaviour, after the remaining persistence/security production gates are closed.
 
@@ -126,6 +126,7 @@ The repository now contains executable messaging and translation control-plane c
 - [PostgreSQL Core Schema — V1](docs/engineering/postgres-core-schema-v1.md)
 - [PostgreSQL Persistence Ports — V1](docs/engineering/postgres-persistence-ports-v1.md)
 - [Persistent Messaging Execution — V1](docs/architecture/persistent-send-v1.md)
+- [OpenAI Translation Provider — V1](docs/engineering/openai-translation-provider-v1.md)
 - [Privacy and data minimisation](docs/security/privacy-data-minimisation.md)
 - [Ephemeral messages and corrective memory](docs/architecture/ephemeral-message-memory-v1.md)
 - [Sanitised recovery checkpoints](docs/architecture/recovery-checkpoint-v1.md)
