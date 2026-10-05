@@ -57,6 +57,10 @@ const EPISODE_SOURCE_TEXTS = [
   "On valide les derniers détails.",
   "Tu peux résumer ce qu'on vient de décider ?",
 ];
+const SEMANTIC_GAP_SOURCE_TEXT =
+  "La démo client garde la traduction instantanée et le contexte de discussion.";
+const SEMANTIC_FOLLOWUP_SOURCE_TEXT =
+  "Oui, résume les choix de la démo client.";
 const FEEDBACK_NOTE =
   "private feedback detail that must not persist";
 const TRANSLATED_TEXT = "Hola mundo 👋";
@@ -99,6 +103,10 @@ const ids = {
     Array.from({ length: 7 }, () => randomUUID()),
   episodeClientMessageIds:
     Array.from({ length: 7 }, () => randomUUID()),
+  semanticGapCommandId: randomUUID(),
+  semanticGapClientMessageId: randomUUID(),
+  semanticFollowupCommandId: randomUUID(),
+  semanticFollowupClientMessageId: randomUUID(),
   stalePolicyCommandId: randomUUID(),
   stalePolicyClientMessageId: randomUUID(),
   staleContextCommandId: randomUUID(),
@@ -112,6 +120,7 @@ const codec = createHpkeP256EnvelopeCodec();
 
 let providerCalls = 0;
 let episodeProviderObservation = null;
+let semanticEpisodeProviderObservation = null;
 const translationProvider = {
   providerId: "ci-deterministic",
   modelId: "ci-translation-v1",
@@ -273,6 +282,31 @@ const translationProvider = {
           input.contextItems,
         ),
       };
+    } else if (providerCalls === 14) {
+      assert.equal(
+        input.source.text,
+        SEMANTIC_GAP_SOURCE_TEXT,
+      );
+      assert.equal(
+        input.contextItems.some(
+          (item) =>
+            item.candidateType ===
+              "ACTIVE_EPISODE",
+        ),
+        false,
+        "stale temporal episode must not leak before semantic reducer continuity is published",
+      );
+    } else if (providerCalls === 15) {
+      assert.equal(
+        input.source.text,
+        SEMANTIC_FOLLOWUP_SOURCE_TEXT,
+      );
+      semanticEpisodeProviderObservation = {
+        sourceText: input.source.text,
+        contextItems: structuredClone(
+          input.contextItems,
+        ),
+      };
     } else {
       assert.fail(
         `Unexpected provider call #${providerCalls}`,
@@ -295,6 +329,10 @@ const env = {
   DATABASE_URL: databaseUrl,
   HERMENEIA_TEST_DATABASE_URL: databaseUrl,
   TRANSLATION_STRATEGY_VERSION: "t0-v1",
+  // The production default remains 300s. This E2E intentionally extends
+  // transient retention to prove semantic continuity across the 20-minute
+  // temporal episode gap when policy explicitly permits the plaintext window.
+  TRANSIENT_SOURCE_TTL_SECONDS: "1800",
 };
 
 let runtime = null;
@@ -2539,7 +2577,153 @@ try {
     );
   }
 
-  runtimeNow = "2026-10-05T09:00:10.000Z";
+  const episodeBeforeSemanticGap =
+    await withConnection(async (db) => {
+      const state = await db.query(
+        `SELECT active_episode_state
+           FROM conversation_context_states
+          WHERE tenant_id = $1
+            AND conversation_id = $2`,
+        [ids.tenantId, ids.conversationId],
+      );
+      assert.equal(state.rowCount, 1);
+      return structuredClone(
+        state.rows[0].active_episode_state,
+      );
+    });
+
+  assert.equal(
+    episodeBeforeSemanticGap.episodeVersion,
+    7,
+  );
+
+  runtimeNow = "2026-10-05T09:21:06.000Z";
+
+  const semanticGapAccepted =
+    await runtime.sendService.sendMessage(
+      sender,
+      {
+        protocol_version: 1,
+        command_id: ids.semanticGapCommandId,
+        client_message_id:
+          ids.semanticGapClientMessageId,
+        conversation_id: ids.conversationId,
+        source: {
+          text: SEMANTIC_GAP_SOURCE_TEXT,
+          language_hint: "fr-FR",
+        },
+        client_authored_at: NOW,
+      },
+    );
+
+  assert.equal(
+    semanticGapAccepted.status,
+    "ACCEPTED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runFanoutOnce(),
+    "FANOUT_DONE",
+  );
+  assert.equal(
+    await runtime.contextStateWorker.runOnce(),
+    "REDUCED",
+  );
+
+  await withConnection(async (db) => {
+    const state = await db.query(
+      `SELECT active_episode_state
+         FROM conversation_context_states
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(state.rowCount, 1);
+    const episode =
+      state.rows[0].active_episode_state;
+    assert.equal(
+      episode.episodeId,
+      episodeBeforeSemanticGap.episodeId,
+      "semantic continuity must preserve the structural episode identity beyond the temporal gap",
+    );
+    assert.equal(episode.episodeVersion, 8);
+    assert.equal(
+      episode.lastActivityAt,
+      "2026-10-05T09:21:06.000Z",
+    );
+    assert.ok(
+      episode.continuityConfidence > 0 &&
+      episode.continuityConfidence <= 1,
+    );
+    assert.equal(
+      JSON.stringify(episode).includes(
+        SEMANTIC_GAP_SOURCE_TEXT,
+      ),
+      false,
+      "durable episode state must remain transcript-free",
+    );
+  });
+
+  assert.equal(
+    await runtime.translationWorker.runExecuteOnce(),
+    "EXECUTION_DONE",
+  );
+  assert.equal(providerCalls, 14);
+
+  runtimeNow = "2026-10-05T09:21:07.000Z";
+
+  const semanticFollowupAccepted =
+    await runtime.sendService.sendMessage(
+      sender,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.semanticFollowupCommandId,
+        client_message_id:
+          ids.semanticFollowupClientMessageId,
+        conversation_id: ids.conversationId,
+        source: {
+          text: SEMANTIC_FOLLOWUP_SOURCE_TEXT,
+          language_hint: "fr-FR",
+        },
+        client_authored_at: NOW,
+      },
+    );
+
+  assert.equal(
+    semanticFollowupAccepted.status,
+    "ACCEPTED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runFanoutOnce(),
+    "FANOUT_DONE",
+  );
+  assert.equal(
+    await runtime.contextStateWorker.runOnce(),
+    "REDUCED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runExecuteOnce(),
+    "EXECUTION_DONE",
+  );
+  assert.equal(providerCalls, 15);
+
+  assert.ok(semanticEpisodeProviderObservation);
+  const semanticEpisodeItem =
+    semanticEpisodeProviderObservation.contextItems.find(
+      (item) =>
+        item.candidateType ===
+          "ACTIVE_EPISODE",
+    );
+  assert.ok(
+    semanticEpisodeItem,
+    "message after semantic continuation must receive ACTIVE_EPISODE context again",
+  );
+  assert.equal(
+    semanticEpisodeItem.selectionReason,
+    "ACTIVE_EPISODE",
+  );
+
+  runtimeNow = "2026-10-05T09:21:10.000Z";
 
   const stalePolicyAccepted =
     await runtime.sendService.sendMessage(
@@ -2690,7 +2874,7 @@ try {
     await runtime.translationWorker.runExecuteOnce(),
     "SUPERSEDED",
   );
-  assert.equal(providerCalls, 13);
+  assert.equal(providerCalls, 15);
 
   await withConnection(async (db) => {
     const execution = await db.query(
@@ -2728,7 +2912,7 @@ try {
     );
   });
 
-  runtimeNow = "2026-10-05T09:00:11.000Z";
+  runtimeNow = "2026-10-05T09:21:11.000Z";
 
   const staleContextAccepted =
     await runtime.sendService.sendMessage(
@@ -2802,7 +2986,7 @@ try {
     await runtime.translationWorker.runExecuteOnce(),
     "SUPERSEDED",
   );
-  assert.equal(providerCalls, 13);
+  assert.equal(providerCalls, 15);
 
   await withConnection(async (db) => {
     const execution = await db.query(
@@ -2848,6 +3032,7 @@ try {
     "style-reset=default " +
     "episode=transient-tail " +
     "episode-window=disjoint " +
+    "episode-semantic=continued-across-temporal-gap " +
     "conversation_policy_version=stable " +
     "tenant_policy_version=stale-context-superseded " +
     "t2=confirmed-correction-context " +
