@@ -69,6 +69,7 @@ export class PostgresConversationContextStateRepository {
               terminology_claim_refs,
               lexical_claim_refs,
               correction_claim_refs,
+              style_claim_refs,
               entity_handles,
               unresolved_reference_handles,
               style_state,
@@ -163,21 +164,22 @@ export class PostgresConversationContextStateRepository {
               terminology_claim_refs = $8::jsonb,
               lexical_claim_refs = $9::jsonb,
               correction_claim_refs = $10::jsonb,
-              entity_handles = $11::jsonb,
-              unresolved_reference_handles = $12::jsonb,
-              style_state = $13::jsonb,
-              pragmatic_state = $14::jsonb,
-              membership_epoch = $15,
-              erasure_epoch = $16,
-              policy_version = $17,
-              strategy_version = $18,
-              state_schema_version = $19,
-              recovery_mode = $20,
-              status = $21,
-              updated_at = $22
+              style_claim_refs = $11::jsonb,
+              entity_handles = $12::jsonb,
+              unresolved_reference_handles = $13::jsonb,
+              style_state = $14::jsonb,
+              pragmatic_state = $15::jsonb,
+              membership_epoch = $16,
+              erasure_epoch = $17,
+              policy_version = $18,
+              strategy_version = $19,
+              state_schema_version = $20,
+              recovery_mode = $21,
+              status = $22,
+              updated_at = $23
         WHERE tenant_id = $1
           AND conversation_id = $2
-          AND state_version = $23`,
+          AND state_version = $24`,
       [...params, input.expectedStateVersion],
     );
     return result.rowCount === 1;
