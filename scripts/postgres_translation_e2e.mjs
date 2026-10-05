@@ -44,6 +44,10 @@ const POST_REVOKE_SOURCE_TEXT =
   "On fait le CR vendredi.";
 const TENANT_POLICY_SOURCE_TEXT =
   "Le SLA est important.";
+const STYLE_SOURCE_TEXT =
+  "Peux-tu me confirmer le SLA ?";
+const POST_STYLE_RESET_SOURCE_TEXT =
+  "Le SLA reste important après reset.";
 const FEEDBACK_NOTE =
   "private feedback detail that must not persist";
 const TRANSLATED_TEXT = "Hola mundo 👋";
@@ -76,6 +80,12 @@ const ids = {
   tenantPolicyRevokeCommandId: randomUUID(),
   tenantPolicyCommandId: randomUUID(),
   tenantPolicyClientMessageId: randomUUID(),
+  toneStyleCommandId: randomUUID(),
+  styleMessageCommandId: randomUUID(),
+  styleClientMessageId: randomUUID(),
+  toneResetCommandId: randomUUID(),
+  postStyleResetCommandId: randomUUID(),
+  postStyleResetClientMessageId: randomUUID(),
   stalePolicyCommandId: randomUUID(),
   stalePolicyClientMessageId: randomUUID(),
   staleContextCommandId: randomUUID(),
@@ -178,6 +188,47 @@ const translationProvider = {
           source_language_tag: "fr-FR",
           target_language_tag: TARGET_LANGUAGE,
         },
+      );
+    } else if (providerCalls === 5) {
+      assert.equal(
+        input.source.text,
+        STYLE_SOURCE_TEXT,
+      );
+      const styleItem = input.contextItems.find(
+        (item) =>
+          item.candidateType ===
+            "STYLE_PROFILE",
+      );
+      assert.ok(styleItem);
+      assert.equal(
+        styleItem.selectionReason,
+        "STYLE_PROFILE",
+      );
+      assert.deepEqual(
+        JSON.parse(styleItem.content),
+        {
+          kind: "trusted_conversation_style",
+          preferred_register: "FORMAL",
+        },
+      );
+      assert.equal(
+        styleItem.content.includes(
+          ids.senderUserId,
+        ),
+        false,
+      );
+    } else if (providerCalls === 6) {
+      assert.equal(
+        input.source.text,
+        POST_STYLE_RESET_SOURCE_TEXT,
+      );
+      assert.equal(
+        input.contextItems.some(
+          (item) =>
+            item.candidateType ===
+              "STYLE_PROFILE",
+        ),
+        false,
       );
     } else {
       assert.fail(
@@ -1960,6 +2011,250 @@ try {
   );
   assert.equal(providerCalls, 4);
 
+  runtimeNow = "2026-10-05T08:00:05.300Z";
+
+  const toneStyle =
+    await runtime.correctionService.createCorrection(
+      sender,
+      {
+        protocol_version: 1,
+        command_id: ids.toneStyleCommandId,
+        conversation_id: ids.conversationId,
+        kind: "TONE",
+        requested_scope: "CONVERSATION",
+        payload: {
+          schema_version: 1,
+          kind: "TONE",
+          preferred_register: "FORMAL",
+        },
+      },
+    );
+
+  assert.equal(toneStyle.status, "APPLIED");
+  assert.equal(
+    toneStyle.applied_scope,
+    "CONVERSATION",
+  );
+  assert.equal(toneStyle.claim_id, null);
+
+  await withConnection(async (db) => {
+    const repair = await db.query(
+      `SELECT kind,
+              status,
+              structured_payload
+         FROM translation_repair_events
+        WHERE tenant_id = $1
+          AND repair_event_id = $2`,
+      [ids.tenantId, toneStyle.repair_event_id],
+    );
+    assert.equal(repair.rowCount, 1);
+    assert.equal(
+      repair.rows[0].kind,
+      "TONE_CORRECTION",
+    );
+    assert.equal(
+      repair.rows[0].status,
+      "APPLIED",
+    );
+    assert.deepEqual(
+      repair.rows[0].structured_payload,
+      {
+        schema_version: 1,
+        kind: "TONE",
+        preferred_register: "FORMAL",
+      },
+    );
+
+    const state = await db.query(
+      `SELECT style_state
+         FROM conversation_context_states
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(state.rowCount, 1);
+    assert.deepEqual(
+      state.rows[0].style_state,
+      {
+        profiles: [{
+          speakerUserId: ids.senderUserId,
+          preferredRegister: "FORMAL",
+          sourceRepairEventId:
+            toneStyle.repair_event_id,
+          confidence: 1,
+          updatedAt: runtimeNow,
+        }],
+      },
+    );
+  });
+
+  runtimeNow = "2026-10-05T08:00:05.301Z";
+
+  const styleAccepted =
+    await runtime.sendService.sendMessage(
+      sender,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.styleMessageCommandId,
+        client_message_id:
+          ids.styleClientMessageId,
+        conversation_id: ids.conversationId,
+        source: {
+          text: STYLE_SOURCE_TEXT,
+          language_hint: "fr-FR",
+        },
+        client_authored_at: NOW,
+      },
+    );
+
+  assert.equal(styleAccepted.status, "ACCEPTED");
+  assert.equal(
+    await runtime.translationWorker.runFanoutOnce(),
+    "FANOUT_DONE",
+  );
+
+  await withConnection(async (db) => {
+    const snapshot = await db.query(
+      `SELECT strategy,
+              selected_claim_refs,
+              selected_candidate_ids
+         FROM context_snapshots
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND recipient_user_id = $3`,
+      [
+        ids.tenantId,
+        styleAccepted.message_id,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(snapshot.rowCount, 1);
+    assert.equal(
+      snapshot.rows[0].strategy,
+      "T2_ADAPTIVE_V1",
+    );
+    assert.ok(
+      snapshot.rows[0].selected_candidate_ids.includes(
+        `style:${toneStyle.repair_event_id}`,
+      ),
+    );
+    assert.equal(
+      snapshot.rows[0].selected_claim_refs.includes(
+        toneStyle.repair_event_id,
+      ),
+      false,
+    );
+  });
+
+  assert.equal(
+    await runtime.contextStateWorker.runOnce(),
+    "REDUCED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runExecuteOnce(),
+    "EXECUTION_DONE",
+  );
+  assert.equal(providerCalls, 5);
+
+  runtimeNow = "2026-10-05T08:00:05.400Z";
+
+  const toneReset =
+    await runtime.correctionService.createCorrection(
+      sender,
+      {
+        protocol_version: 1,
+        command_id: ids.toneResetCommandId,
+        conversation_id: ids.conversationId,
+        kind: "TONE",
+        requested_scope: "CONVERSATION",
+        payload: {
+          schema_version: 1,
+          kind: "TONE",
+          preferred_register: "DEFAULT",
+        },
+      },
+    );
+
+  assert.equal(toneReset.status, "APPLIED");
+  assert.equal(toneReset.claim_id, null);
+
+  await withConnection(async (db) => {
+    const state = await db.query(
+      `SELECT style_state
+         FROM conversation_context_states
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(state.rowCount, 1);
+    assert.deepEqual(
+      state.rows[0].style_state,
+      {},
+    );
+  });
+
+  runtimeNow = "2026-10-05T08:00:05.401Z";
+
+  const postStyleResetAccepted =
+    await runtime.sendService.sendMessage(
+      sender,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.postStyleResetCommandId,
+        client_message_id:
+          ids.postStyleResetClientMessageId,
+        conversation_id: ids.conversationId,
+        source: {
+          text: POST_STYLE_RESET_SOURCE_TEXT,
+          language_hint: "fr-FR",
+        },
+        client_authored_at: NOW,
+      },
+    );
+
+  assert.equal(
+    postStyleResetAccepted.status,
+    "ACCEPTED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runFanoutOnce(),
+    "FANOUT_DONE",
+  );
+
+  await withConnection(async (db) => {
+    const snapshot = await db.query(
+      `SELECT selected_candidate_ids
+         FROM context_snapshots
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND recipient_user_id = $3`,
+      [
+        ids.tenantId,
+        postStyleResetAccepted.message_id,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(snapshot.rowCount, 1);
+    assert.equal(
+      snapshot.rows[0].selected_candidate_ids.some(
+        (id) => id.startsWith("style:"),
+      ),
+      false,
+    );
+  });
+
+  assert.equal(
+    await runtime.contextStateWorker.runOnce(),
+    "REDUCED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runExecuteOnce(),
+    "EXECUTION_DONE",
+  );
+  assert.equal(providerCalls, 6);
+
   runtimeNow = "2026-10-05T08:00:06.000Z";
 
   const stalePolicyAccepted =
@@ -2111,7 +2406,7 @@ try {
     await runtime.translationWorker.runExecuteOnce(),
     "SUPERSEDED",
   );
-  assert.equal(providerCalls, 4);
+  assert.equal(providerCalls, 6);
 
   await withConnection(async (db) => {
     const execution = await db.query(
@@ -2223,7 +2518,7 @@ try {
     await runtime.translationWorker.runExecuteOnce(),
     "SUPERSEDED",
   );
-  assert.equal(providerCalls, 4);
+  assert.equal(providerCalls, 6);
 
   await withConnection(async (db) => {
     const execution = await db.query(
@@ -2265,6 +2560,8 @@ try {
     "tenant-policy=control-plane-created " +
     "tenant-policy-update=old-invalidated " +
     "tenant-policy-revoked=control-plane " +
+    "style=self-formal " +
+    "style-reset=default " +
     "conversation_policy_version=stable " +
     "tenant_policy_version=stale-context-superseded " +
     "t2=confirmed-correction-context " +
