@@ -508,6 +508,7 @@ function createService(store, overrides = {}) {
       },
     },
     transientSources,
+    contextOperations: overrides.contextOperations,
     envelopeTtlSeconds: 3600,
     transientSourceTtlSeconds: 300,
   });
@@ -598,6 +599,107 @@ test("persistent Send commits metadata, device envelopes, inbox events and plain
     receipts: [...store.state.receipts.values()],
   });
   assert.equal(durable.includes(sendCommand().source.text), false);
+});
+
+test("persistent Send atomically records one Context operation and queues one reducer job", async () => {
+  const store = new TransactionalFakeStore();
+  const calls = [];
+  const { service } = createService(store, {
+    contextOperations: {
+      async register(_tx, input) {
+        calls.push(clone(input));
+      },
+    },
+  });
+
+  const accepted = await service.sendMessage(
+    actor,
+    sendCommand(),
+  );
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], {
+    tenantId: "tenant-1",
+    conversationId: "conversation-1",
+    operationId: "cmd-1",
+    kind: "MESSAGE_CREATED",
+    messageId: accepted.message_id,
+    sourceRevision: 1,
+    opSeq: 1,
+    membershipEpoch: 7,
+    erasureEpoch: 2,
+    policyVersion: 11,
+    registeredAt: "2026-10-03T23:00:00.000Z",
+  });
+
+  const contextJobs = store.state.jobs.filter(
+    (job) => job.jobType === "context.reduce",
+  );
+  assert.equal(contextJobs.length, 1);
+  assert.deepEqual(contextJobs[0].payloadRef, {
+    conversation_id: "conversation-1",
+    operation_id: "cmd-1",
+    op_seq: 1,
+  });
+  assert.equal(contextJobs[0].businessKey, "conversation-1:1");
+  assert.equal(
+    store.state.jobs.filter(
+      (job) => job.jobType === "translation.request",
+    ).length,
+    1,
+  );
+});
+
+test("Context operation registration is not duplicated by an idempotent Send retry", async () => {
+  const store = new TransactionalFakeStore();
+  const calls = [];
+  const { service } = createService(store, {
+    contextOperations: {
+      async register(_tx, input) {
+        calls.push(clone(input));
+      },
+    },
+  });
+
+  const first = await service.sendMessage(
+    actor,
+    sendCommand(),
+  );
+  const retry = await service.sendMessage(
+    actor,
+    sendCommand(),
+  );
+
+  assert.deepEqual(retry, first);
+  assert.equal(calls.length, 1);
+  assert.equal(
+    store.state.jobs.filter(
+      (job) => job.jobType === "context.reduce",
+    ).length,
+    1,
+  );
+});
+
+test("Context recorder failure rolls back Send and removes the transient source", async () => {
+  const store = new TransactionalFakeStore();
+  const fixture = createService(store, {
+    contextOperations: {
+      async register() {
+        throw new Error("forced context recorder failure");
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => fixture.service.sendMessage(actor, sendCommand()),
+    /forced context recorder failure/,
+  );
+
+  assert.equal(store.state.messages.length, 0);
+  assert.equal(store.state.revisions.length, 0);
+  assert.equal(store.state.jobs.length, 0);
+  assert.equal(store.state.receipts.size, 0);
+  assert.equal(fixture.transientSources.size, 0);
 });
 
 test("lost response retry with same command_id returns exact original result", async () => {
@@ -1090,6 +1192,34 @@ test("persistent edit creates revision, revokes old envelopes and supersedes old
   );
 });
 
+test("persistent edit records the replacement frontier in ContextState", async () => {
+  const store = new TransactionalFakeStore();
+  const calls = [];
+  const { service } = createService(store, {
+    contextOperations: {
+      async register(_tx, input) {
+        calls.push(clone(input));
+      },
+    },
+  });
+  const accepted = await service.sendMessage(actor, sendCommand());
+
+  await service.editMessage(actor, {
+    protocol_version: 1,
+    command_id: "edit-context",
+    message_id: accepted.message_id,
+    expected_revision: 1,
+    source: { text: "edited context frontier" },
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].kind, "MESSAGE_EDITED");
+  assert.equal(calls[1].sourceRevision, 2);
+  assert.equal(calls[1].opSeq, 2);
+  assert.equal(calls[1].erasureEpoch, 3);
+  assert.equal(store.state.erasureEpoch, 3);
+});
+
 test("persistent edit retry is idempotent and stale new command is rejected", async () => {
   const store = new TransactionalFakeStore();
   const { service } = createService(store);
@@ -1214,6 +1344,33 @@ test("persistent delete creates tombstone, purges pending delivery and transient
     }),
     undefined,
   );
+});
+
+test("persistent delete allocates its operation after the erasure bump and records the new frontier", async () => {
+  const store = new TransactionalFakeStore();
+  const calls = [];
+  const { service } = createService(store, {
+    contextOperations: {
+      async register(_tx, input) {
+        calls.push(clone(input));
+      },
+    },
+  });
+  const accepted = await service.sendMessage(actor, sendCommand());
+
+  await service.deleteMessage(actor, {
+    protocol_version: 1,
+    command_id: "delete-context",
+    message_id: accepted.message_id,
+    expected_revision: 1,
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].kind, "MESSAGE_DELETED");
+  assert.equal(calls[1].sourceRevision, 2);
+  assert.equal(calls[1].opSeq, 2);
+  assert.equal(calls[1].erasureEpoch, 3);
+  assert.equal(store.state.erasureEpoch, 3);
 });
 
 test("persistent delete rolls back erasure epoch when the transaction fails after the bump", async () => {

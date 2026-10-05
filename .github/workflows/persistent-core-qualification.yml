@@ -7,6 +7,7 @@ on:
       - feat/persistent-send-service-v1
       - feat/context-engine-runtime-v1
       - feat/conversation-state-v1
+      - feat/conversation-state-runtime-v1
   workflow_dispatch:
 
 permissions:
@@ -42,7 +43,6 @@ jobs:
       DATABASE_URL: postgresql://hermeneia_ci:hermeneia_ci@127.0.0.1:5432/hermeneia_ci
       SOURCE_FINGERPRINT_HMAC_KEY_VERSION: ci-v1
       SOURCE_FINGERPRINT_VERIFICATION_KEYS_JSON: "[]"
-      TRANSLATION_WORKER_MODE: external
 
     steps:
       - name: Checkout

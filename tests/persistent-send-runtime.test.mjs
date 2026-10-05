@@ -46,6 +46,7 @@ class FakeClient {
           has_translation_executions: true,
           has_provider_executions: true,
           has_context_snapshots: true,
+          has_context_state: true,
           has_command_fingerprint: true,
           has_source_required_constraint: true,
           has_device_platform: true,
@@ -310,6 +311,10 @@ test("persistent Send runtime composes PostgreSQL service and persistent bearer 
   assert.equal(typeof runtime.outboxService.complete, "function");
   assert.equal(typeof runtime.outboxService.retry, "function");
   assert.equal(typeof runtime.outboxService.deadLetter, "function");
+  assert.ok(runtime.contextStateWorker);
+  assert.equal(typeof runtime.contextStateWorker.runOnce, "function");
+  assert.equal(runtime.contextRuntime, null);
+  assert.equal(runtime.translationWorker, null);
   assert.equal(typeof runtime.translationService.ensurePending, "function");
   assert.equal(
     typeof runtime.translationService.startProviderAttempt,

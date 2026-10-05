@@ -31,8 +31,8 @@ export type CorrectionTrigger =
 export interface ConversationContextState {
   conversationId: UUID;
   contextVersion: number;
-  processedPrefixSequence: number;
-  processingGaps: number[];
+  processedPrefixOperationSequence: number;
+  processingGapOperationSequences: number[];
   erasureEpoch: number;
   activeEpisodeId: UUID | null;
   activeEpisodeVersion: number | null;
@@ -49,15 +49,15 @@ export interface ContextCandidate {
    */
   content: string;
 
-  sourceSequence?: number | null;
+  sourceMessageSequence?: number | null;
 
   /**
    * Highest conversation sequence whose evidence contributed to this
    * candidate. Required for derived conversational state that has no single
-   * sourceSequence. It prevents a checkpoint/episode computed in the future
+   * sourceMessageSequence. It prevents a checkpoint/episode computed in the future
    * from leaking into an earlier translation.
    */
-  causalThroughSequence?: number | null;
+  causalThroughOperationSequence?: number | null;
 
   sourceRevisionRefs?: string[];
   claimRefs?: string[];
@@ -119,7 +119,10 @@ export interface BuildContextInput {
   recipientUserId: UUID;
   targetLanguageTag: string;
   targetProfileVersion: number;
-  currentSequence: number;
+  /** Message ordering axis used to exclude future messages. */
+  currentMessageSequence: number;
+  /** Operation ordering axis used for causal state freshness. */
+  currentOperationSequence: number;
   /**
    * Authoritative conversation erasure epoch. This value exists even when
    * the derived ConversationContextState cache is absent.
@@ -164,8 +167,8 @@ export interface ContextSnapshot {
   selectedCandidateIds: string[];
   selectedSourceRevisionRefs: string[];
   selectedClaimRefs: string[];
-  processedPrefixSequence: number;
-  processingGapRefs: number[];
+  processedPrefixOperationSequence: number;
+  processingGapOperationSequences: number[];
   erasureEpoch: number;
   tokenEstimate: number;
   recoveryMode: ContextRecoveryMode;
@@ -177,7 +180,7 @@ export interface ContextMetrics {
   candidatesEligible: number;
   candidatesSelected: number;
   contextTokensEstimated: number;
-  contextFreshnessGap: number;
+  contextFreshnessOperationGap: number;
   recoveryMode: ContextRecoveryMode;
 }
 
@@ -228,17 +231,17 @@ export class ContextEngine {
     validateInput(input);
 
     const erasureEpoch = input.erasureEpoch;
-    const processedPrefixSequence =
-      input.state?.processedPrefixSequence ?? 0;
-    const processingGapRefs =
+    const processedPrefixOperationSequence =
+      input.state?.processedPrefixOperationSequence ?? 0;
+    const processingGapOperationSequences =
       normaliseGaps(
-        input.state?.processingGaps ?? [],
-        processedPrefixSequence,
-        input.currentSequence,
+        input.state?.processingGapOperationSequences ?? [],
+        processedPrefixOperationSequence,
+        input.currentOperationSequence,
       );
     const recoveryMode = deriveRecoveryMode(
       input.state,
-      processingGapRefs,
+      processingGapOperationSequences,
     );
 
     const eligible = input.candidates.filter((candidate) =>
@@ -253,8 +256,8 @@ export class ContextEngine {
           : this.selectT2(
               eligible,
               input,
-              processedPrefixSequence,
-              processingGapRefs,
+              processedPrefixOperationSequence,
+              processingGapOperationSequences,
             );
 
     const tokenEstimate = selected.reduce(
@@ -297,8 +300,8 @@ export class ContextEngine {
           return candidate?.claimRefs ?? [];
         }),
       ),
-      processedPrefixSequence,
-      processingGapRefs,
+      processedPrefixOperationSequence,
+      processingGapOperationSequences,
       erasureEpoch,
       tokenEstimate,
       recoveryMode,
@@ -310,11 +313,11 @@ export class ContextEngine {
       candidatesEligible: eligible.length,
       candidatesSelected: selected.length,
       contextTokensEstimated: tokenEstimate,
-      contextFreshnessGap: Math.max(
+      contextFreshnessOperationGap: Math.max(
         0,
-        input.currentSequence -
+        input.currentOperationSequence -
           1 -
-          processedPrefixSequence,
+          processedPrefixOperationSequence,
       ),
       recoveryMode,
     };
@@ -336,13 +339,13 @@ export class ContextEngine {
         (candidate) =>
           candidate.candidateType ===
             "IMMEDIATE_MESSAGE" &&
-          candidate.sourceSequence !== undefined &&
-          candidate.sourceSequence !== null,
+          candidate.sourceMessageSequence !== undefined &&
+          candidate.sourceMessageSequence !== null,
       )
       .sort(
         (left, right) =>
-          Number(right.sourceSequence) -
-            Number(left.sourceSequence) ||
+          Number(right.sourceMessageSequence) -
+            Number(left.sourceMessageSequence) ||
           left.candidateId.localeCompare(
             right.candidateId,
           ),
@@ -350,8 +353,8 @@ export class ContextEngine {
       .slice(0, this.config.t1WindowSize)
       .sort(
         (left, right) =>
-          Number(left.sourceSequence) -
-            Number(right.sourceSequence) ||
+          Number(left.sourceMessageSequence) -
+            Number(right.sourceMessageSequence) ||
           left.candidateId.localeCompare(
             right.candidateId,
           ),
@@ -383,8 +386,8 @@ export class ContextEngine {
   private selectT2(
     candidates: ContextCandidate[],
     input: BuildContextInput,
-    processedPrefixSequence: number,
-    processingGaps: number[],
+    processedPrefixOperationSequence: number,
+    processingGapOperationSequences: number[],
   ): SelectedContextItem[] {
     const availableTokens = contextTokenBudget(input.budget);
     if (availableTokens <= 0) return [];
@@ -465,18 +468,22 @@ export class ContextEngine {
       }
     };
 
-    const gapSet = new Set(processingGaps);
+    const gapSet = new Set(processingGapOperationSequences);
     const freshness = scored.filter(({ candidate }) =>
       candidate.candidateType ===
         "IMMEDIATE_MESSAGE" &&
-      candidate.sourceSequence !== undefined &&
-      candidate.sourceSequence !== null &&
-      Number(candidate.sourceSequence) <
-        input.currentSequence &&
-      (Number(candidate.sourceSequence) >
-        processedPrefixSequence ||
+      candidate.sourceMessageSequence !== undefined &&
+      candidate.sourceMessageSequence !== null &&
+      Number(candidate.sourceMessageSequence) <
+        input.currentMessageSequence &&
+      candidate.causalThroughOperationSequence !== undefined &&
+      candidate.causalThroughOperationSequence !== null &&
+      Number(candidate.causalThroughOperationSequence) <
+        input.currentOperationSequence &&
+      (Number(candidate.causalThroughOperationSequence) >
+        processedPrefixOperationSequence ||
         gapSet.has(
-          Number(candidate.sourceSequence),
+          Number(candidate.causalThroughOperationSequence),
         )),
     );
 
@@ -624,11 +631,19 @@ function validateInput(input: BuildContextInput): void {
     );
   }
   if (
-    !Number.isInteger(input.currentSequence) ||
-    input.currentSequence < 1
+    !Number.isInteger(input.currentMessageSequence) ||
+    input.currentMessageSequence < 1
   ) {
     throw new TypeError(
-      "currentSequence must be a positive integer",
+      "currentMessageSequence must be a positive integer",
+    );
+  }
+  if (
+    !Number.isInteger(input.currentOperationSequence) ||
+    input.currentOperationSequence < 1
+  ) {
+    throw new TypeError(
+      "currentOperationSequence must be a positive integer",
     );
   }
   if (
@@ -658,14 +673,14 @@ function validateInput(input: BuildContextInput): void {
   if (input.state) {
     if (
       !Number.isInteger(
-        input.state.processedPrefixSequence,
+        input.state.processedPrefixOperationSequence,
       ) ||
-      input.state.processedPrefixSequence < 0 ||
-      input.state.processedPrefixSequence >=
-        input.currentSequence
+      input.state.processedPrefixOperationSequence < 0 ||
+      input.state.processedPrefixOperationSequence >=
+        input.currentOperationSequence
     ) {
       throw new TypeError(
-        "processedPrefixSequence must precede currentSequence",
+        "processedPrefixOperationSequence must precede currentOperationSequence",
       );
     }
     if (
@@ -692,14 +707,14 @@ function validateInput(input: BuildContextInput): void {
       );
     }
 
-    for (const gap of input.state.processingGaps) {
+    for (const gap of input.state.processingGapOperationSequences) {
       if (
         !Number.isInteger(gap) ||
-        gap <= input.state.processedPrefixSequence ||
-        gap >= input.currentSequence
+        gap <= input.state.processedPrefixOperationSequence ||
+        gap >= input.currentOperationSequence
       ) {
         throw new TypeError(
-          "processingGaps must be strictly after the processed prefix and before currentSequence",
+          "processingGapOperationSequences must be strictly after the processed prefix and before currentOperationSequence",
         );
       }
     }
@@ -738,24 +753,24 @@ function validateInput(input: BuildContextInput): void {
     }
 
     if (
-      candidate.sourceSequence !== undefined &&
-      candidate.sourceSequence !== null &&
-      (!Number.isInteger(candidate.sourceSequence) ||
-        candidate.sourceSequence < 1)
+      candidate.sourceMessageSequence !== undefined &&
+      candidate.sourceMessageSequence !== null &&
+      (!Number.isInteger(candidate.sourceMessageSequence) ||
+        candidate.sourceMessageSequence < 1)
     ) {
       throw new TypeError(
-        "candidate sourceSequence must be a positive integer when present",
+        "candidate sourceMessageSequence must be a positive integer when present",
       );
     }
 
     if (
-      candidate.causalThroughSequence !== undefined &&
-      candidate.causalThroughSequence !== null &&
-      (!Number.isInteger(candidate.causalThroughSequence) ||
-        candidate.causalThroughSequence < 0)
+      candidate.causalThroughOperationSequence !== undefined &&
+      candidate.causalThroughOperationSequence !== null &&
+      (!Number.isInteger(candidate.causalThroughOperationSequence) ||
+        candidate.causalThroughOperationSequence < 0)
     ) {
       throw new TypeError(
-        "candidate causalThroughSequence must be a non-negative integer when present",
+        "candidate causalThroughOperationSequence must be a non-negative integer when present",
       );
     }
 
@@ -764,22 +779,22 @@ function validateInput(input: BuildContextInput): void {
       candidate.candidateType === "RECOVERY_CHECKPOINT"
     ) {
       if (
-        candidate.causalThroughSequence === undefined ||
-        candidate.causalThroughSequence === null
+        candidate.causalThroughOperationSequence === undefined ||
+        candidate.causalThroughOperationSequence === null
       ) {
         throw new TypeError(
-          "Derived episode/checkpoint candidates require causalThroughSequence",
+          "Derived episode/checkpoint candidates require causalThroughOperationSequence",
         );
       }
     }
 
     if (
       candidate.candidateType === "CORRECTION_MEMORY" &&
-      (candidate.causalThroughSequence === undefined ||
-        candidate.causalThroughSequence === null)
+      (candidate.causalThroughOperationSequence === undefined ||
+        candidate.causalThroughOperationSequence === null)
     ) {
       throw new TypeError(
-        "Correction memory requires causalThroughSequence",
+        "Correction memory requires causalThroughOperationSequence",
       );
     }
 
@@ -875,10 +890,10 @@ function assertConfig(config: ContextEngineConfig): void {
 
 function deriveRecoveryMode(
   state: ConversationContextState | null,
-  processingGaps: number[],
+  processingGapOperationSequences: number[],
 ): ContextRecoveryMode {
   if (!state) return "DEGRADED";
-  return processingGaps.length > 0
+  return processingGapOperationSequences.length > 0
     ? "PARTIAL"
     : "FAST";
 }
@@ -901,17 +916,17 @@ function isEligible(
   }
 
   if (
-    candidate.sourceSequence !== undefined &&
-    candidate.sourceSequence !== null &&
-    candidate.sourceSequence >= input.currentSequence
+    candidate.sourceMessageSequence !== undefined &&
+    candidate.sourceMessageSequence !== null &&
+    candidate.sourceMessageSequence >= input.currentMessageSequence
   ) {
     return false;
   }
 
   if (
-    candidate.causalThroughSequence !== undefined &&
-    candidate.causalThroughSequence !== null &&
-    candidate.causalThroughSequence >= input.currentSequence
+    candidate.causalThroughOperationSequence !== undefined &&
+    candidate.causalThroughOperationSequence !== null &&
+    candidate.causalThroughOperationSequence >= input.currentOperationSequence
   ) {
     return false;
   }
@@ -965,10 +980,10 @@ function sortScored(
       right.candidate.importance -
         left.candidate.importance ||
       Number(
-        right.candidate.sourceSequence ?? -1,
+        right.candidate.sourceMessageSequence ?? -1,
       ) -
         Number(
-          left.candidate.sourceSequence ?? -1,
+          left.candidate.sourceMessageSequence ?? -1,
         ) ||
       left.candidate.candidateId.localeCompare(
         right.candidate.candidateId,
@@ -992,9 +1007,9 @@ function reorderPayload(
     const rightCandidate = byId.get(right.candidateId);
 
     const leftSequence =
-      leftCandidate?.sourceSequence;
+      leftCandidate?.sourceMessageSequence;
     const rightSequence =
-      rightCandidate?.sourceSequence;
+      rightCandidate?.sourceMessageSequence;
 
     if (
       leftSequence !== undefined &&
@@ -1031,15 +1046,15 @@ function reorderPayload(
 
 function normaliseGaps(
   gaps: number[],
-  processedPrefixSequence: number,
-  currentSequence: number,
+  processedPrefixOperationSequence: number,
+  currentOperationSequence: number,
 ): number[] {
   return unique(
     gaps.filter(
       (value) =>
         Number.isInteger(value) &&
-        value > processedPrefixSequence &&
-        value < currentSequence,
+        value > processedPrefixOperationSequence &&
+        value < currentOperationSequence,
     ),
   ).sort((left, right) => left - right);
 }

@@ -16,12 +16,14 @@ import type {
 export interface RecentContextMessageRef {
   messageId: UUID;
   sourceRevision: number;
-  sequence: number;
+  messageSequence: number;
+  operationSequence: number;
   acceptedAt: string;
 }
 
 export interface ContextPlanningFrame {
-  currentSequence: number;
+  currentMessageSequence: number;
+  currentOperationSequence: number;
   erasureEpoch: number;
   recentMessages: RecentContextMessageRef[];
 }
@@ -37,6 +39,14 @@ export interface ConversationContextStateSource {
   load(
     input: TranslationContextRequest,
   ): Promise<ConversationContextState | null>;
+}
+
+export interface DerivedContextCandidateSource {
+  load(
+    input: TranslationContextRequest,
+    state: ConversationContextState,
+    frame: ContextPlanningFrame,
+  ): Promise<ContextCandidate[]>;
 }
 
 export interface TranslationContextPlannerConfig {
@@ -64,6 +74,7 @@ export interface TranslationContextPlannerDependencies {
   metadata: ContextPlanningMetadataSource;
   transientSources: TransientSourceStore;
   stateSource?: ConversationContextStateSource;
+  derivedCandidates?: DerivedContextCandidateSource;
   config?: Omit<
     Partial<TranslationContextPlannerConfig>,
     "budget"
@@ -110,12 +121,11 @@ export class TranslationContextPlanner
       }),
     ]);
 
-    const state =
-      loadedState &&
-      loadedState.conversationId === input.conversationId &&
-      loadedState.erasureEpoch === frame.erasureEpoch
-        ? loadedState
-        : null;
+    const state = stateForCurrentOperation(
+      loadedState,
+      input.conversationId,
+      frame,
+    );
 
     const resolved = await Promise.all(
       frame.recentMessages.map(async (ref) => {
@@ -128,16 +138,30 @@ export class TranslationContextPlanner
           ? toImmediateCandidate(
               ref,
               source.source.text,
-              frame.currentSequence,
+              frame.currentMessageSequence,
               frame.erasureEpoch,
             )
           : null;
       }),
     );
 
-    const candidates = resolved.filter(
+    const immediateCandidates = resolved.filter(
       (value): value is ContextCandidate => value !== null,
     );
+
+    const derivedCandidates =
+      state && this.deps.derivedCandidates
+        ? await this.safeLoadDerivedCandidates(
+            input,
+            state,
+            frame,
+          )
+        : [];
+
+    const candidates = [
+      ...immediateCandidates,
+      ...derivedCandidates,
+    ];
 
     const currentMessageTokens = Math.min(
       this.config.maxCurrentMessageTokens,
@@ -146,15 +170,20 @@ export class TranslationContextPlanner
         : this.config.fallbackCurrentMessageTokens,
     );
 
+    // A compatible ConversationState is necessary for T2, but not
+    // sufficient. Until a state/recovery/correction adapter materialises at
+    // least one derived candidate, selecting T2 would only relabel the same
+    // recent-message window and overstate adaptive-context behaviour.
     const strategy =
-      state !== null
+      state !== null && derivedCandidates.length > 0
         ? "T2_ADAPTIVE_V1"
-        : candidates.length > 0
+        : immediateCandidates.length > 0
           ? "T1"
           : "T0";
 
     return {
-      currentSequence: frame.currentSequence,
+      currentMessageSequence: frame.currentMessageSequence,
+      currentOperationSequence: frame.currentOperationSequence,
       erasureEpoch: frame.erasureEpoch,
       strategy,
       state,
@@ -164,6 +193,31 @@ export class TranslationContextPlanner
         currentMessageTokens,
       },
     };
+  }
+
+  private async safeLoadDerivedCandidates(
+    input: TranslationContextRequest,
+    state: ConversationContextState,
+    frame: ContextPlanningFrame,
+  ): Promise<ContextCandidate[]> {
+    try {
+      const candidates =
+        await this.deps.derivedCandidates!.load(
+          input,
+          structuredClone(state),
+          structuredClone(frame),
+        );
+      return Array.isArray(candidates)
+        ? candidates.map((candidate) =>
+            structuredClone(candidate),
+          )
+        : [];
+    } catch {
+      // Adaptive enrichment is optional to the critical path. A failed
+      // adapter degrades to exact transient T1/T0 context rather than
+      // blocking translation or fabricating derived evidence.
+      return [];
+    }
   }
 
   private async safeGetSource(input: {
@@ -179,15 +233,54 @@ export class TranslationContextPlanner
   }
 }
 
+function stateForCurrentOperation(
+  loadedState: ConversationContextState | null,
+  conversationId: UUID,
+  frame: ContextPlanningFrame,
+): ConversationContextState | null {
+  if (
+    !loadedState ||
+    loadedState.conversationId !== conversationId ||
+    loadedState.erasureEpoch !== frame.erasureEpoch
+  ) {
+    return null;
+  }
+
+  // Once durable derived state has processed the current operation (or a
+  // later one), we cannot project it backwards safely: episode/style/etc.
+  // may already contain evidence from the message being translated.
+  if (
+    loadedState.processedPrefixOperationSequence >=
+    frame.currentOperationSequence
+  ) {
+    return null;
+  }
+
+  // Pending operations at/after the current operation are not historical
+  // freshness gaps for this translation. In particular, the current message
+  // is normally registered before its translation fanout and must not make
+  // context preparation reject an otherwise causal state.
+  return {
+    ...structuredClone(loadedState),
+    processingGapOperationSequences:
+      loadedState.processingGapOperationSequences.filter(
+        (sequence) =>
+          sequence >
+            loadedState.processedPrefixOperationSequence &&
+          sequence < frame.currentOperationSequence,
+      ),
+  };
+}
+
 function toImmediateCandidate(
   ref: RecentContextMessageRef,
   content: string,
-  currentSequence: number,
+  currentMessageSequence: number,
   erasureEpoch: number,
 ): ContextCandidate {
   const distance = Math.max(
     1,
-    currentSequence - ref.sequence,
+    currentMessageSequence - ref.messageSequence,
   );
 
   return {
@@ -195,8 +288,8 @@ function toImmediateCandidate(
       `message:${ref.messageId}:${ref.sourceRevision}`,
     candidateType: "IMMEDIATE_MESSAGE",
     content,
-    sourceSequence: ref.sequence,
-    causalThroughSequence: ref.sequence,
+    sourceMessageSequence: ref.messageSequence,
+    causalThroughOperationSequence: ref.operationSequence,
     sourceRevisionRefs: [
       `${ref.messageId}:${ref.sourceRevision}`,
     ],

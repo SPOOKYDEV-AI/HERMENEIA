@@ -40,6 +40,51 @@ test("worker runner drains fanout and execute fairly until idle", async () => {
   assert.equal(executeCalls, 2);
 });
 
+test("worker runner snapshots translation fanout before reducing ContextState", async () => {
+  const order = [];
+  let pass = 0;
+
+  const runner = createTranslationWorkerRunner({
+    worker: {
+      async runFanoutOnce() {
+        order.push("fanout");
+        return pass === 0 ? "FANOUT_DONE" : "NO_WORK";
+      },
+      async runExecuteOnce() {
+        order.push("execute");
+        const result =
+          pass === 0 ? "EXECUTION_DONE" : "NO_WORK";
+        pass += 1;
+        return result;
+      },
+    },
+    contextWorker: {
+      async runOnce() {
+        order.push("context");
+        return pass === 0 ? "REDUCED" : "NO_WORK";
+      },
+    },
+    config: {
+      maxDrainPerCycle: 8,
+    },
+  });
+
+  assert.deepEqual(await runner.runOnce(), {
+    processed: 3,
+    fanoutResult: "NO_WORK",
+    contextResult: "NO_WORK",
+    executeResult: "NO_WORK",
+  });
+  assert.deepEqual(order, [
+    "fanout",
+    "context",
+    "execute",
+    "fanout",
+    "context",
+    "execute",
+  ]);
+});
+
 test("worker runner enforces the per-cycle drain bound", async () => {
   let fanoutCalls = 0;
   let executeCalls = 0;
@@ -146,12 +191,18 @@ test("worker runner stop waits for an in-flight cycle before resolving", async (
   assert.equal(runner.running, false);
 });
 
-test("worker runner config supports embedded or external mode only", () => {
+test("worker runner config rejects cross-process mode while source is process-local", () => {
   assert.equal(
-    translationWorkerRunnerConfigFromEnv({
-      TRANSLATION_WORKER_MODE: "external",
-    }).mode,
-    "external",
+    translationWorkerRunnerConfigFromEnv({}).mode,
+    "embedded",
+  );
+
+  assert.throws(
+    () =>
+      translationWorkerRunnerConfigFromEnv({
+        TRANSLATION_WORKER_MODE: "external",
+      }),
+    /external is not supported.*process-local transient state/,
   );
 
   assert.throws(
@@ -159,7 +210,7 @@ test("worker runner config supports embedded or external mode only", () => {
       translationWorkerRunnerConfigFromEnv({
         TRANSLATION_WORKER_MODE: "sometimes",
       }),
-    /must be embedded or external/,
+    /must be embedded/,
   );
 });
 

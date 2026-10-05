@@ -76,8 +76,8 @@ function snapshot() {
     selectedClaimRefs: [
       "claim-1",
     ],
-    processedPrefixSequence: 7,
-    processingGapRefs: [],
+    processedPrefixOperationSequence: 7,
+    processingGapOperationSequences: [],
     erasureEpoch: 2,
     tokenEstimate: 18,
     recoveryMode: "FAST",
@@ -216,8 +216,8 @@ test("PostgreSQL context snapshot lookup reconstructs typed metadata", async () 
       "message-7:1",
     ],
     selectedClaimRefs: ["claim-1"],
-    processedPrefixSequence: 7,
-    processingGapRefs: [5, 6],
+    processedPrefixOperationSequence: 7,
+    processingGapOperationSequences: [5, 6],
     erasureEpoch: 2,
     tokenEstimate: 18,
     recoveryMode: "PARTIAL",
@@ -291,6 +291,7 @@ test("PostgreSQL context planner loads current sequence/erasure epoch and recent
     {
       rows: [{
         message_seq: 8,
+        op_seq: 10,
         erasure_epoch: 3,
       }],
       rowCount: 1,
@@ -301,12 +302,14 @@ test("PostgreSQL context planner loads current sequence/erasure epoch and recent
           message_id: "message-7",
           current_revision: 2,
           message_seq: 7,
+          op_seq: 9,
           accepted_at: "2026-10-04 19:59:58+00",
         },
         {
           message_id: "message-6",
           current_revision: 1,
           message_seq: 6,
+          op_seq: 6,
           accepted_at: "2026-10-04 19:59:55+00",
         },
       ],
@@ -336,19 +339,22 @@ test("PostgreSQL context planner loads current sequence/erasure epoch and recent
   );
 
   assert.deepEqual(result, {
-    currentSequence: 8,
+    currentMessageSequence: 8,
+    currentOperationSequence: 10,
     erasureEpoch: 3,
     recentMessages: [
       {
         messageId: "message-7",
         sourceRevision: 2,
-        sequence: 7,
+        messageSequence: 7,
+        operationSequence: 9,
         acceptedAt: "2026-10-04 19:59:58+00",
       },
       {
         messageId: "message-6",
         sourceRevision: 1,
-        sequence: 6,
+        messageSequence: 6,
+        operationSequence: 6,
         acceptedAt: "2026-10-04 19:59:55+00",
       },
     ],
@@ -356,6 +362,8 @@ test("PostgreSQL context planner loads current sequence/erasure epoch and recent
 
   const currentQuery = connection.queries[1];
   assert.match(currentQuery.text, /c\.erasure_epoch/);
+  assert.match(currentQuery.text, /mr\.op_seq/);
+  assert.match(currentQuery.text, /JOIN message_revisions mr/);
   assert.match(currentQuery.text, /mm\.current_revision = \$4/);
   assert.match(currentQuery.text, /cm\.user_id = \$5/);
   assert.doesNotMatch(
@@ -364,8 +372,9 @@ test("PostgreSQL context planner loads current sequence/erasure epoch and recent
   );
 
   const recentQuery = connection.queries[2];
-  assert.match(recentQuery.text, /message_seq < \$3/);
-  assert.match(recentQuery.text, /ORDER BY message_seq DESC/);
+  assert.match(recentQuery.text, /mm\.message_seq < \$3/);
+  assert.match(recentQuery.text, /ORDER BY mm\.message_seq DESC/);
+  assert.match(recentQuery.text, /mr\.op_seq/);
   assert.match(recentQuery.text, /LIMIT \$4/);
   assert.doesNotMatch(
     recentQuery.text,

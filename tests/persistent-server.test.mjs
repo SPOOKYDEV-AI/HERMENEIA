@@ -33,6 +33,7 @@ class FakeClient {
           has_translation_executions: true,
           has_provider_executions: true,
           has_context_snapshots: true,
+          has_context_state: true,
           has_command_fingerprint: true,
           has_source_required_constraint: true,
           has_device_platform: true,

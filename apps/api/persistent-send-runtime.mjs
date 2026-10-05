@@ -11,6 +11,9 @@ import {
   PostgresContextSnapshotRepository,
 } from "../../.build/packages/persistence-postgres/src/context.js";
 import {
+  PostgresConversationContextStateRepository,
+} from "../../.build/packages/persistence-postgres/src/context-state.js";
+import {
   SqlTransactionManager,
 } from "../../.build/packages/persistence/src/index.js";
 import {
@@ -37,6 +40,12 @@ import {
 import {
   createPostgresTranslationContextRuntime,
 } from "../../.build/packages/runtime/src/persistent-context-translation.js";
+import {
+  createPostgresContextOperationRecorder,
+} from "../../.build/packages/runtime/src/persistent-context-state.js";
+import {
+  createPostgresContextStateWorker,
+} from "../../.build/packages/runtime/src/persistent-context-state-worker.js";
 import {
   InMemoryTransientSourceStore,
 } from "../../.build/packages/transient-source/src/index.js";
@@ -285,6 +294,19 @@ export async function createPersistentSendRuntime({
       new PostgresContextSnapshotRepository(transactions);
     const contextPlanningRepository =
       new PostgresContextPlanningRepository(transactions);
+    const contextStateRepository =
+      new PostgresConversationContextStateRepository(
+        transactions,
+      );
+
+    // ConversationState registration is part of durable messaging semantics,
+    // not translation-provider availability. In external-worker mode the API
+    // intentionally has no provider loaded, but it must still register every
+    // causal operation so the external ContextState worker can reduce it.
+    const contextOperationRecorder =
+      createPostgresContextOperationRecorder({
+        repository: contextStateRepository,
+      });
 
     const transientSources = new InMemoryTransientSourceStore({
       clock,
@@ -299,6 +321,7 @@ export async function createPersistentSendRuntime({
       fingerprinter,
       envelopeProtector,
       transientSources,
+      contextOperations: contextOperationRecorder,
       envelopeTtlSeconds: config.envelopeTtlSeconds,
       transientSourceTtlSeconds: config.transientSource.ttlSeconds,
     });
@@ -323,6 +346,17 @@ export async function createPersistentSendRuntime({
       leaseSeconds: config.outboxLeaseSeconds,
     });
 
+    // Keep the reducer independently composable from the translation
+    // provider. The HTTP process may leave it idle in external-worker mode,
+    // while an embedded/external worker host can drain the same durable jobs.
+    const contextStateWorker =
+      createPostgresContextStateWorker({
+        stateRepository: contextStateRepository,
+        outboxRepository,
+        outboxService,
+        clock,
+      });
+
     const translationService =
       createPostgresTranslationExecutionService({
         repository: translationRepository,
@@ -346,6 +380,7 @@ export async function createPersistentSendRuntime({
       ? createPostgresTranslationContextRuntime({
           snapshotRepository: contextSnapshotRepository,
           planningRepository: contextPlanningRepository,
+          stateRepository: contextStateRepository,
           transientSources,
           ids,
           clock,
@@ -406,6 +441,8 @@ export async function createPersistentSendRuntime({
                  AS has_provider_executions,
                to_regclass('public.context_snapshots') IS NOT NULL
                  AS has_context_snapshots,
+               to_regclass('public.conversation_context_states') IS NOT NULL
+                 AS has_context_state,
                EXISTS (
                  SELECT 1
                    FROM information_schema.columns
@@ -442,6 +479,7 @@ export async function createPersistentSendRuntime({
             row?.has_translation_executions &&
             row?.has_provider_executions &&
             row?.has_context_snapshots &&
+            row?.has_context_state &&
             row?.has_command_fingerprint &&
             row?.has_source_required_constraint &&
             row?.has_device_platform &&
@@ -477,6 +515,7 @@ export async function createPersistentSendRuntime({
       translationService,
       translationRecoveryService,
       translationWorker,
+      contextStateWorker,
       contextRuntime,
       readinessService,
       authenticate,
@@ -485,6 +524,7 @@ export async function createPersistentSendRuntime({
       translationRepository,
       contextSnapshotRepository,
       contextPlanningRepository,
+      contextStateRepository,
       sessionRepository,
       transientSources,
       sqlPool,

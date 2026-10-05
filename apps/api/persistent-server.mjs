@@ -31,6 +31,7 @@ export async function createPersistentHermeneiaHttpRuntime(options = {}) {
   const translationWorkerRunner = runtime.translationWorker
     ? createTranslationWorkerRunner({
         worker: runtime.translationWorker,
+        contextWorker: runtime.contextStateWorker,
         config: workerConfig,
       })
     : null;

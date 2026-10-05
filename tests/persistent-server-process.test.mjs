@@ -21,7 +21,6 @@ function runtimeEnv(overrides = {}) {
     SOURCE_FINGERPRINT_HMAC_KEY_VERSION: "k1",
     SOURCE_FINGERPRINT_HMAC_KEY_BASE64: keyBase64(1),
     SOURCE_FINGERPRINT_VERIFICATION_KEYS_JSON: "[]",
-    TRANSLATION_WORKER_MODE: "external",
     ...overrides,
   };
 }
@@ -43,6 +42,7 @@ class FakeClient {
           has_translation_executions: true,
           has_provider_executions: true,
           has_context_snapshots: true,
+          has_context_state: true,
           has_command_fingerprint: true,
           has_source_required_constraint: true,
           has_device_platform: true,

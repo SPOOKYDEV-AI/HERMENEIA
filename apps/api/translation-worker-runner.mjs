@@ -26,9 +26,14 @@ export function translationWorkerRunnerConfigFromEnv(
   env = process.env,
 ) {
   const mode = env.TRANSLATION_WORKER_MODE || "embedded";
-  if (!["embedded", "external"].includes(mode)) {
+  if (mode === "external") {
     throw new TypeError(
-      "TRANSLATION_WORKER_MODE must be embedded or external",
+      "TRANSLATION_WORKER_MODE=external is not supported: raw source is process-local transient state; use embedded until a reviewed cross-process transient source transport exists",
+    );
+  }
+  if (mode !== "embedded") {
+    throw new TypeError(
+      "TRANSLATION_WORKER_MODE must be embedded",
     );
   }
 
@@ -63,6 +68,7 @@ export function translationWorkerRunnerConfigFromEnv(
 
 export function createTranslationWorkerRunner({
   worker,
+  contextWorker = null,
   config = {},
   onError = null,
 }) {
@@ -73,6 +79,15 @@ export function createTranslationWorkerRunner({
   ) {
     throw new TypeError(
       "worker.runFanoutOnce and worker.runExecuteOnce are required",
+    );
+  }
+  if (
+    contextWorker !== null &&
+    (!contextWorker ||
+      typeof contextWorker.runOnce !== "function")
+  ) {
+    throw new TypeError(
+      "contextWorker.runOnce is required when contextWorker is provided",
     );
   }
 
@@ -167,6 +182,7 @@ export function createTranslationWorkerRunner({
     cyclePromise = (async () => {
       let processed = 0;
       let fanoutResult = "NO_WORK";
+      let contextResult = "NO_WORK";
       let executeResult = "NO_WORK";
 
       for (
@@ -174,15 +190,28 @@ export function createTranslationWorkerRunner({
         i < settings.maxDrainPerCycle;
         i += 1
       ) {
+        // Translation fanout snapshots context before the current message
+        // operation is allowed to enter the durable ConversationState.
         fanoutResult = await worker.runFanoutOnce();
+        contextResult = contextWorker
+          ? await contextWorker.runOnce()
+          : "NO_WORK";
         executeResult = await worker.runExecuteOnce();
 
         const fanoutWorked = fanoutResult !== "NO_WORK";
+        const contextWorked = contextResult !== "NO_WORK";
         const executeWorked = executeResult !== "NO_WORK";
 
-        processed += Number(fanoutWorked) + Number(executeWorked);
+        processed +=
+          Number(fanoutWorked) +
+          Number(contextWorked) +
+          Number(executeWorked);
 
-        if (!fanoutWorked && !executeWorked) {
+        if (
+          !fanoutWorked &&
+          !contextWorked &&
+          !executeWorked
+        ) {
           break;
         }
       }
@@ -190,6 +219,7 @@ export function createTranslationWorkerRunner({
       return {
         processed,
         fanoutResult,
+        ...(contextWorker ? { contextResult } : {}),
         executeResult,
       };
     })();

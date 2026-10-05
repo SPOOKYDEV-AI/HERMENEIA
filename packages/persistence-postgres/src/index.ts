@@ -1911,6 +1911,41 @@ export class PostgresOutboxRepository {
       : undefined;
   }
 
+  async isJobPending(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      jobType: string;
+      businessKey: string;
+    },
+  ): Promise<boolean> {
+    const result = await tx.query<{
+      status:
+        | "AVAILABLE"
+        | "LEASED"
+        | "DONE"
+        | "DEAD"
+        | "SUPERSEDED";
+    }>(
+      `SELECT status
+         FROM outbox_jobs
+        WHERE tenant_id = $1
+          AND job_type = $2
+          AND business_key = $3`,
+      [
+        input.tenantId,
+        input.jobType,
+        input.businessKey,
+      ],
+    );
+    const row = first(result);
+    return Boolean(
+      row &&
+      (row.status === "AVAILABLE" ||
+        row.status === "LEASED"),
+    );
+  }
+
   async reactivateTranslationExecuteJob(
     tx: SqlExecutor,
     input: {
