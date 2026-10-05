@@ -45,6 +45,7 @@ class FakeClient {
           has_tenant_sync: true,
           has_translation_executions: true,
           has_provider_executions: true,
+          has_context_snapshots: true,
           has_command_fingerprint: true,
           has_source_required_constraint: true,
           has_device_platform: true,
@@ -177,6 +178,11 @@ test("persistent Send config decodes active and verification HMAC keys", () => {
     TRANSIENT_SOURCE_MAX_APPROX_BYTES: "4096",
     DELIVERY_ENVELOPE_TTL_SECONDS: "600",
     OUTBOX_LEASE_SECONDS: "45",
+    CONTEXT_RECENT_MESSAGE_LIMIT: "4",
+    CONTEXT_PAYLOAD_TTL_SECONDS: "90",
+    CONTEXT_PAYLOAD_MAX_ENTRIES: "25",
+    CONTEXT_PAYLOAD_MAX_TOTAL_CHARS: "12000",
+    CONTEXT_TOTAL_TOKENS: "1536",
   }));
 
   assert.equal(config.sourceFingerprint.keyVersion, "k2");
@@ -193,6 +199,13 @@ test("persistent Send config decodes active and verification HMAC keys", () => {
   });
   assert.equal(config.envelopeTtlSeconds, 600);
   assert.equal(config.outboxLeaseSeconds, 45);
+  assert.deepEqual(config.context, {
+    recentMessageLimit: 4,
+    payloadTtlSeconds: 90,
+    payloadMaxEntries: 25,
+    payloadMaxTotalChars: 12000,
+    totalTokens: 1536,
+  });
 });
 
 test("persistent Send config rejects malformed or weak HMAC material", () => {
@@ -396,5 +409,58 @@ test("persistent readiness rejects reachable but incomplete schema", async () =>
   });
 
   assert.equal(await runtime.readinessService.check(), false);
+  await runtime.close();
+});
+
+
+test("persistent runtime composes context bridge when translation provider is enabled", async () => {
+  FakePool.instances.length = 0;
+
+  const runtime = await createPersistentSendRuntime({
+    env: env(),
+    pgModule: { Pool: FakePool },
+    envelopeProtector: {
+      protect() {
+        return "original-protected";
+      },
+    },
+    translationProvider: {
+      providerId: "provider-test",
+      modelId: "model-test",
+      async translate() {
+        return {
+          status: "SUCCESS",
+          translatedText: "translated",
+          providerRequestId: "provider-request-1",
+        };
+      },
+    },
+    translationEnvelopeProtector: {
+      protect() {
+        return "translation-protected";
+      },
+    },
+    clock: {
+      now() {
+        return "2026-10-04T20:00:00.000Z";
+      },
+    },
+  });
+
+  assert.ok(runtime.contextRuntime);
+  assert.equal(
+    typeof runtime.contextRuntime.contextService.prepareForTranslation,
+    "function",
+  );
+  assert.equal(
+    typeof runtime.contextRuntime.contextBridge.prepare,
+    "function",
+  );
+  assert.equal(
+    typeof runtime.contextRuntime.contextBridge.resolve,
+    "function",
+  );
+  assert.ok(runtime.translationWorker);
+
   await runtime.close();
 });

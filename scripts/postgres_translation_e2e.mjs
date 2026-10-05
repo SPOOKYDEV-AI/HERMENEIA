@@ -50,6 +50,8 @@ const ids = {
   conversationId: randomUUID(),
   commandId: randomUUID(),
   clientMessageId: randomUUID(),
+  staleContextCommandId: randomUUID(),
+  staleContextClientMessageId: randomUUID(),
 };
 
 const senderKeys = await generateHpkeP256DeviceKeyPair();
@@ -71,8 +73,15 @@ const translationProvider = {
     assert.equal(input.source.language_hint, "fr-FR");
     assert.equal(input.targetLanguageTag, TARGET_LANGUAGE);
     assert.equal(input.targetProfileVersion, 1);
-    assert.equal(input.strategyVersion, "t0-v1");
-    assert.equal(input.contextSnapshotId, null);
+    assert.equal(
+      input.strategyVersion,
+      "adaptive-context-v1",
+    );
+    assert.match(
+      input.contextSnapshotId,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    assert.deepEqual(input.contextItems, []);
 
     return {
       ok: true,
@@ -221,6 +230,10 @@ async function cleanup() {
         tenant,
       );
       await db.query(
+        "DELETE FROM context_snapshots WHERE tenant_id = $1",
+        tenant,
+      );
+      await db.query(
         "DELETE FROM message_revisions WHERE tenant_id = $1",
         tenant,
       );
@@ -356,6 +369,40 @@ try {
     assert.equal(
       Number(translation.rows[0].target_profile_version),
       1,
+    );
+
+    const snapshots = await db.query(
+      `SELECT strategy,
+              strategy_version,
+              selected_candidate_ids,
+              token_estimate
+         FROM context_snapshots
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND recipient_user_id = $3`,
+      [
+        ids.tenantId,
+        accepted.message_id,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(snapshots.rowCount, 1);
+    assert.deepEqual(
+      {
+        strategy: snapshots.rows[0].strategy,
+        strategyVersion:
+          snapshots.rows[0].strategy_version,
+        selectedCandidateIds:
+          snapshots.rows[0].selected_candidate_ids,
+        tokenEstimate:
+          Number(snapshots.rows[0].token_estimate),
+      },
+      {
+        strategy: "T0",
+        strategyVersion: "adaptive-context-v1",
+        selectedCandidateIds: [],
+        tokenEstimate: 0,
+      },
     );
 
     const attempts = await db.query(
@@ -533,10 +580,112 @@ try {
     assert.equal(Number(state.rows[0].last_acked_offset), 2);
   });
 
+  const staleContextAccepted =
+    await runtime.sendService.sendMessage(
+      sender,
+      {
+        protocol_version: 1,
+        command_id: ids.staleContextCommandId,
+        client_message_id: ids.staleContextClientMessageId,
+        conversation_id: ids.conversationId,
+        source: {
+          text: "Bonjour encore",
+          language_hint: "fr-FR",
+        },
+        client_authored_at: NOW,
+      },
+    );
+
+  assert.equal(staleContextAccepted.status, "ACCEPTED");
+  assert.equal(
+    await runtime.translationWorker.runFanoutOnce(),
+    "FANOUT_DONE",
+  );
+
+  const staleContextSnapshot = await withConnection(
+    async (db) => {
+      const snapshots = await db.query(
+        `SELECT snapshot_id,
+                strategy,
+                erasure_epoch,
+                selected_candidate_ids
+           FROM context_snapshots
+          WHERE tenant_id = $1
+            AND message_id = $2
+            AND recipient_user_id = $3`,
+        [
+          ids.tenantId,
+          staleContextAccepted.message_id,
+          ids.recipientUserId,
+        ],
+      );
+      assert.equal(snapshots.rowCount, 1);
+      assert.notEqual(snapshots.rows[0].strategy, "T0");
+      assert.ok(
+        snapshots.rows[0].selected_candidate_ids.length > 0,
+      );
+
+      const bumped = await db.query(
+        `UPDATE conversations
+            SET erasure_epoch = erasure_epoch + 1
+          WHERE tenant_id = $1
+            AND conversation_id = $2
+        RETURNING erasure_epoch`,
+        [ids.tenantId, ids.conversationId],
+      );
+      assert.equal(bumped.rowCount, 1);
+      assert.equal(
+        Number(bumped.rows[0].erasure_epoch),
+        Number(snapshots.rows[0].erasure_epoch) + 1,
+      );
+
+      return snapshots.rows[0].snapshot_id;
+    },
+  );
+
+  assert.match(
+    staleContextSnapshot,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  );
+
+  assert.equal(
+    await runtime.translationWorker.runExecuteOnce(),
+    "SUPERSEDED",
+  );
+  assert.equal(providerCalls, 1);
+
+  await withConnection(async (db) => {
+    const execution = await db.query(
+      `SELECT status
+         FROM translation_executions
+        WHERE tenant_id = $1
+          AND source_message_id = $2
+          AND recipient_user_id = $3`,
+      [
+        ids.tenantId,
+        staleContextAccepted.message_id,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(execution.rowCount, 1);
+    assert.equal(execution.rows[0].status, "SUPERSEDED");
+
+    const translated = await db.query(
+      `SELECT COUNT(*)::integer AS count
+         FROM delivery_envelopes
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND rendition_type = 'TRANSLATION'`,
+      [ids.tenantId, staleContextAccepted.message_id],
+    );
+    assert.equal(Number(translated.rows[0].count), 0);
+  });
+
   process.stdout.write(
     "POSTGRES_TRANSLATION_E2E=PASS " +
     "send=accepted fanout=done execute=done " +
-    "hpke=original+translation sync=2 ack=purged\n",
+    "hpke=original+translation sync=2 ack=purged " +
+    "erasure_epoch=stale-context-superseded\n",
   );
 } catch (error) {
   failure = error;

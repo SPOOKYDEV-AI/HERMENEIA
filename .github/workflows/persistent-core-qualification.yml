@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feat/persistent-send-service-v1
+      - feat/context-engine-runtime-v1
   workflow_dispatch:
 
 permissions:

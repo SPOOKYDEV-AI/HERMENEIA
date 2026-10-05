@@ -293,7 +293,7 @@ test("fanout plan resolves locale override and membership version without source
   );
 });
 
-test("publish lock verifies current source revision and target profile", async () => {
+test("publish lock verifies source, target profile and context erasure frontier", async () => {
   const connection = new ScriptedConnection([
     { rows: [row()], rowCount: 1 },
   ]);
@@ -314,7 +314,15 @@ test("publish lock verifies current source revision and target profile", async (
   assert.match(sql.text, /mm\.current_revision = te\.source_revision/);
   assert.match(sql.text, /cm\.membership_version = te\.target_profile_version/);
   assert.match(sql.text, /target_locale_override/);
-  assert.match(sql.text, /FOR UPDATE OF te, mm, cm/);
+  assert.match(sql.text, /JOIN conversations c/);
+  assert.match(sql.text, /c\.status = 'ACTIVE'/);
+  assert.match(sql.text, /te\.context_snapshot_id IS NULL/);
+  assert.match(sql.text, /FROM context_snapshots cs/);
+  assert.match(
+    sql.text,
+    /cs\.erasure_epoch = c\.erasure_epoch/,
+  );
+  assert.match(sql.text, /FOR UPDATE OF te, mm, cm, c/);
 });
 
 test("translation publish device query locks active devices with public material", async () => {

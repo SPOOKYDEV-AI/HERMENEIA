@@ -145,6 +145,12 @@ export interface PersistentMessagingStore<Tx> {
     conversationId: UUID,
   ): Promise<PersistentOperationAllocation | undefined>;
 
+  bumpConversationErasureEpoch(
+    tx: Tx,
+    actor: ActorContext,
+    conversationId: UUID,
+  ): Promise<number | undefined>;
+
   updateMessageRevisionPointer(
     tx: Tx,
     input: {
@@ -918,6 +924,19 @@ export class PersistentMessagingService<Tx> {
           );
         }
 
+        const nextErasureEpoch =
+          await this.deps.store.bumpConversationErasureEpoch(
+            tx,
+            actor,
+            message.conversationId,
+          );
+        if (nextErasureEpoch === undefined) {
+          throw new DomainError(
+            "NOT_AUTHORIZED",
+            "Conversation is not available to actor",
+          );
+        }
+
         const allocation =
           await this.deps.store.allocateOperationSequence(
             tx,
@@ -1243,6 +1262,20 @@ export class PersistentMessagingService<Tx> {
 
       const previousRevision = message.currentRevision;
       const newRevision = previousRevision + 1;
+
+      const nextErasureEpoch =
+        await this.deps.store.bumpConversationErasureEpoch(
+          tx,
+          actor,
+          message.conversationId,
+        );
+      if (nextErasureEpoch === undefined) {
+        throw new DomainError(
+          "NOT_AUTHORIZED",
+          "Conversation is not available to actor",
+        );
+      }
+
       previousTransientKey = {
         tenantId: actor.tenantId,
         messageId: command.message_id,

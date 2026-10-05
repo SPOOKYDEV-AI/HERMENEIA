@@ -317,6 +317,10 @@ export class PostgresTranslationRepository {
           AND mm.message_id = te.source_message_id
           AND mm.current_revision = te.source_revision
           AND mm.status = 'ACTIVE'
+         JOIN conversations c
+           ON c.tenant_id = te.tenant_id
+          AND c.conversation_id = te.conversation_id
+          AND c.status = 'ACTIVE'
          JOIN conversation_members cm
            ON cm.tenant_id = te.tenant_id
           AND cm.conversation_id = te.conversation_id
@@ -330,7 +334,17 @@ export class PostgresTranslationRepository {
         WHERE te.tenant_id = $1
           AND te.translation_id = $2
           AND te.status = 'PENDING'
-        FOR UPDATE OF te, mm, cm`,
+          AND (
+            te.context_snapshot_id IS NULL
+            OR EXISTS (
+              SELECT 1
+                FROM context_snapshots cs
+               WHERE cs.tenant_id = te.tenant_id
+                 AND cs.snapshot_id = te.context_snapshot_id
+                 AND cs.erasure_epoch = c.erasure_epoch
+            )
+          )
+        FOR UPDATE OF te, mm, cm, c`,
       [tenantId, translationId],
     );
     const row = first(result);
