@@ -15,12 +15,14 @@ export type ContextCandidateType =
   | "ACTIVE_EPISODE"
   | "RECOVERY_CHECKPOINT"
   | "CORRECTION_MEMORY"
+  | "USER_PREFERENCE"
   | "APPROVED_POLICY";
 
 export type ContextPrivacyScope =
   | "TRANSIENT"
   | "CHECKPOINT"
   | "CORRECTION"
+  | "PREFERENCE"
   | "POLICY";
 
 export type CorrectionTrigger =
@@ -40,6 +42,7 @@ export interface ConversationContextState {
   terminologyClaimRefs?: UUID[];
   lexicalClaimRefs?: UUID[];
   correctionClaimRefs?: UUID[];
+  styleClaimRefs?: UUID[];
   updatedAt: string;
 }
 
@@ -544,6 +547,8 @@ export class ContextEngine {
         ({ candidate }) =>
           candidate.candidateType ===
             "CORRECTION_MEMORY" ||
+          candidate.candidateType ===
+            "USER_PREFERENCE" ||
           candidate.candidateType ===
             "APPROVED_POLICY",
       ),
