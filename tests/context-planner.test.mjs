@@ -35,6 +35,7 @@ function frame(overrides = {}) {
     currentOperationSequence: 8,
     currentMessageAcceptedAt: "2026-10-04T20:00:00.000Z",
     currentSourceAuthorUserId: "user-a",
+    currentSourceLanguageTag: "fr-FR",
     erasureEpoch: 2,
     recentMessages: [
       {
@@ -226,6 +227,10 @@ test("planner chooses T2 only when compatible state materialises a derived candi
       async load(_input, state, planningFrame) {
         assert.equal(state.contextVersion, 4);
         assert.equal(planningFrame.currentOperationSequence, 8);
+        assert.equal(
+          planningFrame.currentSourceLanguageTag,
+          "fr-FR",
+        );
         return [{
           candidateId: "episode:episode-1:3",
           candidateType: "ACTIVE_EPISODE",
