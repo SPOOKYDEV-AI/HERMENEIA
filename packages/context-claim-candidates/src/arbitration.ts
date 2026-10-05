@@ -62,6 +62,29 @@ export function arbitrateCandidateClaims(
       continue;
     }
 
+    const explicitPreferences = group.filter(
+      ({ claim }) =>
+        claim.authorityClass ===
+          "EXPLICIT_PREFERENCE",
+    );
+
+    if (explicitPreferences.length > 0) {
+      const targetSpecific =
+        explicitPreferences.filter(
+          ({ proposition }) =>
+            proposition.kind ===
+              "STYLE_PREFERENCE" &&
+            proposition.targetLanguageTag !== null,
+        );
+      const winner = resolveConsensus(
+        targetSpecific.length > 0
+          ? targetSpecific
+          : explicitPreferences,
+      );
+      if (winner) resolved.push(winner);
+      continue;
+    }
+
     const speakerScoped = group.filter(
       ({ claim }) =>
         claim.authorityClass ===
@@ -149,15 +172,22 @@ function semanticKey(
   // Language applicability is resolved before arbitration. At this point a
   // generic claim and a language-specific claim may both apply to the same
   // current message, so qualifiers must not split them into separate keys.
-  return proposition.kind === "TERM_MEANING"
-    ? JSON.stringify([
-        proposition.kind,
-        proposition.surfaceForm,
-      ])
-    : JSON.stringify([
-        proposition.kind,
-        proposition.sourceForm,
-      ]);
+  if (proposition.kind === "TERM_MEANING") {
+    return JSON.stringify([
+      proposition.kind,
+      proposition.surfaceForm,
+    ]);
+  }
+  if (proposition.kind === "PREFERRED_RENDERING") {
+    return JSON.stringify([
+      proposition.kind,
+      proposition.sourceForm,
+    ]);
+  }
+  return JSON.stringify([
+    proposition.kind,
+    "preferred_register",
+  ]);
 }
 
 function propositionValueKey(
@@ -170,9 +200,16 @@ function propositionValueKey(
     ]);
   }
 
+  if (proposition.kind === "PREFERRED_RENDERING") {
+    return JSON.stringify([
+      semanticKey(proposition),
+      proposition.targetForm,
+    ]);
+  }
+
   return JSON.stringify([
     semanticKey(proposition),
-    proposition.targetForm,
+    proposition.preferredRegister,
   ]);
 }
 
