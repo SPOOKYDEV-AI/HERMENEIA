@@ -2088,7 +2088,7 @@ try {
     assert.equal(tenant.rowCount, 1);
     assert.equal(
       Number(tenant.rows[0].policy_version),
-      3,
+      4,
     );
 
     const conversationPolicy = await db.query(
