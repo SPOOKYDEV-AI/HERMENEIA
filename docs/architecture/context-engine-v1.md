@@ -1,6 +1,6 @@
 # HERMENEIA Context Engine V1
 
-**Status:** Design baseline  
+**Status:** Executable T0/T1 runtime baseline; T2 derived-state pipeline incomplete  
 **Version:** 1  
 **Primary goals:** translation quality, low latency, temporal correctness, reproducibility
 
@@ -13,6 +13,22 @@ The Context Engine answers one question:
 It does not own message transport and does not call a specific AI provider directly.
 
 Its output is a versioned ContextSnapshot consumed by the Translation Engine.
+
+### Executable baseline qualified in PostgreSQL
+
+The current V1 runtime implements and tests:
+
+- metadata-only immutable `ContextSnapshot` persistence in migration 0012;
+- T0 snapshots even when no contextual candidate is selected, so translation decisions remain traceable without persisting plaintext;
+- T1 recent-message context sourced only from the bounded transient source store;
+- bounded in-memory context payloads with TTL and fail-closed T0 fallback when contextual payload cannot be admitted or recovered;
+- exact source revision, recipient profile and active-conversation fences before translation publication;
+- a conversation content-invalidation frontier carried by `erasure_epoch`;
+- edit and delete advancing that frontier transactionally;
+- stale ContextSnapshots being rejected when their epoch no longer matches the authoritative conversation epoch;
+- a real PostgreSQL E2E proving stale contextual work is superseded before another provider call and cannot publish a TRANSLATION envelope.
+
+The persistent runtime does **not** yet make T2 production-complete. The engine contains adaptive T2 selection semantics and causal/future-leakage tests, but persistent derived `ConversationContextState`, enrichment workers, episode/memory state and their dependency index remain future implementation work.
 
 ## 2. Design principle: understand progressively
 
@@ -293,6 +309,10 @@ It should identify:
 
 The snapshot must be sufficient to explain and reproduce evaluation decisions without unnecessarily duplicating private text.
 
+The executable V1 schema persists snapshot metadata/provenance only. Selected plaintext remains in the bounded transient context payload store. A T0 decision still receives a durable snapshot with an empty selected-candidate set.
+
+`erasure_epoch` is the authoritative **content-invalidation frontier** for prepared context in the current V1 runtime. Replacing a source through edit or removing it through delete advances the epoch in the same transaction as the mutation. Publication locks the active conversation and accepts a referenced ContextSnapshot only when its recorded epoch still equals the current conversation epoch. This deliberately invalidates more prepared context than a future fine-grained dependency index may need, but it fails closed and prevents old text from being reintroduced.
+
 ## 14. Fast-path stale-state reconciliation
 
 Example race:
@@ -419,6 +439,8 @@ Deletion/invalidation may affect:
 - ContextSnapshots according to retention policy.
 
 Caches must not resurrect deleted data after authoritative deletion.
+
+For the executable T0/T1 baseline, edit/delete invalidation is intentionally conversation-wide through `erasure_epoch`. Transient payload bytes may remain resident until their bounded TTL expires, but a stale snapshot cannot pass the authoritative publish fence after the epoch advances. Future T2 dependency indexing may narrow invalidation while preserving the same fail-closed publication rule.
 
 ## 22. Latency SLO candidates
 

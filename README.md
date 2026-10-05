@@ -98,9 +98,9 @@ The Context Engine is the main research and engineering differentiator. Messagin
 
 ## Repository status
 
-**Persistent Core V1 execution is active and qualified against disposable PostgreSQL 16: Send, command recovery, edit/delete, tenant-scoped sync/ACK, session/device trust, translation outbox/recovery/worker orchestration, HPKE publication, recipient decrypt and ACK/payload purge now execute end-to-end in CI. The suite currently passes 255/255 Node regressions plus migration, runtime and real SIGTERM gates. Independent cryptographic/platform review, live external-provider qualification with controlled credentials, and target-deployment crash/restart recovery remain open production gates.**
+**Persistent Core V1 and the first executable Context Engine runtime are qualified against disposable PostgreSQL 16. Send, command recovery, edit/delete, tenant-scoped sync/ACK, session/device trust, translation outbox/recovery, metadata-only ContextSnapshots, bounded transient context, HPKE publication, recipient decrypt and ACK/payload purge execute through the real persistence/runtime path. The qualification suite currently passes 305/305 Node regressions, migrations through 0012, real process/SIGTERM checks and PostgreSQL translation E2E.**
 
-The repository now contains executable messaging and translation control-plane code as well as the architecture/research contracts. The next major implementation focus is the context engine and its measurable T0/T1/T2 behaviour, after the remaining persistence/security production gates are closed.
+The persistent Context runtime currently qualifies the T0/T1 baseline. T2 adaptive engine semantics and tests exist, but durable derived ContextState/enrichment is not yet wired as a production-complete persistent pipeline. Message edit/delete advance the conversation content-invalidation frontier, and translation publication rejects snapshots whose erasure epoch is stale before provider invocation/publication. Independent cryptographic/platform review, live external-provider qualification with controlled credentials, target-deployment crash/restart recovery and the remaining T2 derived-state pipeline remain open gates.
 
 ## Documentation
 
@@ -126,6 +126,8 @@ The repository now contains executable messaging and translation control-plane c
 - [PostgreSQL Core Schema — V1](docs/engineering/postgres-core-schema-v1.md)
 - [PostgreSQL Persistence Ports — V1](docs/engineering/postgres-persistence-ports-v1.md)
 - [Persistent Messaging Execution — V1](docs/architecture/persistent-send-v1.md)
+- [Context Engine — V1](docs/architecture/context-engine-v1.md)
+- [Context Integrity, Provenance and Memory Safety — V1](docs/architecture/context-integrity-v1.md)
 - [OpenAI Translation Provider — V1](docs/engineering/openai-translation-provider-v1.md)
 - [Privacy and data minimisation](docs/security/privacy-data-minimisation.md)
 - [Ephemeral messages and corrective memory](docs/architecture/ephemeral-message-memory-v1.md)

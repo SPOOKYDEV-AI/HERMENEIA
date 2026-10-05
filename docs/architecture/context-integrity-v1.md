@@ -1,6 +1,6 @@
 # Context Integrity, Provenance and Memory Safety — V1
 
-**Status:** Design baseline  
+**Status:** Design baseline with executable T0/T1 integrity fences  
 **Scope:** Context Engine, Memory, Translation traceability  
 **Primary goal:** ensure that HERMENEIA can be wrong safely
 
@@ -216,6 +216,8 @@ HERMENEIA should:
 
 ## 11. Message edit workflow
 
+In the executable T0/T1 runtime, a successful edit advances the conversation `erasure_epoch` transactionally before the replacement revision is published. This is the current coarse-grained invalidation frontier: any previously prepared ContextSnapshot from the older epoch becomes ineligible for translation publication.
+
 Editing a message can change:
 
     entities
@@ -237,6 +239,8 @@ Dependencies are recomputed from the earliest affected sequence or dependency bo
 ## 12. Message deletion workflow
 
 Deletion must remove or invalidate derived content that depends on the deleted source.
+
+The executable runtime advances the same conversation `erasure_epoch` used for replacement/edit invalidation. The bump is part of the mutation transaction, so rollback restores the previous frontier and an idempotent retry does not advance it twice.
 
 The system should maintain a deletion frontier so that stale workers cannot recreate data after deletion.
 
@@ -386,6 +390,10 @@ Only authorised application actions can create:
 Conversation text may create hypotheses, never privileged configuration.
 
 ## 21. Dependency invalidation
+
+The current persistent T0/T1 implementation uses a conservative conversation-wide epoch fence before the future fine-grained dependency index exists. `lockCurrentTranslationForPublish()` locks the authoritative conversation and rejects a ContextSnapshot whose `erasure_epoch` is stale. The same check runs on worker preflight and again at final publication, so a stale snapshot cannot produce a deliverable translation.
+
+This does not make an already-started external provider request reversible: if a mutation commits while provider I/O is already in flight, final publication is still rejected, but data already sent to that configured processor cannot be unsent. Provider trust/processing policy therefore remains a separate boundary.
 
 A dependency index should support:
 
