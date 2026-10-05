@@ -84,6 +84,7 @@ function fixture({
   planningFrame = frame(),
   state = null,
   derivedCandidates = undefined,
+  controlPlaneCandidates = undefined,
 } = {}) {
   const transientSources =
     new InMemoryTransientSourceStore({
@@ -110,6 +111,7 @@ function fixture({
           },
         },
     derivedCandidates,
+    controlPlaneCandidates,
   });
 
   return { planner, transientSources };
@@ -425,4 +427,158 @@ test("planner rejects derived state from a stale policy version and degrades to 
   assert.equal(result.strategy, "T1");
   assert.equal(result.state, null);
   assert.equal(result.policyVersion, 2);
+});
+
+
+function approvedPolicyCandidate(overrides = {}) {
+  return {
+    candidateId: "claim:tenant-policy:1",
+    candidateType: "APPROVED_POLICY",
+    content: JSON.stringify({
+      kind: "trusted_term_meaning",
+      surface_form: "SLA",
+      meaning: "service level agreement",
+      source_language_tag: "fr-FR",
+    }),
+    sourceMessageSequence: null,
+    causalThroughOperationSequence: 7,
+    sourceRevisionRefs: [],
+    claimRefs: ["tenant-policy:1"],
+    semanticScore: 1,
+    temporalScore: 1,
+    confidence: 1,
+    importance: 1,
+    explicitReference: false,
+    activeEpisode: false,
+    tokenEstimate: 12,
+    privacyScope: "POLICY",
+    erasureEpoch: 2,
+    validUntil: null,
+    correctionTrigger: null,
+    ...overrides,
+  };
+}
+
+test("tenant control-plane evidence can select T2 without ConversationState", async () => {
+  let controlLoads = 0;
+  const { planner, transientSources } = fixture({
+    state: null,
+    controlPlaneCandidates: {
+      async load(_input, planningFrame) {
+        controlLoads += 1;
+        assert.equal(
+          planningFrame.policyVersion,
+          1,
+        );
+        return [approvedPolicyCandidate()];
+      },
+    },
+  });
+
+  put(transientSources, "message-7", 1, "recent seven");
+  const result = await planner.load(request());
+
+  assert.equal(controlLoads, 1);
+  assert.equal(result.state, null);
+  assert.equal(
+    result.strategy,
+    "T2_ADAPTIVE_V1",
+  );
+  assert.equal(
+    result.candidates.some(
+      (candidate) =>
+        candidate.candidateType ===
+          "APPROVED_POLICY",
+    ),
+    true,
+  );
+});
+
+test("stale policy-version state is discarded while current tenant control-plane evidence remains live", async () => {
+  let stateDerivedLoads = 0;
+  let controlLoads = 0;
+  const { planner, transientSources } = fixture({
+    planningFrame: frame({
+      policyVersion: 2,
+    }),
+    state: {
+      conversationId: "conversation-1",
+      contextVersion: 4,
+      processedPrefixOperationSequence: 7,
+      processingGapOperationSequences: [],
+      erasureEpoch: 2,
+      policyVersion: 1,
+      activeEpisodeId: "episode-stale",
+      activeEpisodeVersion: 3,
+      updatedAt: "2026-10-04T19:59:59.000Z",
+    },
+    derivedCandidates: {
+      async load() {
+        stateDerivedLoads += 1;
+        return [approvedPolicyCandidate()];
+      },
+    },
+    controlPlaneCandidates: {
+      async load(_input, planningFrame) {
+        controlLoads += 1;
+        assert.equal(
+          planningFrame.policyVersion,
+          2,
+        );
+        return [approvedPolicyCandidate()];
+      },
+    },
+  });
+
+  put(transientSources, "message-7", 1, "recent seven");
+  const result = await planner.load(request());
+
+  assert.equal(stateDerivedLoads, 0);
+  assert.equal(controlLoads, 1);
+  assert.equal(result.state, null);
+  assert.equal(result.policyVersion, 2);
+  assert.equal(
+    result.strategy,
+    "T2_ADAPTIVE_V1",
+  );
+});
+
+test("control-plane candidate failure fails soft to T1 without calling stale state-derived adapter", async () => {
+  let stateDerivedLoads = 0;
+  const { planner, transientSources } = fixture({
+    planningFrame: frame({
+      policyVersion: 2,
+    }),
+    state: {
+      conversationId: "conversation-1",
+      contextVersion: 4,
+      processedPrefixOperationSequence: 7,
+      processingGapOperationSequences: [],
+      erasureEpoch: 2,
+      policyVersion: 1,
+      activeEpisodeId: null,
+      activeEpisodeVersion: null,
+      updatedAt: "2026-10-04T19:59:59.000Z",
+    },
+    derivedCandidates: {
+      async load() {
+        stateDerivedLoads += 1;
+        return [];
+      },
+    },
+    controlPlaneCandidates: {
+      async load() {
+        throw new Error(
+          "tenant policy view unavailable",
+        );
+      },
+    },
+  });
+
+  put(transientSources, "message-7", 1, "recent seven");
+  const result = await planner.load(request());
+
+  assert.equal(stateDerivedLoads, 0);
+  assert.equal(result.state, null);
+  assert.equal(result.strategy, "T1");
 });
