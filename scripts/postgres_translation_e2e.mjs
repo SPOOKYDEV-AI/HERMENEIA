@@ -48,6 +48,15 @@ const STYLE_SOURCE_TEXT =
   "Peux-tu me confirmer le SLA ?";
 const POST_STYLE_RESET_SOURCE_TEXT =
   "Le SLA reste important après reset.";
+const EPISODE_SOURCE_TEXTS = [
+  "On prépare la démo client.",
+  "Il faut vérifier le parcours mobile.",
+  "Le bouton principal doit rester visible.",
+  "On garde la traduction instantanée.",
+  "Le contexte doit suivre la discussion.",
+  "On valide les derniers détails.",
+  "Tu peux résumer ce qu'on vient de décider ?",
+];
 const FEEDBACK_NOTE =
   "private feedback detail that must not persist";
 const TRANSLATED_TEXT = "Hola mundo 👋";
@@ -86,6 +95,10 @@ const ids = {
   toneResetCommandId: randomUUID(),
   postStyleResetCommandId: randomUUID(),
   postStyleResetClientMessageId: randomUUID(),
+  episodeCommandIds:
+    Array.from({ length: 7 }, () => randomUUID()),
+  episodeClientMessageIds:
+    Array.from({ length: 7 }, () => randomUUID()),
   stalePolicyCommandId: randomUUID(),
   stalePolicyClientMessageId: randomUUID(),
   staleContextCommandId: randomUUID(),
@@ -230,6 +243,92 @@ const translationProvider = {
         ),
         false,
       );
+    } else if (
+      providerCalls >= 7 &&
+      providerCalls <= 12
+    ) {
+      const episodeIndex =
+        providerCalls - 7;
+      assert.equal(
+        input.source.text,
+        EPISODE_SOURCE_TEXTS[episodeIndex],
+      );
+
+      if (providerCalls === 7) {
+        assert.equal(
+          input.contextItems.some(
+            (item) =>
+              item.candidateType ===
+                "ACTIVE_EPISODE",
+          ),
+          false,
+          "episode older than continuity gap must not leak before reducer starts the new episode",
+        );
+      }
+    } else if (providerCalls === 13) {
+      assert.equal(
+        input.source.text,
+        EPISODE_SOURCE_TEXTS[6],
+      );
+
+      const episodeItem =
+        input.contextItems.find(
+          (item) =>
+            item.candidateType ===
+              "ACTIVE_EPISODE",
+        );
+      assert.ok(episodeItem);
+      assert.equal(
+        episodeItem.selectionReason,
+        "ACTIVE_EPISODE",
+      );
+
+      const episode =
+        JSON.parse(episodeItem.content);
+      assert.equal(
+        episode.kind,
+        "trusted_active_episode_tail",
+      );
+      assert.equal(
+        episode.episode_version,
+        6,
+      );
+      assert.ok(
+        episode.continuity_confidence >= 0.6 &&
+        episode.continuity_confidence <= 1,
+      );
+      assert.deepEqual(
+        episode.messages,
+        EPISODE_SOURCE_TEXTS
+          .slice(0, 3)
+          .map((source_text) => ({
+            source_text,
+          })),
+      );
+
+      const immediateContents =
+        input.contextItems
+          .filter(
+            (item) =>
+              item.candidateType ===
+                "IMMEDIATE_MESSAGE",
+          )
+          .map((item) => item.content);
+
+      for (const oldText of EPISODE_SOURCE_TEXTS.slice(0, 3)) {
+        assert.equal(
+          immediateContents.includes(oldText),
+          false,
+          "episode-tail source must not be duplicated into nominal immediate window",
+        );
+      }
+      for (const recentText of EPISODE_SOURCE_TEXTS.slice(3, 6)) {
+        assert.equal(
+          immediateContents.includes(recentText),
+          true,
+          "three most recent prior messages remain immediate context",
+        );
+      }
     } else {
       assert.fail(
         `Unexpected provider call #${providerCalls}`,
