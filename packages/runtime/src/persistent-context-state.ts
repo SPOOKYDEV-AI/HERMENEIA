@@ -13,9 +13,25 @@ import type {
 import type {
   PostgresConversationContextStateRepository,
 } from "../../persistence-postgres/src/context-state.js";
+import {
+  restoreContextStateFromCheckpoint,
+  type RecoveryCheckpointV1,
+} from "../../context-recovery/src/index.js";
 
 export interface PostgresContextOperationRecorderDependencies {
   repository: PostgresConversationContextStateRepository;
+  recoveryCheckpoints?: {
+    loadValidForRestore(
+      tx: SqlExecutor,
+      input: {
+        tenantId: string;
+        conversationId: string;
+        requiredProcessedPrefixOpSeq: number;
+        strategyVersion: string;
+        now: string;
+      },
+    ): Promise<RecoveryCheckpointV1 | undefined>;
+  };
   strategyVersion?: string;
 }
 
@@ -40,27 +56,68 @@ export function createPostgresContextOperationRecorder(
       });
 
       if (!existing) {
-        let created =
-          input.opSeq === 1
-            ? createInitialContextState({
-                tenantId: input.tenantId,
-                conversationId: input.conversationId,
-                membershipEpoch: input.membershipEpoch,
-                erasureEpoch: input.erasureEpoch,
-                policyVersion: input.policyVersion,
-                strategyVersion,
-                now: input.registeredAt,
-              })
-            : createDegradedContextStateFromFloor({
-                tenantId: input.tenantId,
-                conversationId: input.conversationId,
-                causalFloorOpSeq: input.opSeq - 1,
-                membershipEpoch: input.membershipEpoch,
-                erasureEpoch: input.erasureEpoch,
-                policyVersion: input.policyVersion,
-                strategyVersion,
-                now: input.registeredAt,
-              });
+        let created;
+
+        if (input.opSeq === 1) {
+          created = createInitialContextState({
+            tenantId: input.tenantId,
+            conversationId: input.conversationId,
+            membershipEpoch: input.membershipEpoch,
+            erasureEpoch: input.erasureEpoch,
+            policyVersion: input.policyVersion,
+            strategyVersion,
+            now: input.registeredAt,
+          });
+        } else {
+          const checkpoint =
+            deps.recoveryCheckpoints
+              ? await deps.recoveryCheckpoints.loadValidForRestore(
+                  tx,
+                  {
+                    tenantId: input.tenantId,
+                    conversationId:
+                      input.conversationId,
+                    requiredProcessedPrefixOpSeq:
+                      input.opSeq - 1,
+                    strategyVersion,
+                    now: input.registeredAt,
+                  },
+                )
+              : undefined;
+
+          created =
+            checkpoint
+              ? restoreContextStateFromCheckpoint(
+                  checkpoint,
+                  {
+                    tenantId: input.tenantId,
+                    conversationId:
+                      input.conversationId,
+                    requiredProcessedPrefixOpSeq:
+                      input.opSeq - 1,
+                    strategyVersion,
+                    now: input.registeredAt,
+                  },
+                )
+              : null;
+
+          created ??=
+            createDegradedContextStateFromFloor({
+              tenantId: input.tenantId,
+              conversationId:
+                input.conversationId,
+              causalFloorOpSeq:
+                input.opSeq - 1,
+              membershipEpoch:
+                input.membershipEpoch,
+              erasureEpoch:
+                input.erasureEpoch,
+              policyVersion:
+                input.policyVersion,
+              strategyVersion,
+              now: input.registeredAt,
+            });
+        }
 
         created = registerContextOperation(created, {
           opSeq: input.opSeq,
