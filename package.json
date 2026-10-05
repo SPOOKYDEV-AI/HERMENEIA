@@ -12,6 +12,7 @@
     "verify": "npm run typecheck && npm test",
     "smoke:postgres-runtime": "npm run build && node scripts/postgres_runtime_smoke.mjs",
     "smoke:persistent-process-signal": "npm run build && node scripts/persistent_process_signal_smoke.mjs",
+    "smoke:postgres-translation-e2e": "npm run build && node scripts/postgres_translation_e2e.mjs",
     "smoke:openai-provider-live": "node scripts/openai_provider_live_smoke.mjs",
     "start:persistent": "npm run build && node apps/api/start-persistent-server.mjs"
   },

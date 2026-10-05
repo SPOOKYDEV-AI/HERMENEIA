@@ -178,6 +178,12 @@ def run_runtime() -> None:
         "smoke:persistent-process-signal",
         timeout=RUNTIME_TIMEOUT_SECONDS,
     )
+    run(
+        "npm",
+        "run",
+        "smoke:postgres-translation-e2e",
+        timeout=RUNTIME_TIMEOUT_SECONDS,
+    )
     print("LOCAL_CI_STAGE_RUNTIME=PASS")
 
 
