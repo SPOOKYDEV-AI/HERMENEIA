@@ -186,7 +186,11 @@ paths:
               $ref: '#/components/schemas/TranslationFeedbackRequest'
       responses:
         '202':
-          description: Repair/problem signal recorded.
+          description: Repair/problem signal recorded without automatically promoting durable memory.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslationFeedbackResult'
         '403':
           $ref: '#/components/responses/Forbidden'
   /v1/conversations/{conversation_id}/corrections:
@@ -585,6 +589,22 @@ components:
         note:
           type: string
           maxLength: 2048
+    TranslationFeedbackResult:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - repair_event_id
+        - status
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        repair_event_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [RECORDED, NEEDS_CONFIRMATION]
     CorrectionRequest:
       type: object
       additionalProperties: false
