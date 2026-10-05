@@ -832,3 +832,42 @@ test("context snapshot records the authoritative tenant policy version", () => {
 
   assert.equal(result.snapshot.tenantPolicyVersion, 9);
 });
+
+
+test("explicit speaker style profile is selected with dedicated T2 reason", () => {
+  const engine = new ContextEngine();
+
+  const result = engine.build(input({
+    candidates: [
+      candidate({
+        candidateId: "style:repair-1",
+        candidateType: "STYLE_PROFILE",
+        sourceMessageSequence: null,
+        causalThroughOperationSequence: 7,
+        content: JSON.stringify({
+          kind: "trusted_conversation_style",
+          preferred_register: "FORMAL",
+        }),
+        privacyScope: "STYLE",
+        semanticScore: 1,
+        temporalScore: 1,
+        confidence: 1,
+        importance: 1,
+        correctionTrigger: null,
+      }),
+    ],
+  }));
+
+  assert.deepEqual(
+    result.selected.map((item) => item.candidateId),
+    ["style:repair-1"],
+  );
+  assert.equal(
+    result.selected[0].selectionReason,
+    "STYLE_PROFILE",
+  );
+  assert.deepEqual(
+    result.snapshot.selectedClaimRefs,
+    [],
+  );
+});
