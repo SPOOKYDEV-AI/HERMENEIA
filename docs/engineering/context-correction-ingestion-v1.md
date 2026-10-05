@@ -131,6 +131,41 @@ The old claim becomes `INVALIDATED`, receives a bounded `valid_until`, and gets 
 
 This preserves history and provenance while ensuring current T2 planning sees one active correction per subject/key rather than contradictory active memories.
 
+## Revocation without replacement
+
+The persistent runtime also implements:
+
+```text
+POST /v1/conversations/{conversation_id}/corrections/{claim_id}/revoke
+```
+
+Revocation never deletes the durable claim row.
+
+Authority is deliberately asymmetric:
+
+- a speaker-scoped claim (`subject_user_id != NULL`) may be revoked only by that subject user;
+- a moderator/admin/owner cannot use this endpoint to revoke another speaker's explicit intended meaning;
+- a generic correction (`subject_user_id = NULL`) may be revoked by a conversation `MODERATOR` or tenant `ADMIN/OWNER`;
+- inactive, superseded, non-correction, cross-conversation or otherwise unavailable claim identifiers fail closed.
+
+The revocation command uses the shared durable command ledger and a dedicated `context.correction.revoke` fingerprint. The claim is locked `FOR UPDATE` before authority is applied.
+
+One transaction performs:
+
+```text
+command receipt
+  -> ACTIVE correction claim row lock
+  -> EXPLICIT_CORRECTION repair/audit event
+  -> claim status = REVOKED + bounded valid_until
+  -> INVALIDATED_BY provenance: claim -> repair event
+  -> remove correction ref from ConversationState
+  -> command receipt SUCCEEDED
+```
+
+If ConversationState is absent, revocation does not fabricate one merely to remove a reference.
+
+The real PostgreSQL E2E then sends another message from the same speaker and proves the resulting provider request contains no `CORRECTION_MEMORY`.
+
 ## Qualification
 
 The persistent qualification suite exercises:
@@ -154,6 +189,5 @@ Still separate work:
 - tenant-wide glossary/policy distribution;
 - typed TONE/style memory;
 - moderation flow that converts `NEEDS_CONFIRMATION` feedback into an explicit structured correction;
-- claim revocation/supersession workflow;
-- dependency-aware invalidation;
+- dependency-aware invalidation beyond explicit correction supersession/revocation;
 - semantic episode derivation and recovery checkpoints.
