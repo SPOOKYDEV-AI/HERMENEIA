@@ -45,6 +45,7 @@ function row(overrides = {}) {
     recipient_user_id: "user-b",
     target_language_tag: "es-CO",
     target_profile_version: 1,
+    preferred_register: null,
     context_snapshot_id: null,
     strategy_version: "t0-v1",
     status: "PENDING",
@@ -65,6 +66,7 @@ function key() {
     recipientUserId: "user-b",
     targetLanguageTag: "es-CO",
     targetProfileVersion: 1,
+    preferredRegister: null,
     contextSnapshotId: null,
     strategyVersion: "t0-v1",
   };
@@ -86,7 +88,11 @@ test("translation logical lookup is null-safe and fully parameterized", async ()
   const sql = connection.queries[1];
   assert.match(
     sql.text,
-    /context_snapshot_id IS NOT DISTINCT FROM \$8::uuid/,
+    /preferred_register IS NOT DISTINCT FROM \$8/,
+  );
+  assert.match(
+    sql.text,
+    /context_snapshot_id IS NOT DISTINCT FROM \$9::uuid/,
   );
   assert.deepEqual(sql.params, [
     "tenant-1",
@@ -96,6 +102,7 @@ test("translation logical lookup is null-safe and fully parameterized", async ()
     "user-b",
     "es-CO",
     1,
+    null,
     null,
     "t0-v1",
   ]);
@@ -255,6 +262,7 @@ test("fanout plan resolves locale override and membership version without source
         user_id: "user-b",
         target_language_tag: "es-CO",
         membership_version: 4,
+        preferred_register: "FORMAL",
       }],
       rowCount: 1,
     },
@@ -279,6 +287,7 @@ test("fanout plan resolves locale override and membership version without source
       recipientUserId: "user-b",
       targetLanguageTag: "es-CO",
       targetProfileVersion: 4,
+      preferredRegister: "FORMAL",
     }],
   });
 
@@ -286,6 +295,8 @@ test("fanout plan resolves locale override and membership version without source
   assert.match(connection.queries[1].text, /mr\.source_hash/);
   assert.match(connection.queries[1].text, /mr\.source_hash IS NOT NULL/);
   assert.match(connection.queries[2].text, /target_locale_override/);
+  assert.match(connection.queries[2].text, /user_language_preferences/);
+  assert.match(connection.queries[2].text, /preferred_register/);
   assert.match(connection.queries[2].text, /membership_version/);
   assert.doesNotMatch(
     connection.queries[2].text,
@@ -314,6 +325,11 @@ test("publish lock verifies source, target profile, erasure, conversation policy
   assert.match(sql.text, /mm\.current_revision = te\.source_revision/);
   assert.match(sql.text, /cm\.membership_version = te\.target_profile_version/);
   assert.match(sql.text, /target_locale_override/);
+  assert.match(sql.text, /user_language_preferences/);
+  assert.match(
+    sql.text,
+    /te\.preferred_register/,
+  );
   assert.match(sql.text, /JOIN conversations c/);
   assert.match(sql.text, /c\.status = 'ACTIVE'/);
   assert.match(sql.text, /te\.context_snapshot_id IS NULL/);
@@ -496,6 +512,7 @@ test("translation recovery lock is actor-scoped and returns blocked target state
         status: "BLOCKED",
         membership_version: 3,
         target_language_tag: "es-CO",
+        preferred_register: "INFORMAL",
       }],
       rowCount: 1,
     },
