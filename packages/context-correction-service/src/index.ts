@@ -140,20 +140,27 @@ export class ContextCorrectionService<Tx> {
                 target.authorUserId,
               )
             : null;
-        const promotion =
-          toneStyle ??
-          decideCorrectionPromotion(
-            command,
-            authority,
-            normalised.canBecomeClaim,
-            actor.userId,
-            target.authorUserId,
-          );
+        const claimPromotion =
+          toneStyle
+            ? null
+            : decideCorrectionPromotion(
+                command,
+                authority,
+                normalised.canBecomeClaim,
+                actor.userId,
+                target.authorUserId,
+              );
+        const status =
+          toneStyle?.status ??
+          claimPromotion!.status;
+        const appliedScope =
+          toneStyle?.scope ??
+          claimPromotion!.scope;
 
         const repairEventId =
           this.deps.ids.next("repair");
         const claimId =
-          !toneStyle && promotion.apply
+          claimPromotion?.apply
             ? this.deps.ids.next("claim")
             : null;
 
@@ -173,7 +180,7 @@ export class ContextCorrectionService<Tx> {
             kind: correctionRepairKind(
               command.kind,
             ),
-            status: promotion.status,
+            status,
             structuredPayload:
               normalised.payload,
             commandId: command.command_id,
@@ -188,11 +195,11 @@ export class ContextCorrectionService<Tx> {
             command,
             authority,
             target.messageId,
-            promotion.subjectUserId,
+            claimPromotion!.subjectUserId,
             claimId,
             repairEventId,
             normalised.payload,
-            promotion.scope!,
+            claimPromotion!.scope!,
             now,
           );
         }
@@ -218,10 +225,10 @@ export class ContextCorrectionService<Tx> {
         const result: CorrectionResult = {
           protocol_version: 1,
           repair_event_id: repairEventId,
-          status: promotion.status,
+          status,
           requested_scope:
             command.requested_scope,
-          applied_scope: promotion.scope,
+          applied_scope: appliedScope,
           claim_id: claimId,
           claim_version: claimId ? 1 : null,
         };
