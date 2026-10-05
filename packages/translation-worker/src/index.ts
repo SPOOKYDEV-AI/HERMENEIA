@@ -97,6 +97,11 @@ export interface TranslationWorkerProvider {
     };
     targetLanguageTag: string;
     targetProfileVersion: number;
+    preferredRegister:
+      | "NEUTRAL"
+      | "FORMAL"
+      | "INFORMAL"
+      | null;
     strategyVersion: string;
     contextSnapshotId: UUID | null;
     contextItems: TranslationWorkerContextItem[];
@@ -428,6 +433,7 @@ export class TranslationWorkerService<Tx> {
           recipientUserId: target.recipientUserId,
           targetLanguageTag: target.targetLanguageTag,
           targetProfileVersion: target.targetProfileVersion,
+          preferredRegister: target.preferredRegister,
           contextSnapshotId,
           strategyVersion,
         });
@@ -634,6 +640,7 @@ export class TranslationWorkerService<Tx> {
         source: source.source,
         targetLanguageTag: execution.targetLanguageTag,
         targetProfileVersion: execution.targetProfileVersion,
+        preferredRegister: execution.preferredRegister,
         strategyVersion: execution.strategyVersion,
         contextSnapshotId: execution.contextSnapshotId,
         contextItems,
@@ -746,6 +753,7 @@ export class TranslationWorkerService<Tx> {
       recipientUserId: execution.recipientUserId,
       targetLanguageTag: execution.targetLanguageTag,
       targetProfileVersion: execution.targetProfileVersion,
+      preferredRegister: execution.preferredRegister,
       contextSnapshotId: null,
       strategyVersion: this.strategyVersion,
     });
