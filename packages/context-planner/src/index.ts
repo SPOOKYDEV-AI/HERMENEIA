@@ -28,6 +28,7 @@ export interface ContextPlanningFrame {
   currentSourceAuthorUserId: UUID;
   currentSourceLanguageTag: string | null;
   erasureEpoch: number;
+  policyVersion: number;
   recentMessages: RecentContextMessageRef[];
 }
 
@@ -198,6 +199,7 @@ export class TranslationContextPlanner
       currentMessageSequence: frame.currentMessageSequence,
       currentOperationSequence: frame.currentOperationSequence,
       erasureEpoch: frame.erasureEpoch,
+      policyVersion: frame.policyVersion,
       strategy,
       state,
       candidates,
@@ -254,7 +256,8 @@ function stateForCurrentOperation(
   if (
     !loadedState ||
     loadedState.conversationId !== conversationId ||
-    loadedState.erasureEpoch !== frame.erasureEpoch
+    loadedState.erasureEpoch !== frame.erasureEpoch ||
+    loadedState.policyVersion !== frame.policyVersion
   ) {
     return null;
   }
