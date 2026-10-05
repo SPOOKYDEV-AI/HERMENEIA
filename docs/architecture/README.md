@@ -204,6 +204,7 @@ See [Product North Star — Global Messaging First](../specification/product-nor
 The current execution-level contracts are:
 
 - [Delivery Contract — V1](delivery-contract-v1.md);
+- [Persistent Send Execution — V1](persistent-send-v1.md);
 - [Data Lifecycle — V1](data-lifecycle-v1.md);
 - [Canonical Domain & Data Model — V1](canonical-data-model-v1.md);
 - [API & Realtime Protocol — V1](protocol-v1.md);

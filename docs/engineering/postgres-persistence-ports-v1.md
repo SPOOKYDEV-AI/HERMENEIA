@@ -1,6 +1,6 @@
 # PostgreSQL Persistence Ports — V1
 
-**Status:** Executable repository boundary, live PostgreSQL gate pending
+**Status:** Executable repository boundary + node-postgres runtime adapter; live PostgreSQL gate pending
 
 This slice introduces transaction and SQL repository ports without coupling the domain to a particular Node PostgreSQL client library.
 
@@ -18,7 +18,19 @@ The generic package defines:
 
 The PostgreSQL package implements messaging/session queries against the canonical schema.
 
-A future runtime adapter may wrap `pg`, another mature PostgreSQL driver, or an equivalent serverless driver as long as it satisfies these ports.
+The current Node runtime adapter is `apps/api/postgres-pool.mjs`, backed by the pinned `pg` dependency. It adapts `pg.Pool` to the internal ports without leaking driver concepts into domain/application packages.
+
+The persistent messaging runtime is composed by `apps/api/persistent-send-runtime.mjs`, while `apps/api/persistent-server.mjs` creates the pure persistent HTTP profile. Together they wire:
+
+- node-postgres pool;
+- transaction manager;
+- PostgreSQL messaging/session repositories;
+- bounded transient source store;
+- versioned HMAC source fingerprinting;
+- persistent Bearer-session authentication;
+- the canonical PersistentMessagingService.
+
+The persistent server now defaults to the built-in HPKE P-256 envelope implementation. The application layer still receives envelope protection through an explicit port, so a reviewed local module can replace the default without coupling cryptography to messaging. There is no insecure plaintext or TEST_ONLY production fallback, and external cryptographic review remains an open production gate.
 
 ## 2. Transaction rule
 
@@ -103,47 +115,75 @@ Therefore the durable privacy invariant is **payload purge on ACK**, not necessa
 
 This is the persistent equivalent of the in-memory relay tombstone.
 
-## 8. Cursor after purge
+## 8. Tenant-local cursor and payload purge
 
-Once the service records:
+Persistent sync cursor state is stored in `tenant_device_sync_states` and is scoped by:
 
-    last_acked_offset = N
+    tenant_id
+    device_id
 
-a client cannot request recoverable payload history from an offset earlier than N.
+The state owns:
 
-`evaluateSyncCursor()` returns:
+    inbox_epoch
+    next_offset
+    last_acked_offset
 
-    CONTINUE
-    RESET_EPOCH
-    RESET_PURGED
+`next_offset` is tenant-local. The same physical device may therefore have the same numeric offset in multiple tenants without exposing activity between them.
 
-A future persistent sync service must apply this rule before querying old events.
+`last_acked_offset` tracks the contiguous terminal envelope prefix for payload lifecycle purposes. It is deliberately **not** used as a blanket replay floor because content-free control events may still need replay.
 
-## 9. No live PostgreSQL claim yet
+Persistent sync behavior therefore distinguishes:
 
-The current sandbox has:
+- ACKED/REVOKED content envelopes: advance cursor without exposing payload;
+- PENDING content envelopes: deliver normally;
+- EXPIRED/missing content payload at the current replay point: controlled reset;
+- content-free controls such as `message.deleted`: remain replayable even below the ACK watermark.
 
-- Node/TypeScript;
-- no `pg` package;
+`evaluateSyncCursor()` rejects wrong epochs and cursors ahead of the tenant-local issued range; it does not infer another tenant's activity from a global device counter.
+
+## 9. Mutation lifecycle
+
+Migration `0006_outbox_superseded.sql` adds the explicit `SUPERSEDED` lifecycle for translation outbox jobs. Edit/delete mark AVAILABLE or LEASED jobs from stale source revisions as superseded and purge pending protected delivery payloads in the same transaction.
+
+A running worker also fences publication against current source revision/message status, and provider-attempt completion is conditional on the attempt still being STARTED. Edit/delete logically cancel started provider attempts, supersede stale translation executions, and make stale leases unable to complete/retry/dead-letter successfully.
+
+## 10. Historical edit/delete fanout
+
+Mutation fanout is derived from retained `delivery_envelopes` metadata rather than the replay journal.
+
+- edit targets only active devices with prior ORIGINAL-envelope exposure and current active membership;
+- delete targets active devices with prior ORIGINAL-envelope exposure even if current membership has ended, because deletion reduces retained client exposure;
+- raw protected payload is not required for this lookup.
+
+This avoids coupling mutation correctness to future inbox-event compaction.
+
+## 11. No live PostgreSQL claim yet
+
+The current repository now declares a pinned `pg` runtime dependency and contains the concrete pool adapter/composition root.
+
+The current execution sandbox still has:
+
 - no `psql` binary;
-- no reachable package mirror for installing PostgreSQL.
+- no configured live PostgreSQL test URL;
+- no installed external `pg` package in the isolated local test runtime.
 
 Therefore:
 
 - TypeScript repository logic is sandbox-tested;
+- the node-postgres adapter/composition logic is tested with an injected driver-compatible fake;
 - SQL query ordering/parameters are sandbox-tested with a scripted driver;
 - migrations are statically checked;
 - the live PostgreSQL integration runner is prepared;
-- **live PostgreSQL execution is not claimed yet**.
+- the actual external `pg` package + live PostgreSQL server path is **not claimed as executed yet**.
 
 When available:
 
     HERMENEIA_TEST_DATABASE_URL=...
     python scripts/postgres_integration.py
 
-must apply migrations 0001 -> 0002 -> 0003 and smoke tests successfully before production persistence is considered validated.
+must apply migrations 0001 -> ... -> 0011 and the declared smoke tests successfully before production persistence is considered validated.
 
-## 10. Sandbox evidence
+## 12. Sandbox evidence
 
 Executed:
 
@@ -163,5 +203,5 @@ The persistence-specific suite contains 7 tests covering:
 - parameterized sequence allocation;
 - ACK payload purge;
 - ACK idempotency;
-- cursor reset after epoch/purge;
+- tenant-local cursor isolation and controlled replay/reset;
 - exact tenant session binding.

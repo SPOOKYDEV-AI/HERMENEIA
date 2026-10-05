@@ -99,6 +99,7 @@ export interface ClientStore {
 
   hasAppliedEvent(eventId: UUID): boolean;
   listIncoming(): LocalIncomingEnvelope[];
+  listIncomingRenditions(messageId: UUID): LocalIncomingEnvelope[];
 
   listPendingAcks(): PendingDeliveryAck[];
   removePendingAcks(envelopeIds: UUID[]): void;
@@ -106,7 +107,16 @@ export interface ClientStore {
 
 export class InMemoryClientStore implements ClientStore {
   private readonly outgoing = new Map<UUID, LocalOutgoingMessage>();
-  private readonly incoming = new Map<UUID, LocalIncomingEnvelope>();
+  private readonly incoming = new Map<
+    UUID,
+    {
+      sourceRevision: number;
+      renditions: Map<
+        "ORIGINAL" | "TRANSLATION",
+        LocalIncomingEnvelope
+      >;
+    }
+  >();
   private readonly appliedEvents = new Set<UUID>();
   private readonly pendingAcks = new Map<UUID, PendingDeliveryAck>();
   private syncCursor?: string;
@@ -146,8 +156,32 @@ export class InMemoryClientStore implements ClientStore {
     }
 
     // One synchronous store mutation models the transaction boundary required
-    // from IndexedDB/SQLite adapters: envelope + event id + cursor + pending ACK.
-    this.incoming.set(envelope.messageId, structuredClone(envelope));
+    // from IndexedDB/SQLite adapters: renditions + event id + cursor + pending ACK.
+    const current = this.incoming.get(envelope.messageId);
+
+    if (
+      !current ||
+      envelope.sourceRevision > current.sourceRevision
+    ) {
+      this.incoming.set(envelope.messageId, {
+        sourceRevision: envelope.sourceRevision,
+        renditions: new Map([
+          [
+            envelope.renditionType,
+            structuredClone(envelope),
+          ],
+        ]),
+      });
+    } else if (envelope.sourceRevision === current.sourceRevision) {
+      current.renditions.set(
+        envelope.renditionType,
+        structuredClone(envelope),
+      );
+    }
+    // A stale envelope from an older source revision is intentionally not
+    // displayed/stored as current content, but it is still durably observed
+    // and ACKed below so the relay can purge it.
+
     this.appliedEvents.add(event.event_id);
     this.pendingAcks.set(envelope.envelopeId, {
       envelopeId: envelope.envelopeId,
@@ -172,7 +206,30 @@ export class InMemoryClientStore implements ClientStore {
   }
 
   listIncoming(): LocalIncomingEnvelope[] {
-    return [...this.incoming.values()].map((value) => structuredClone(value));
+    const visible: LocalIncomingEnvelope[] = [];
+    for (const message of this.incoming.values()) {
+      const preferred =
+        message.renditions.get("TRANSLATION") ??
+        message.renditions.get("ORIGINAL");
+      if (preferred) {
+        visible.push(structuredClone(preferred));
+      }
+    }
+    return visible;
+  }
+
+  listIncomingRenditions(messageId: UUID): LocalIncomingEnvelope[] {
+    const message = this.incoming.get(messageId);
+    if (!message) return [];
+
+    const renditions: LocalIncomingEnvelope[] = [];
+    const original = message.renditions.get("ORIGINAL");
+    const translation = message.renditions.get("TRANSLATION");
+
+    if (original) renditions.push(structuredClone(original));
+    if (translation) renditions.push(structuredClone(translation));
+
+    return renditions;
   }
 
   listPendingAcks(): PendingDeliveryAck[] {

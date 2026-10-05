@@ -43,10 +43,18 @@ function mapError(error) {
     switch (error.code) {
       case "IDEMPOTENCY_CONFLICT":
       case "REVISION_CONFLICT":
+      case "SOURCE_REVISION_MISMATCH":
+      case "SOURCE_REQUIRED":
         return { status: 409, body: errorBody(error.code, error.message, false) };
+      case "SOURCE_BUFFER_UNAVAILABLE":
+        return { status: 503, body: errorBody(error.code, error.message, true) };
+      case "SOURCE_EXPIRED":
+        return { status: 410, body: errorBody(error.code, error.message, false) };
       case "NOT_AUTHORIZED":
       case "DEVICE_REVOKED":
         return { status: 403, body: errorBody(error.code, error.message, false) };
+      case "RECIPIENT_UNAVAILABLE":
+        return { status: 503, body: errorBody(error.code, error.message, true) };
       case "DELIVERY_EXPIRED":
         return { status: 410, body: errorBody(error.code, error.message, false) };
       case "INVALID_COMMAND":
@@ -169,9 +177,85 @@ function matchPath(pathname, regex) {
   return match ? match.slice(1).map(decodeURIComponent) : null;
 }
 
-export function createHermeneiaHttpServer({ core, authenticate }) {
-  if (!core) {
-    throw new TypeError("core is required");
+export function createHermeneiaHttpServer({
+  core = null,
+  authenticate,
+  sendService = core,
+  commandService = core,
+  mutationService = core,
+  deliveryService = null,
+  translationRecoveryService = null,
+  deviceService = null,
+  readinessService = null,
+}) {
+  if (!sendService || typeof sendService.sendMessage !== "function") {
+    throw new TypeError("sendService.sendMessage is required");
+  }
+  if (
+    !commandService ||
+    typeof commandService.getCommandStatus !== "function"
+  ) {
+    throw new TypeError("commandService.getCommandStatus is required");
+  }
+  if (
+    !mutationService ||
+    typeof mutationService.editMessage !== "function" ||
+    typeof mutationService.deleteMessage !== "function"
+  ) {
+    throw new TypeError(
+      "mutationService.editMessage and mutationService.deleteMessage are required",
+    );
+  }
+  if (
+    translationRecoveryService !== null &&
+    (
+      typeof translationRecoveryService.resupplySource !== "function" ||
+      typeof translationRecoveryService.retryTranslation !== "function"
+    )
+  ) {
+    throw new TypeError(
+      "translationRecoveryService.resupplySource and retryTranslation are required",
+    );
+  }
+
+  if (
+    deviceService !== null &&
+    (
+      typeof deviceService.enrollDevice !== "function" ||
+      typeof deviceService.listDevices !== "function" ||
+      typeof deviceService.rotateMaterial !== "function" ||
+      typeof deviceService.revokeDevice !== "function"
+    )
+  ) {
+    throw new TypeError(
+      "deviceService enrollment/list/rotation/revocation methods are required",
+    );
+  }
+
+  if (
+    deliveryService !== null &&
+    (
+      typeof deliveryService.sync !== "function" ||
+      typeof deliveryService.acknowledge !== "function"
+    )
+  ) {
+    throw new TypeError(
+      "deliveryService.sync and deliveryService.acknowledge are required",
+    );
+  }
+  if (
+    deliveryService === null &&
+    (
+      !core ||
+      typeof core.getDeviceSyncPosition !== "function" ||
+      typeof core.syncDevice !== "function" ||
+      typeof core.getEnvelopeForDevice !== "function" ||
+      typeof core.acknowledgeEnvelope !== "function"
+    )
+  ) {
+    throw new TypeError(
+      "deliveryService is required when no in-memory delivery core is provided",
+    );
   }
   if (typeof authenticate !== "function") {
     throw new TypeError("authenticate(req) dependency is required");
@@ -185,9 +269,153 @@ export function createHermeneiaHttpServer({ core, authenticate }) {
         return json(res, 200, { status: "ok" });
       }
 
+      if (req.method === "GET" && requestUrl.pathname === "/readyz") {
+        const ready = readinessService
+          ? await readinessService.check()
+          : true;
+        return json(
+          res,
+          ready ? 200 : 503,
+          { status: ready ? "ready" : "not_ready" },
+        );
+      }
+
       const actor = await authenticate(req);
       if (!actor) {
         throw new HttpError(401, "NOT_AUTHORIZED", "Authentication required");
+      }
+
+      if (
+        (req.method === "POST" || req.method === "GET") &&
+        requestUrl.pathname === "/v1/devices"
+      ) {
+        if (!deviceService) {
+          throw new HttpError(
+            503,
+            "DEVICE_SERVICE_UNAVAILABLE",
+            "Device trust service unavailable",
+            true,
+          );
+        }
+
+        if (req.method === "GET") {
+          return json(
+            res,
+            200,
+            await deviceService.listDevices(actor),
+          );
+        }
+
+        const body = await readJson(req);
+        requireProtocolV1(body);
+        if (
+          typeof body.command_id !== "string" ||
+          typeof body.device_id !== "string" ||
+          typeof body.public_material_ref !== "string" ||
+          body.public_material_ref.length > 4096 ||
+          body.public_material_ref.trim().length < 1 ||
+          (
+            body.platform !== undefined &&
+            !["WEB","ANDROID","IOS","DESKTOP","OTHER"].includes(body.platform)
+          )
+        ) {
+          throw new HttpError(
+            400,
+            "INVALID_COMMAND",
+            "Invalid device enrollment payload",
+          );
+        }
+
+        return json(
+          res,
+          201,
+          await deviceService.enrollDevice(actor, {
+            protocol_version: 1,
+            command_id: body.command_id,
+            device_id: body.device_id,
+            public_material_ref: body.public_material_ref,
+            ...(body.platform ? { platform: body.platform } : {}),
+          }),
+        );
+      }
+
+      const deviceMaterialMatch = matchPath(
+        requestUrl.pathname,
+        /^\/v1\/devices\/([^/]+)\/delivery-material$/,
+      );
+      if (req.method === "PATCH" && deviceMaterialMatch) {
+        if (!deviceService) {
+          throw new HttpError(
+            503,
+            "DEVICE_SERVICE_UNAVAILABLE",
+            "Device trust service unavailable",
+            true,
+          );
+        }
+        const body = await readJson(req);
+        requireProtocolV1(body);
+        if (
+          typeof body.command_id !== "string" ||
+          typeof body.expected_credential_version !== "number" ||
+          !Number.isInteger(body.expected_credential_version) ||
+          body.expected_credential_version < 1 ||
+          typeof body.public_material_ref !== "string" ||
+          body.public_material_ref.length > 4096 ||
+          body.public_material_ref.trim().length < 1
+        ) {
+          throw new HttpError(
+            400,
+            "INVALID_COMMAND",
+            "Invalid device material rotation payload",
+          );
+        }
+
+        return json(
+          res,
+          200,
+          await deviceService.rotateMaterial(actor, {
+            protocol_version: 1,
+            command_id: body.command_id,
+            device_id: deviceMaterialMatch[0],
+            expected_credential_version:
+              body.expected_credential_version,
+            public_material_ref: body.public_material_ref,
+          }),
+        );
+      }
+
+      const deviceRevokeMatch = matchPath(
+        requestUrl.pathname,
+        /^\/v1\/devices\/([^/]+)\/revoke$/,
+      );
+      if (req.method === "POST" && deviceRevokeMatch) {
+        if (!deviceService) {
+          throw new HttpError(
+            503,
+            "DEVICE_SERVICE_UNAVAILABLE",
+            "Device trust service unavailable",
+            true,
+          );
+        }
+        const body = await readJson(req);
+        requireProtocolV1(body);
+        if (typeof body.command_id !== "string") {
+          throw new HttpError(
+            400,
+            "INVALID_COMMAND",
+            "Invalid device revocation payload",
+          );
+        }
+
+        return json(
+          res,
+          200,
+          await deviceService.revokeDevice(actor, {
+            protocol_version: 1,
+            command_id: body.command_id,
+            device_id: deviceRevokeMatch[0],
+          }),
+        );
       }
 
       const commandStatusMatch = matchPath(
@@ -198,7 +426,10 @@ export function createHermeneiaHttpServer({ core, authenticate }) {
         return json(
           res,
           200,
-          core.getCommandStatus(actor, commandStatusMatch[0]),
+          await commandService.getCommandStatus(
+            actor,
+            commandStatusMatch[0],
+          ),
         );
       }
 
@@ -219,7 +450,7 @@ export function createHermeneiaHttpServer({ core, authenticate }) {
           throw new HttpError(400, "INVALID_COMMAND", "Invalid send payload");
         }
 
-        const accepted = await core.sendMessage(actor, {
+        const accepted = await sendService.sendMessage(actor, {
           protocol_version: 1,
           command_id: body.command_id,
           client_message_id: body.client_message_id,
@@ -261,7 +492,7 @@ export function createHermeneiaHttpServer({ core, authenticate }) {
           throw new HttpError(400, "INVALID_COMMAND", "Invalid edit payload");
         }
 
-        const result = await core.editMessage(actor, {
+        const result = await mutationService.editMessage(actor, {
           protocol_version: 1,
           command_id: body.command_id,
           message_id: messageMatch[0],
@@ -290,7 +521,7 @@ export function createHermeneiaHttpServer({ core, authenticate }) {
           throw new HttpError(400, "INVALID_COMMAND", "Invalid delete payload");
         }
 
-        const result = await core.deleteMessage(actor, {
+        const result = await mutationService.deleteMessage(actor, {
           protocol_version: 1,
           command_id: body.command_id,
           message_id: messageMatch[0],
@@ -300,9 +531,126 @@ export function createHermeneiaHttpServer({ core, authenticate }) {
         return json(res, 200, result);
       }
 
+      const translationSourceMatch = matchPath(
+        requestUrl.pathname,
+        /^\/v1\/translations\/([^/]+)\/source$/,
+      );
+
+      if (req.method === "POST" && translationSourceMatch) {
+        if (!translationRecoveryService) {
+          throw new HttpError(
+            503,
+            "PROVIDER_UNAVAILABLE",
+            "Translation recovery service unavailable",
+            true,
+          );
+        }
+
+        const body = await readJson(req);
+        requireProtocolV1(body);
+
+        if (
+          typeof body.command_id !== "string" ||
+          typeof body.message_id !== "string" ||
+          typeof body.source_revision !== "number" ||
+          !Number.isInteger(body.source_revision) ||
+          body.source_revision < 1 ||
+          typeof body.source_ref !== "string" ||
+          body.source_ref.length < 16 ||
+          !body.source ||
+          typeof body.source.text !== "string" ||
+          body.source.text.length < 1
+        ) {
+          throw new HttpError(
+            400,
+            "INVALID_COMMAND",
+            "Invalid source re-supply payload",
+          );
+        }
+
+        const result =
+          await translationRecoveryService.resupplySource(actor, {
+            protocol_version: 1,
+            command_id: body.command_id,
+            translation_id: translationSourceMatch[0],
+            message_id: body.message_id,
+            source_revision: body.source_revision,
+            source_ref: body.source_ref,
+            source: {
+              text: body.source.text,
+              ...(typeof body.source.language_hint === "string"
+                ? { language_hint: body.source.language_hint }
+                : {}),
+            },
+          });
+
+        return json(res, 202, result);
+      }
+
+      const translationRetryMatch = matchPath(
+        requestUrl.pathname,
+        /^\/v1\/translations\/([^/]+)\/retry$/,
+      );
+
+      if (req.method === "POST" && translationRetryMatch) {
+        if (!translationRecoveryService) {
+          throw new HttpError(
+            503,
+            "PROVIDER_UNAVAILABLE",
+            "Translation recovery service unavailable",
+            true,
+          );
+        }
+
+        const result =
+          await translationRecoveryService.retryTranslation(
+            actor,
+            translationRetryMatch[0],
+          );
+
+        return json(res, 202, result);
+      }
+
       if (req.method === "GET" && requestUrl.pathname === "/v1/sync") {
+        const limit = Math.min(
+          MAX_SYNC_LIMIT,
+          Math.max(1, Number(requestUrl.searchParams.get("limit") ?? 100) || 100),
+        );
+        const waitMs = Math.min(
+          MAX_WAIT_MS,
+          Math.max(0, Number(requestUrl.searchParams.get("wait_ms") ?? 0) || 0),
+        );
+
+        if (deliveryService) {
+          const syncInput = {
+            ...(requestUrl.searchParams.get("cursor")
+              ? { cursor: requestUrl.searchParams.get("cursor") }
+              : {}),
+            limit,
+          };
+
+          let result = await deliveryService.sync(actor, syncInput);
+          if (
+            result.kind === "OK" &&
+            result.response.events.length === 0 &&
+            waitMs > 0
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, waitMs));
+            result = await deliveryService.sync(actor, syncInput);
+          }
+
+          return json(
+            res,
+            result.kind === "RESET" ? 409 : 200,
+            result.response,
+          );
+        }
+
         const position = core.getDeviceSyncPosition(actor.deviceId);
-        const parsed = parseCursor(requestUrl.searchParams.get("cursor"), position.inboxEpoch);
+        const parsed = parseCursor(
+          requestUrl.searchParams.get("cursor"),
+          position.inboxEpoch,
+        );
 
         if (parsed.epoch !== position.inboxEpoch) {
           return json(res, 409, {
@@ -312,15 +660,6 @@ export function createHermeneiaHttpServer({ core, authenticate }) {
             events: [],
           });
         }
-
-        const limit = Math.min(
-          MAX_SYNC_LIMIT,
-          Math.max(1, Number(requestUrl.searchParams.get("limit") ?? 100) || 100),
-        );
-        const waitMs = Math.min(
-          MAX_WAIT_MS,
-          Math.max(0, Number(requestUrl.searchParams.get("wait_ms") ?? 0) || 0),
-        );
 
         let events = core.syncDevice(actor.deviceId, parsed.offset);
         if (!events.length && waitMs > 0) {
@@ -352,9 +691,22 @@ export function createHermeneiaHttpServer({ core, authenticate }) {
         }
 
         for (const ack of body.acks) {
-          if (!ack || typeof ack.envelope_id !== "string") {
+          if (
+            !ack ||
+            typeof ack.envelope_id !== "string" ||
+            typeof ack.persisted_at !== "string" ||
+            !Number.isFinite(Date.parse(ack.persisted_at))
+          ) {
             throw new HttpError(400, "INVALID_COMMAND", "Invalid delivery ACK");
           }
+        }
+
+        if (deliveryService) {
+          await deliveryService.acknowledge(actor, body.acks);
+          return noContent(res);
+        }
+
+        for (const ack of body.acks) {
           core.acknowledgeEnvelope(actor.deviceId, ack.envelope_id);
         }
 

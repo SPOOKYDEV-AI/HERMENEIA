@@ -44,7 +44,9 @@ Properties:
 
     durable enough for declared delivery guarantee
     ciphertext at rest
-    TTL + delete-on-ACK/revocation
+    TTL + protected-payload purge on ACK/revocation
+    minimal envelope lifecycle/exposure metadata may remain when required
+    for idempotency, replay safety and edit/delete fanout
 
 ### D. Durable structured control/context
 
@@ -155,10 +157,25 @@ These are configuration defaults for experiments, not validated final values:
     transient Core plaintext: max 5 minutes
     recovery checkpoint: active + previous only
     inferred working claims: bounded TTL, max 24h
-    delivery envelope: until ACK/revocation or max configured TTL
+    delivery protected payload: until ACK/revocation or max configured TTL
+    delivery envelope control metadata: retained only for bounded lifecycle,
+    idempotency and historical exposure decisions
     routine technical traces: no plaintext
 
 Exact values are deployment policy and must be measured.
+
+### Source fingerprint keys
+
+Durable source fingerprints use an opaque keyed construction in production.
+
+Fingerprint verification keys have a lifecycle dependency on any retained command receipt or source revision that must remain retryable/re-suppliable. Rotating the active key does not by itself make older durable fingerprints independently verifiable.
+
+A deployment must therefore either:
+
+- retain old fingerprint keys for the required verification window; or
+- expire/erase the dependent verification records before retiring the key.
+
+These fingerprint keys are separate from per-device delivery-envelope keys.
 
 ## 8. No hidden retention
 

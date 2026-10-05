@@ -413,3 +413,226 @@ test("recipient applies edit as replacement and delete as local removal", async 
   assert.equal(recipientStore.listIncoming().length, 0);
   assert.equal(core.getMessageMetadata(accepted.message_id).status, "DELETED");
 });
+
+
+function syntheticEvent({
+  eventId,
+  cursor,
+  type = "message.available",
+  messageId = "message-rendition-1",
+  revision = 1,
+}) {
+  return {
+    protocol_version: 1,
+    event_id: eventId,
+    cursor,
+    type,
+    server_time: "2026-10-04T12:00:00.000Z",
+    tenant_id: "tenant-1",
+    conversation_id: "conversation-1",
+    payload: {
+      message_id: messageId,
+      source_revision: revision,
+    },
+  };
+}
+
+function syntheticEnvelope({
+  eventId,
+  envelopeId,
+  revision = 1,
+  renditionType,
+  payload,
+  messageId = "message-rendition-1",
+}) {
+  return {
+    eventId,
+    envelopeId,
+    conversationId: "conversation-1",
+    messageId,
+    sourceRevision: revision,
+    renditionType,
+    protectedPayload: payload,
+    expiresAt: "2026-10-11T12:00:00.000Z",
+    persistedAt: "2026-10-04T12:00:01.000Z",
+  };
+}
+
+test("client keeps ORIGINAL and TRANSLATION renditions while preferring translation for display", () => {
+  const store = new InMemoryClientStore();
+
+  store.applyIncomingEventAtomically(
+    syntheticEvent({
+      eventId: "evt-original",
+      cursor: "1:1",
+    }),
+    syntheticEnvelope({
+      eventId: "evt-original",
+      envelopeId: "env-original",
+      renditionType: "ORIGINAL",
+      payload: "protected-original",
+    }),
+  );
+
+  store.applyIncomingEventAtomically(
+    syntheticEvent({
+      eventId: "evt-translation",
+      cursor: "1:2",
+    }),
+    syntheticEnvelope({
+      eventId: "evt-translation",
+      envelopeId: "env-translation",
+      renditionType: "TRANSLATION",
+      payload: "protected-translation",
+    }),
+  );
+
+  const visible = store.listIncoming();
+  assert.equal(visible.length, 1);
+  assert.equal(visible[0].renditionType, "TRANSLATION");
+  assert.equal(visible[0].protectedPayload, "protected-translation");
+
+  const renditions = store.listIncomingRenditions(
+    "message-rendition-1",
+  );
+  assert.deepEqual(
+    renditions.map((item) => item.renditionType),
+    ["ORIGINAL", "TRANSLATION"],
+  );
+  assert.equal(renditions[0].protectedPayload, "protected-original");
+  assert.equal(renditions[1].protectedPayload, "protected-translation");
+  assert.equal(store.listPendingAcks().length, 2);
+});
+
+test("stale translation is ACKed but cannot regress a newer source revision", () => {
+  const store = new InMemoryClientStore();
+
+  store.applyIncomingEventAtomically(
+    syntheticEvent({
+      eventId: "evt-v1-original",
+      cursor: "1:1",
+    }),
+    syntheticEnvelope({
+      eventId: "evt-v1-original",
+      envelopeId: "env-v1-original",
+      renditionType: "ORIGINAL",
+      payload: "original-v1",
+    }),
+  );
+
+  store.applyIncomingEventAtomically(
+    syntheticEvent({
+      eventId: "evt-v1-translation",
+      cursor: "1:2",
+    }),
+    syntheticEnvelope({
+      eventId: "evt-v1-translation",
+      envelopeId: "env-v1-translation",
+      renditionType: "TRANSLATION",
+      payload: "translation-v1",
+    }),
+  );
+
+  store.applyIncomingEventAtomically(
+    syntheticEvent({
+      eventId: "evt-v2-original",
+      cursor: "1:3",
+      type: "message.edited",
+      revision: 2,
+    }),
+    syntheticEnvelope({
+      eventId: "evt-v2-original",
+      envelopeId: "env-v2-original",
+      revision: 2,
+      renditionType: "ORIGINAL",
+      payload: "original-v2",
+    }),
+  );
+
+  store.applyIncomingEventAtomically(
+    syntheticEvent({
+      eventId: "evt-late-v1-translation",
+      cursor: "1:4",
+      revision: 1,
+    }),
+    syntheticEnvelope({
+      eventId: "evt-late-v1-translation",
+      envelopeId: "env-late-v1-translation",
+      revision: 1,
+      renditionType: "TRANSLATION",
+      payload: "late-translation-v1",
+    }),
+  );
+
+  assert.equal(store.listIncoming()[0].sourceRevision, 2);
+  assert.equal(store.listIncoming()[0].renditionType, "ORIGINAL");
+  assert.deepEqual(
+    store
+      .listIncomingRenditions("message-rendition-1")
+      .map((item) => [item.sourceRevision, item.renditionType]),
+    [[2, "ORIGINAL"]],
+  );
+  assert.equal(store.listPendingAcks().length, 4);
+
+  store.applyIncomingEventAtomically(
+    syntheticEvent({
+      eventId: "evt-v2-translation",
+      cursor: "1:5",
+      revision: 2,
+    }),
+    syntheticEnvelope({
+      eventId: "evt-v2-translation",
+      envelopeId: "env-v2-translation",
+      revision: 2,
+      renditionType: "TRANSLATION",
+      payload: "translation-v2",
+    }),
+  );
+
+  assert.equal(store.listIncoming()[0].sourceRevision, 2);
+  assert.equal(store.listIncoming()[0].renditionType, "TRANSLATION");
+  assert.deepEqual(
+    store
+      .listIncomingRenditions("message-rendition-1")
+      .map((item) => item.renditionType),
+    ["ORIGINAL", "TRANSLATION"],
+  );
+});
+
+test("delete removes every local rendition of the message", () => {
+  const store = new InMemoryClientStore();
+
+  for (const [index, renditionType] of [
+    [1, "ORIGINAL"],
+    [2, "TRANSLATION"],
+  ]) {
+    store.applyIncomingEventAtomically(
+      syntheticEvent({
+        eventId: `evt-delete-${index}`,
+        cursor: `1:${index}`,
+      }),
+      syntheticEnvelope({
+        eventId: `evt-delete-${index}`,
+        envelopeId: `env-delete-${index}`,
+        renditionType,
+        payload: `payload-${index}`,
+      }),
+    );
+  }
+
+  store.applyDeleteEventAtomically(
+    syntheticEvent({
+      eventId: "evt-delete-control",
+      cursor: "1:3",
+      type: "message.deleted",
+      revision: 2,
+    }),
+    "message-rendition-1",
+  );
+
+  assert.equal(store.listIncoming().length, 0);
+  assert.equal(
+    store.listIncomingRenditions("message-rendition-1").length,
+    0,
+  );
+});

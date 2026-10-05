@@ -92,3 +92,28 @@ export interface DeleteMessageCommand {
   message_id: UUID;
   expected_revision: number;
 }
+
+
+export interface MessageRevisionResult {
+  message_id: UUID;
+  revision: number;
+  op_seq: number;
+  status: "ACTIVE" | "DELETED";
+}
+
+
+export interface SourceResupplyCommand {
+  protocol_version: 1;
+  command_id: UUID;
+  translation_id: UUID;
+  message_id: UUID;
+  source_revision: number;
+  source_ref: string;
+  source: SourceContent;
+}
+
+export interface TranslationRecoveryResult {
+  protocol_version: 1;
+  translation_id: UUID;
+  status: "PENDING" | "SOURCE_REQUIRED" | "READY" | "FAILED" | "SUPERSEDED";
+}

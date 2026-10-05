@@ -1,0 +1,94 @@
+name: Persistent Core Qualification
+
+on:
+  push:
+    branches:
+      - main
+      - feat/persistent-send-service-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: persistent-core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualification:
+    name: PostgreSQL + runtime qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: hermeneia_ci
+          POSTGRES_PASSWORD: hermeneia_ci
+          POSTGRES_DB: hermeneia_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hermeneia_ci -d hermeneia_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      HERMENEIA_TEST_DATABASE_URL: postgresql://hermeneia_ci:hermeneia_ci@127.0.0.1:5432/hermeneia_ci
+      DATABASE_URL: postgresql://hermeneia_ci:hermeneia_ci@127.0.0.1:5432/hermeneia_ci
+      SOURCE_FINGERPRINT_HMAC_KEY_VERSION: ci-v1
+      SOURCE_FINGERPRINT_VERIFICATION_KEYS_JSON: "[]"
+      TRANSLATION_WORKER_MODE: external
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: Ensure PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+          psql --version
+
+      - name: Require committed npm lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f package-lock.json
+
+      - name: Install exact dependency graph
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Assert committed npm lockfile is stable
+        run: git diff --exit-code -- package-lock.json
+
+      - name: Generate ephemeral source fingerprint key
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module -e "import { randomBytes } from 'node:crypto'; process.stdout.write('SOURCE_FINGERPRINT_HMAC_KEY_BASE64=' + randomBytes(32).toString('base64') + '\\n')" >> "$GITHUB_ENV"
+
+      - name: Foundation + PostgreSQL migration gate
+        run: python scripts/local_ci.py --stage foundation
+
+      - name: TypeScript + Node regression gate
+        run: python scripts/local_ci.py --stage node
+
+      - name: Persistent process + pg runtime gate
+        run: python scripts/local_ci.py --stage runtime

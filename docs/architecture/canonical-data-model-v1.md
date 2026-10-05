@@ -439,6 +439,7 @@ Fields:
     actor_user_id UUID
     actor_device_id UUID
     command_type text
+    command_fingerprint text
     status enum(IN_PROGRESS, SUCCEEDED, FAILED)
     result_ref jsonb
     created_at timestamptz
@@ -448,32 +449,47 @@ PK:
 
     (tenant_id, command_id)
 
+`command_fingerprint` is an opaque canonical operation fingerprint used to reject command_id reuse with a different payload.
+
 `result_ref` is bounded structured result metadata and must not contain a raw message transcript.
 
-### 3.15 DeviceSyncState
+### 3.15 TenantDeviceSyncState
+
+Purpose: tenant-isolated sync state for one physical device.
 
 Fields:
 
-    device_id UUID PK
+    tenant_id UUID
+    device_id UUID
     inbox_epoch bigint
     next_offset bigint
     last_acked_offset bigint
     updated_at timestamptz
 
-Changing/resetting the inbox increments `inbox_epoch`.
+PK:
+
+    (tenant_id, device_id)
+
+Changing/resetting one tenant inbox increments that tenant/device `inbox_epoch`.
+
+`next_offset` is tenant-local. A physical device shared across several tenant memberships must not expose another tenant's activity through cursor growth or gaps.
+
+`last_acked_offset` is a payload-lifecycle watermark, not a blanket replay floor for content-free control events.
+
+A legacy physical-device sync row may exist during migration/bootstrap, but it is not authoritative for public tenant-scoped cursor semantics.
 
 ### 3.16 DeviceInboxEvent
 
-Purpose: ordered sync/realtime journal per device.
+Purpose: ordered sync/realtime journal per tenant/device.
 
 Fields:
 
+    tenant_id UUID
     device_id UUID
     inbox_epoch bigint
     offset bigint
     event_id UUID
     event_type text
-    tenant_id UUID
     conversation_id UUID nullable
     message_id UUID nullable
     envelope_id UUID nullable
@@ -483,7 +499,7 @@ Fields:
 
 PK:
 
-    (device_id, inbox_epoch, offset)
+    (tenant_id, device_id, inbox_epoch, offset)
 
 Unique:
 

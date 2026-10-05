@@ -20,10 +20,29 @@ Current checks:
 - client outbox/restart/sync tests pass locally, including lost Send response and lost ACK recovery;
 - edit/delete/command-recovery tests pass locally, including stale revisions, mutation retry idempotence and client replacement/removal;
 - Bearer session tests pass locally, including expiry, revocation and spoofed identity rejection;
-- PostgreSQL repository-port tests pass locally, including transaction rollback, SQL parameterisation, ACK payload purge, cursor purge reset and exact tenant session binding.
+- PostgreSQL repository-port tests pass locally, including transaction rollback, SQL parameterisation, ACK payload purge, tenant/device cursor isolation and exact tenant session binding;
+- persistent Send/command/edit/delete regression tests cover stale revision fencing, transient rollback, translation supersession and logical provider cancellation;
+- translation worker tests cover late provider responses after a concurrent mutation;
+- translation recovery tests cover exact source re-supply, actor/device exposure authorization, stale source/profile supersession, transient rollback and manual retry lifecycle;
+- translation publish/control-event tests enforce no historical backfill to newly enrolled device IDs;
+- persistent process tests cover built-in HPKE defaults and separate provider-module loading;
+- SQL migration validation covers migrations 0001..0011;
+- live PostgreSQL integration replays down migrations 0011→0001, then up migrations 0001→0011, then schema smoke tests when `psql` and `HERMENEIA_TEST_DATABASE_URL` are available;
+- the runtime stage starts the real persistent process, checks health/readiness against PostgreSQL and verifies graceful SIGTERM shutdown;
+- the PostgreSQL translation E2E seeds real tenant/user/device/conversation rows, executes Send → fanout → execute → HPKE publication → recipient sync/decrypt → ACK/payload purge with a deterministic provider adapter.
 
-This does **not** mean GitHub-hosted CI is permanently forbidden.
+Node gate:
 
-Later, when application code exists, GitHub Actions should remain deliberately small and protect only critical merge invariants. Expensive benchmarks, chaos/network tests and provider evaluations should run in controlled local/sandbox/dedicated environments unless there is a measured reason to move them.
+    npm run verify
+
+`npm run verify` performs strict TypeScript checking, emits `.build`, then executes all Node test files.
+
+### Dependency reproducibility
+
+A committed `package-lock.json` is required. Qualification installs dependencies with `npm ci --ignore-scripts` and fails if the lockfile is missing or mutated.
+
+The qualification workflow has read-only repository permissions. It no longer contains a fallback path that generates or commits dependency state from CI.
+
+GitHub Actions remains deliberately limited to critical merge invariants. Expensive benchmarks, chaos/network tests and live provider evaluations belong in controlled/dedicated environments unless there is a measured reason to run them on every push.
 
 Never claim a check passed unless its command was actually executed.

@@ -8,7 +8,11 @@ import {
   InMemoryMessagingCore,
 } from "../.build/packages/core/src/index.js";
 
-function createCore({ secondRecipientDevice = false } = {}) {
+function createCore({
+  secondRecipientDevice = false,
+  recipientDevice = true,
+  senderSecondDevice = false,
+} = {}) {
   let id = 0;
   const core = new InMemoryMessagingCore({
     ids: {
@@ -42,8 +46,13 @@ function createCore({ secondRecipientDevice = false } = {}) {
   });
 
   core.registerDevice("user-a", "device-a");
-  core.registerDevice("user-b", "device-b1");
-  if (secondRecipientDevice) {
+  if (senderSecondDevice) {
+    core.registerDevice("user-a", "device-a2");
+  }
+  if (recipientDevice) {
+    core.registerDevice("user-b", "device-b1");
+  }
+  if (recipientDevice && secondRecipientDevice) {
     core.registerDevice("user-b", "device-b2");
   }
   core.registerConversation("tenant-1", "conversation-1", ["user-a", "user-b"]);
@@ -266,4 +275,134 @@ test("command status returns durable logical result to the originating device", 
 
   const unknown = core.getCommandStatus(actor, "unknown-command");
   assert.equal(unknown.status, "UNKNOWN");
+});
+
+
+test("Send is not ACCEPTED when an external recipient has no deliverable device", async () => {
+  const core = createCore({ recipientDevice: false });
+
+  await assert.rejects(
+    () => core.sendMessage(actor, command("cannot promise delivery")),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "RECIPIENT_UNAVAILABLE",
+  );
+
+  assert.equal(core.getMessageCount(), 0);
+});
+
+test("sender secondary device still receives a delivery envelope", async () => {
+  const core = createCore({ senderSecondDevice: true });
+  await core.sendMessage(actor, command("sync my second device"));
+
+  assert.equal(core.pendingEnvelopes("device-a2").length, 1);
+  assert.equal(core.pendingEnvelopes("device-b1").length, 1);
+});
+
+
+test("failed edit delivery preparation leaves prior revision and pending delivery intact", async () => {
+  const core = createCore();
+  const accepted = await core.sendMessage(
+    actor,
+    command("original remains valid"),
+  );
+
+  const oldEnvelope = core.pendingEnvelopes("device-b1")[0];
+  assert.ok(oldEnvelope);
+
+  core.revokeDevice("device-b1");
+
+  await assert.rejects(
+    () =>
+      core.editMessage(actor, {
+        protocol_version: 1,
+        command_id: "cmd-edit-unavailable",
+        message_id: accepted.message_id,
+        expected_revision: 1,
+        source: { text: "edit cannot be delivered" },
+      }),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "RECIPIENT_UNAVAILABLE",
+  );
+
+  assert.equal(
+    core.getMessageMetadata(accepted.message_id).currentRevision,
+    1,
+  );
+  assert.equal(core.getTranslationJobs().length, 1);
+  assert.equal(core.getTranslationJobs()[0].status, "AVAILABLE");
+  assert.equal(core.pendingEnvelopes("device-b1").length, 1);
+  assert.equal(
+    core.pendingEnvelopes("device-b1")[0].envelopeId,
+    oldEnvelope.envelopeId,
+  );
+});
+
+
+test("client_message_id cannot be reused for another conversation or reply semantic", async () => {
+  const core = createCore();
+  const first = await core.sendMessage(actor, command("same source"));
+
+  core.registerConversation(
+    "tenant-1",
+    "conversation-2",
+    ["user-a", "user-b"],
+  );
+
+  await assert.rejects(
+    () =>
+      core.sendMessage(
+        actor,
+        {
+          ...command("same source"),
+          command_id: "cmd-other-conversation",
+          conversation_id: "conversation-2",
+        },
+      ),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "IDEMPOTENCY_CONFLICT",
+  );
+
+  await assert.rejects(
+    () =>
+      core.sendMessage(
+        actor,
+        {
+          ...command("same source"),
+          command_id: "cmd-other-reply",
+          reply_to_message_id: first.message_id,
+        },
+      ),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "IDEMPOTENCY_CONFLICT",
+  );
+
+  assert.equal(core.getMessageCount(), 1);
+});
+
+
+test("client_message_id cannot be reused with a different client authored timestamp", async () => {
+  const core = createCore();
+
+  await core.sendMessage(actor, {
+    ...command("same source"),
+    client_authored_at: "2026-10-03T19:19:00.000Z",
+  });
+
+  await assert.rejects(
+    () =>
+      core.sendMessage(actor, {
+        ...command("same source"),
+        command_id: "cmd-other-client-time",
+        client_authored_at: "2026-10-03T19:19:01.000Z",
+      }),
+    (error) =>
+      error instanceof DomainError &&
+      error.code === "IDEMPOTENCY_CONFLICT",
+  );
+
+  assert.equal(core.getMessageCount(), 1);
 });

@@ -14,6 +14,14 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "db/migrations/0001_core_messaging.sql"
 SESSION_MIGRATION = ROOT / "db/migrations/0002_session_access_credential.sql"
 RUNTIME_MIGRATION = ROOT / "db/migrations/0003_runtime_alignment.sql"
+COMMAND_MIGRATION = ROOT / "db/migrations/0004_command_fingerprint.sql"
+TENANT_SYNC_MIGRATION = ROOT / "db/migrations/0005_tenant_device_sync_state.sql"
+OUTBOX_LIFECYCLE_MIGRATION = ROOT / "db/migrations/0006_outbox_superseded.sql"
+OUTBOX_LEASE_MIGRATION = ROOT / "db/migrations/0007_outbox_lease_shape.sql"
+TRANSLATION_MIGRATION = ROOT / "db/migrations/0008_translation_execution.sql"
+SOURCE_REQUIRED_EVENT_MIGRATION = ROOT / "db/migrations/0009_translation_source_required_event.sql"
+DEVICE_TRUST_MIGRATION = ROOT / "db/migrations/0010_device_trust_lifecycle.sql"
+TENANT_LOCAL_SEQUENCE_MIGRATION = ROOT / "db/migrations/0011_tenant_local_inbox_sequence.sql"
 
 REQUIRED_TABLES = {
     "users",
@@ -65,6 +73,18 @@ def main() -> int:
     sql = MIGRATION.read_text(encoding="utf-8")
     session_sql = SESSION_MIGRATION.read_text(encoding="utf-8")
     runtime_sql = RUNTIME_MIGRATION.read_text(encoding="utf-8")
+    command_sql = COMMAND_MIGRATION.read_text(encoding="utf-8")
+    tenant_sync_sql = TENANT_SYNC_MIGRATION.read_text(encoding="utf-8")
+    outbox_lifecycle_sql = OUTBOX_LIFECYCLE_MIGRATION.read_text(encoding="utf-8")
+    outbox_lease_sql = OUTBOX_LEASE_MIGRATION.read_text(encoding="utf-8")
+    translation_sql = TRANSLATION_MIGRATION.read_text(encoding="utf-8")
+    source_required_event_sql = SOURCE_REQUIRED_EVENT_MIGRATION.read_text(
+        encoding="utf-8"
+    )
+    device_trust_sql = DEVICE_TRUST_MIGRATION.read_text(encoding="utf-8")
+    tenant_local_sequence_sql = TENANT_LOCAL_SEQUENCE_MIGRATION.read_text(
+        encoding="utf-8"
+    )
     upper = sql.upper()
 
     if not upper.lstrip().startswith("BEGIN;"):
@@ -134,6 +154,183 @@ def main() -> int:
         fail("runtime alignment migration must begin with BEGIN")
     if not runtime_sql.rstrip().endswith("COMMIT;"):
         fail("runtime alignment migration must end with COMMIT")
+
+    command_required = [
+        "ADD COLUMN command_fingerprint text",
+        "command_receipts_actor_status_idx",
+        "command_receipts_message_result_idx",
+        "result_ref->>'message_id'",
+        "WHERE command_type = 'message.send'",
+        "AND status = 'SUCCEEDED'",
+    ]
+    for snippet in command_required:
+        if snippet not in command_sql:
+            fail(f"command migration missing invariant: {snippet}")
+
+    if not command_sql.lstrip().startswith("BEGIN;"):
+        fail("command migration must begin with BEGIN")
+    if not command_sql.rstrip().endswith("COMMIT;"):
+        fail("command migration must end with COMMIT")
+
+    tenant_sync_required = [
+        "CREATE TABLE tenant_device_sync_states",
+        "PRIMARY KEY (tenant_id, device_id)",
+        "last_acked_offset bigint NOT NULL DEFAULT 0",
+        "FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id)",
+        "FOREIGN KEY (device_id) REFERENCES devices(device_id)",
+        "first_blocking_offset",
+        "de.status = 'PENDING'",
+        "first_blocking_offset - 1",
+        "next_offset - 1",
+    ]
+    for snippet in tenant_sync_required:
+        if snippet not in tenant_sync_sql:
+            fail(f"tenant sync migration missing invariant: {snippet}")
+
+    if not tenant_sync_sql.lstrip().startswith("BEGIN;"):
+        fail("tenant sync migration must begin with BEGIN")
+    if not tenant_sync_sql.rstrip().endswith("COMMIT;"):
+        fail("tenant sync migration must end with COMMIT")
+
+    outbox_required = [
+        "outbox_jobs_status_check",
+        "'SUPERSEDED'",
+        "outbox_jobs_message_revision_idx",
+        "payload_ref->>'message_id'",
+        "payload_ref->>'source_revision'",
+        "WHERE job_type IN ('translation.request','translation.execute')",
+    ]
+    for snippet in outbox_required:
+        if snippet not in outbox_lifecycle_sql:
+            fail(f"outbox lifecycle migration missing invariant: {snippet}")
+
+    if not outbox_lifecycle_sql.lstrip().startswith("BEGIN;"):
+        fail("outbox lifecycle migration must begin with BEGIN")
+    if not outbox_lifecycle_sql.rstrip().endswith("COMMIT;"):
+        fail("outbox lifecycle migration must end with COMMIT")
+
+    outbox_lease_required = [
+        "outbox_jobs_lifecycle_shape_check",
+        "status = 'AVAILABLE'",
+        "status = 'LEASED'",
+        "status IN ('DONE','DEAD','SUPERSEDED')",
+        "lease_until IS NOT NULL",
+        "completed_at IS NOT NULL",
+    ]
+    for snippet in outbox_lease_required:
+        if snippet not in outbox_lease_sql:
+            fail(f"outbox lease migration missing invariant: {snippet}")
+
+    if not outbox_lease_sql.lstrip().startswith("BEGIN;"):
+        fail("outbox lease migration must begin with BEGIN")
+    if not outbox_lease_sql.rstrip().endswith("COMMIT;"):
+        fail("outbox lease migration must end with COMMIT")
+
+    translation_required = [
+        "CREATE TABLE translation_executions",
+        "CREATE TABLE provider_executions",
+        "translation_executions_logical_idx",
+        "delivery_envelopes_translation_fk",
+        "'SOURCE_REQUIRED'",
+        "'SUPERSEDED'",
+        "'CANCELLED_LOGICALLY'",
+        "UNIQUE (tenant_id, translation_id, attempt_no)",
+    ]
+    for snippet in translation_required:
+        if snippet not in translation_sql:
+            fail(f"translation migration missing invariant: {snippet}")
+
+    if not translation_sql.lstrip().startswith("BEGIN;"):
+        fail("translation migration must begin with BEGIN")
+    if not translation_sql.rstrip().endswith("COMMIT;"):
+        fail("translation migration must end with COMMIT")
+
+    translation_lower = translation_sql.lower()
+    for forbidden in (
+        "source_text",
+        "translated_text",
+        "translation_text",
+        "prompt_text",
+        "conversation_history",
+        "raw_history",
+        "plaintext",
+        "bearer_token",
+        "access_token",
+    ):
+        if forbidden in translation_lower:
+            fail(f"translation migration contains forbidden token: {forbidden}")
+
+    source_required_event_required = [
+        "'translation.source_required'",
+        "device_inbox_events_translation_source_required_check",
+        "metadata ? 'translation_id'",
+        "metadata ? 'source_revision'",
+        "metadata ? 'source_ref'",
+        "event_type IN ('message.deleted','translation.source_required')",
+    ]
+    for snippet in source_required_event_required:
+        if snippet not in source_required_event_sql:
+            fail(f"source-required event migration missing invariant: {snippet}")
+
+    if not source_required_event_sql.lstrip().startswith("BEGIN;"):
+        fail("source-required event migration must begin with BEGIN")
+    if not source_required_event_sql.rstrip().endswith("COMMIT;"):
+        fail("source-required event migration must end with COMMIT")
+
+    device_trust_required = [
+        "ADD COLUMN platform text NOT NULL DEFAULT 'OTHER'",
+        "devices_platform_check",
+        "WEB",
+        "ANDROID",
+        "IOS",
+        "DESKTOP",
+        "devices_public_material_ref_length_check",
+        "char_length(public_material_ref) BETWEEN 1 AND 4096",
+        "NOT VALID",
+        "devices_user_registered_idx",
+    ]
+    for snippet in device_trust_required:
+        if snippet not in device_trust_sql:
+            fail(f"device trust migration missing invariant: {snippet}")
+
+    if not device_trust_sql.lstrip().startswith("BEGIN;"):
+        fail("device trust migration must begin with BEGIN")
+    if not device_trust_sql.rstrip().endswith("COMMIT;"):
+        fail("device trust migration must end with COMMIT")
+
+    tenant_local_sequence_required = [
+        "ADD COLUMN next_offset bigint",
+        "tenant_device_sync_states_next_offset_check",
+        "PRIMARY KEY (",
+        "tenant_id,",
+        "device_id,",
+        "inbox_epoch,",
+        "offset_value",
+        "device_inbox_events_event_time_idx",
+    ]
+    for snippet in tenant_local_sequence_required:
+        if snippet not in tenant_local_sequence_sql:
+            fail(
+                f"tenant-local sequence migration missing invariant: {snippet}"
+            )
+
+    if not tenant_local_sequence_sql.lstrip().startswith("BEGIN;"):
+        fail("tenant-local sequence migration must begin with BEGIN")
+    if not tenant_local_sequence_sql.rstrip().endswith("COMMIT;"):
+        fail("tenant-local sequence migration must end with COMMIT")
+
+    command_lower = command_sql.lower()
+    for forbidden in (
+        "source_text",
+        "message_text",
+        "translated_text",
+        "prompt_text",
+        "plaintext",
+        "bearer_token",
+        "access_token",
+    ):
+        if forbidden in command_lower:
+            fail(f"command migration contains forbidden token: {forbidden}")
 
     print(
         "SQL_CONTRACT_PASS "

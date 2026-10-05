@@ -61,7 +61,7 @@ interface ConversationRecord {
 }
 
 interface DedupeRecord {
-  fingerprint: string;
+  logicalFingerprint: string;
   accepted: AcceptedMessage;
 }
 
@@ -175,6 +175,7 @@ export class InMemoryMessagingCore {
       command.client_message_id,
       sourceFingerprint,
       command.reply_to_message_id ?? "",
+      command.client_authored_at ?? "",
     ].join("|");
 
     const priorCommand = this.getExistingCommandResult(
@@ -192,13 +193,19 @@ export class InMemoryMessagingCore {
       actor.userId,
       command.client_message_id,
     ].join(":");
+    const logicalFingerprint = [
+      command.conversation_id,
+      sourceFingerprint,
+      command.reply_to_message_id ?? "",
+      command.client_authored_at ?? "",
+    ].join("|");
 
     const previous = this.dedupe.get(dedupeKey);
     if (previous) {
-      if (previous.fingerprint !== sourceFingerprint) {
+      if (previous.logicalFingerprint !== logicalFingerprint) {
         throw new DomainError(
           "IDEMPOTENCY_CONFLICT",
-          "client_message_id was already used with different source content",
+          "client_message_id was already used for a different logical message",
         );
       }
       this.storeCommandReceipt(
@@ -209,6 +216,26 @@ export class InMemoryMessagingCore {
         previous.accepted,
       );
       return previous.accepted;
+    }
+
+    const externalMembers = [...conversation.members].filter(
+      (userId) => userId !== actor.userId,
+    );
+    const unavailableRecipient =
+      externalMembers.length < 1 ||
+      externalMembers.some(
+        (userId) =>
+          ![...this.devices.values()].some(
+            (device) =>
+              device.userId === userId &&
+              device.status === "ACTIVE",
+          ),
+      );
+    if (unavailableRecipient) {
+      throw new DomainError(
+        "RECIPIENT_UNAVAILABLE",
+        "At least one active recipient has no deliverable device",
+      );
     }
 
     const now = this.deps.clock.now();
@@ -266,7 +293,7 @@ export class InMemoryMessagingCore {
     this.applyPreparedDelivery(prepared);
     this.translationJobs.set(translationJob.jobId, translationJob);
     this.dedupe.set(dedupeKey, {
-      fingerprint: sourceFingerprint,
+      logicalFingerprint,
       accepted,
     });
     this.storeCommandReceipt(
@@ -322,10 +349,7 @@ export class InMemoryMessagingCore {
     const revision = message.currentRevision + 1;
     const opSeq = conversation.nextOpSeq;
 
-    // Prevent stale undelivered content from winning after this edit.
-    this.revokePendingEnvelopesForMessage(message.messageId);
-    this.supersedeTranslationJobs(message.messageId);
-
+    // Prepare all failure-prone delivery work before destructive mutation.
     const prepared = this.prepareContentDelivery(
       actor,
       conversation,
@@ -340,6 +364,10 @@ export class InMemoryMessagingCore {
       revision,
       now,
     );
+
+    // Only after preparation succeeds may stale undelivered content be revoked.
+    this.revokePendingEnvelopesForMessage(message.messageId);
+    this.supersedeTranslationJobs(message.messageId);
 
     const result: MessageRevisionResult = {
       message_id: message.messageId,
@@ -611,6 +639,28 @@ export class InMemoryMessagingCore {
     eventType: "message.available" | "message.edited",
     now: string,
   ): PreparedDelivery {
+    const externalRecipients = [...conversation.members].filter(
+      (userId) => userId !== actor.userId,
+    );
+    const unavailableRecipients = externalRecipients.filter(
+      (userId) =>
+        ![...this.devices.values()].some(
+          (device) =>
+            device.userId === userId &&
+            device.status === "ACTIVE",
+        ),
+    );
+
+    if (
+      externalRecipients.length === 0 ||
+      unavailableRecipients.length > 0
+    ) {
+      throw new DomainError(
+        "RECIPIENT_UNAVAILABLE",
+        "At least one active recipient has no deliverable device",
+      );
+    }
+
     const envelopes: DeliveryEnvelope[] = [];
     const events: DeviceInboxEvent[] = [];
 
