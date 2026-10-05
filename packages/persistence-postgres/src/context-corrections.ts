@@ -13,6 +13,7 @@ export interface CorrectionAuthority {
   membershipEpoch: number;
   erasureEpoch: number;
   policyVersion: number;
+  nextOperationSequence: number;
 }
 
 export class PostgresContextCorrectionRepository {
@@ -39,12 +40,14 @@ export class PostgresContextCorrectionRepository {
       membership_epoch: number;
       erasure_epoch: number;
       policy_version: number;
+      next_op_seq: number;
     }>(
       `SELECT tm.role AS tenant_role,
               cm.role AS conversation_role,
               c.membership_epoch,
               c.erasure_epoch,
-              c.policy_version
+              c.policy_version,
+              c.next_op_seq
          FROM conversations c
          JOIN conversation_members cm
            ON cm.tenant_id = c.tenant_id
@@ -78,6 +81,7 @@ export class PostgresContextCorrectionRepository {
           membershipEpoch: Number(row.membership_epoch),
           erasureEpoch: Number(row.erasure_epoch),
           policyVersion: Number(row.policy_version),
+          nextOperationSequence: Number(row.next_op_seq),
         }
       : undefined;
   }
