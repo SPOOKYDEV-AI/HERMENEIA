@@ -256,7 +256,7 @@ export function createPostgresTranslationContextRuntime(
 }
 
 
-async function materializeActiveEpisodeCandidates(
+export async function materializeActiveEpisodeCandidates(
   transientSources: TransientSourceStore,
   tenantId: UUID,
   state: ConversationContextState,
