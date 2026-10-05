@@ -1133,5 +1133,5 @@ function canonicalJson(
       )
       .join(",")}}`;
   }
-  return JSON.stringify(value);
+  return JSON.stringify(value) ?? "null";
 }
