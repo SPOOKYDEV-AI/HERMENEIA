@@ -15,6 +15,7 @@ on:
       - feat/correction-supersession-v1
       - feat/context-claim-arbitration-v1
       - feat/context-claim-language-fence-v1
+      - feat/correction-revocation-v1
   workflow_dispatch:
 
 permissions:
