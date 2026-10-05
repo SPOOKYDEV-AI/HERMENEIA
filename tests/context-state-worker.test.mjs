@@ -188,7 +188,7 @@ function job(opSeq, overrides = {}) {
   };
 }
 
-function fixture(state, jobs) {
+function fixture(state, jobs, options = {}) {
   let now = "2026-10-05T09:01:00.000Z";
   const clock = {
     now() {
@@ -208,6 +208,7 @@ function fixture(state, jobs) {
     store,
     outbox,
     clock,
+    episodeDeriver: options.episodeDeriver,
     retryBaseSeconds: 1,
     maxAttempts: 4,
   });
@@ -358,4 +359,64 @@ test("malformed context.reduce payload is dead-lettered without touching state",
   assert.equal(await worker.runOnce(), "DEAD");
   assert.deepEqual(store.state, before);
   assert.equal(store.jobs[0].status, "DEAD");
+});
+
+
+test("context reducer applies bounded episode enrichment atomically with causal progress", async () => {
+  const { worker, store } = fixture(
+    stateWithOperations([1]),
+    [job(1)],
+    {
+      episodeDeriver: {
+        async derive({ operation }) {
+          return {
+            activeEpisode: {
+              episodeId: operation.operationId,
+              episodeVersion: 1,
+              continuityConfidence: 1,
+              continuityStrategy: "heuristic-v1",
+              startedAt: "2026-10-05T09:00:01.000Z",
+              lastActivityAt: "2026-10-05T09:00:01.000Z",
+              sourceLanguageTag: "fr-fr",
+              sourceRevisionRefs: [
+                "message-1:1",
+              ],
+            },
+          };
+        },
+      },
+    },
+  );
+
+  assert.equal(await worker.runOnce(), "REDUCED");
+  assert.equal(store.state.processedPrefixOpSeq, 1);
+  assert.deepEqual(store.state.activeEpisode, {
+    episodeId: "op-1",
+    episodeVersion: 1,
+    continuityConfidence: 1,
+    continuityStrategy: "heuristic-v1",
+    startedAt: "2026-10-05T09:00:01.000Z",
+    lastActivityAt: "2026-10-05T09:00:01.000Z",
+    sourceLanguageTag: "fr-fr",
+    sourceRevisionRefs: ["message-1:1"],
+  });
+});
+
+test("episode enrichment failure is fail-soft and never blocks the causal reducer", async () => {
+  const { worker, store } = fixture(
+    stateWithOperations([1]),
+    [job(1)],
+    {
+      episodeDeriver: {
+        async derive() {
+          throw new Error("transient source disappeared");
+        },
+      },
+    },
+  );
+
+  assert.equal(await worker.runOnce(), "REDUCED");
+  assert.equal(store.state.processedPrefixOpSeq, 1);
+  assert.equal(store.state.activeEpisode, undefined);
+  assert.equal(store.jobs[0].status, "DONE");
 });
