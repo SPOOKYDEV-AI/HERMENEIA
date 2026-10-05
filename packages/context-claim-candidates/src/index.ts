@@ -47,7 +47,7 @@ export interface MaterializeReferencedClaimsInput {
   now: string;
 }
 
-type SupportedProposition =
+export type SupportedProposition =
   | {
       schemaVersion: 1;
       kind: "TERM_MEANING";
@@ -80,7 +80,7 @@ export function materializeReferencedClaimCandidates(
     if (!referenced.has(claim.claimId)) continue;
     if (!isAdmissibleClaim(claim, input)) continue;
 
-    const proposition = parseSupportedProposition(
+    const proposition = parseSupportedClaimProposition(
       claim.propositionRef,
     );
     if (!proposition) continue;
@@ -213,7 +213,7 @@ function isAdmissibleClaim(
   );
 }
 
-function parseSupportedProposition(
+export function parseSupportedClaimProposition(
   value: Record<string, unknown>,
 ): SupportedProposition | null {
   if (!isPlainObject(value) || value.schema_version !== 1) {
@@ -271,6 +271,36 @@ function parseSupportedProposition(
   }
 
   return null;
+}
+
+export function storedClaimProposition(
+  proposition: SupportedProposition,
+): Record<string, unknown> {
+  if (proposition.kind === "TERM_MEANING") {
+    return {
+      schema_version: 1,
+      kind: proposition.kind,
+      surface_form: proposition.surfaceForm,
+      meaning: proposition.meaning,
+      ...(proposition.sourceLanguageTag
+        ? { source_language_tag: proposition.sourceLanguageTag }
+        : {}),
+      ...(proposition.targetLanguageTag
+        ? { target_language_tag: proposition.targetLanguageTag }
+        : {}),
+    };
+  }
+
+  return {
+    schema_version: 1,
+    kind: proposition.kind,
+    source_form: proposition.sourceForm,
+    target_form: proposition.targetForm,
+    ...(proposition.sourceLanguageTag
+      ? { source_language_tag: proposition.sourceLanguageTag }
+      : {}),
+    target_language_tag: proposition.targetLanguageTag,
+  };
 }
 
 function renderProposition(
