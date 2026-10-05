@@ -510,8 +510,10 @@ test("message-scoped correction remains a repair event and never leaks into conv
   assert.equal(f.events[0].targetSourceRevision, 1);
 });
 
-test("tone correction is retained for confirmation until style-memory semantics exist", async () => {
-  const f = fixture();
+test("member can apply their own conversation tone without creating durable claim memory", async () => {
+  const f = fixture({
+    conversationRole: "MEMBER",
+  });
 
   const result = await f.service.createCorrection(
     actor,
@@ -525,9 +527,10 @@ test("tone correction is retained for confirmation until style-memory semantics 
     }),
   );
 
+  assert.equal(result.status, "APPLIED");
   assert.equal(
-    result.status,
-    "NEEDS_CONFIRMATION",
+    result.applied_scope,
+    "CONVERSATION",
   );
   assert.equal(result.claim_id, null);
   assert.equal(f.claims.length, 0);
@@ -535,6 +538,142 @@ test("tone correction is retained for confirmation until style-memory semantics 
     f.events[0].kind,
     "TONE_CORRECTION",
   );
+  assert.deepEqual(
+    f.state().styleState.profiles.map(
+      (profile) => ({
+        speaker: profile.speakerUserId,
+        register: profile.preferredRegister,
+        repair: profile.sourceRepairEventId,
+      }),
+    ),
+    [{
+      speaker: USER,
+      register: "FORMAL",
+      repair: result.repair_event_id,
+    }],
+  );
+});
+
+test("tone correction cannot set another speaker's conversation style", async () => {
+  const f = fixture({
+    conversationRole: "MODERATOR",
+    tenantRole: "OWNER",
+    messageAuthorUserId: OTHER_USER,
+  });
+
+  const result = await f.service.createCorrection(
+    actor,
+    command({
+      kind: "TONE",
+      target_message_id: MESSAGE,
+      target_source_revision: 1,
+      payload: {
+        schema_version: 1,
+        kind: "TONE",
+        preferred_register: "FORMAL",
+      },
+    }),
+  );
+
+  assert.equal(
+    result.status,
+    "NEEDS_CONFIRMATION",
+  );
+  assert.equal(result.applied_scope, null);
+  assert.deepEqual(
+    f.state().styleState,
+    {},
+  );
+});
+
+test("DEFAULT tone correction clears only the actor's explicit conversation style", async () => {
+  const f = fixture({
+    conversationRole: "MEMBER",
+  });
+
+  const applied = await f.service.createCorrection(
+    actor,
+    command({
+      kind: "TONE",
+      payload: {
+        schema_version: 1,
+        kind: "TONE",
+        preferred_register: "INFORMAL",
+      },
+    }),
+  );
+  assert.equal(applied.status, "APPLIED");
+
+  const reset = await f.service.createCorrection(
+    actor,
+    command({
+      command_id:
+        "10000000-0000-4000-8000-000000000012",
+      kind: "TONE",
+      payload: {
+        schema_version: 1,
+        kind: "TONE",
+        preferred_register: "DEFAULT",
+      },
+    }),
+  );
+
+  assert.equal(reset.status, "APPLIED");
+  assert.equal(reset.claim_id, null);
+  assert.deepEqual(
+    f.state().styleState,
+    {},
+  );
+});
+
+test("message-scoped tone remains repair-only and does not mutate style projection", async () => {
+  const f = fixture();
+
+  const result = await f.service.createCorrection(
+    actor,
+    command({
+      kind: "TONE",
+      requested_scope: "MESSAGE",
+      target_message_id: MESSAGE,
+      target_source_revision: 1,
+      payload: {
+        schema_version: 1,
+        kind: "TONE",
+        preferred_register: "FORMAL",
+      },
+    }),
+  );
+
+  assert.equal(result.status, "RECORDED");
+  assert.equal(result.applied_scope, null);
+  assert.deepEqual(f.state().styleState, {});
+});
+
+test("tenant-scoped tone stays pending until an explicit tenant style policy exists", async () => {
+  const f = fixture({
+    tenantRole: "OWNER",
+    conversationRole: "MODERATOR",
+  });
+
+  const result = await f.service.createCorrection(
+    actor,
+    command({
+      kind: "TONE",
+      requested_scope: "TENANT",
+      payload: {
+        schema_version: 1,
+        kind: "TONE",
+        preferred_register: "FORMAL",
+      },
+    }),
+  );
+
+  assert.equal(
+    result.status,
+    "NEEDS_CONFIRMATION",
+  );
+  assert.equal(result.applied_scope, null);
+  assert.deepEqual(f.state().styleState, {});
 });
 
 test("tenant correction remains pending until tenant-wide claim distribution exists", async () => {
