@@ -70,11 +70,13 @@ function fixture({
   },
   messageAuthorUserId = OTHER_USER,
   nextOperationSequence = 1,
+  supersededClaims = [],
 } = {}) {
   const receipts = new Map();
   const events = [];
   const claims = [];
   const provenance = [];
+  const overrideProvenance = [];
   let currentState = state
     ? structuredClone(state)
     : undefined;
@@ -156,8 +158,23 @@ function fixture({
       events.push(structuredClone(input));
     },
 
+    async invalidateSupersededCorrectionClaims() {
+      return structuredClone(
+        supersededClaims,
+      );
+    },
+
     async insertConfirmedClaim(_tx, input) {
       claims.push(structuredClone(input));
+    },
+
+    async insertClaimOverrideProvenance(
+      _tx,
+      input,
+    ) {
+      overrideProvenance.push(
+        structuredClone(input),
+      );
     },
 
     async insertRepairProvenance(_tx, input) {
@@ -219,6 +236,7 @@ function fixture({
     events,
     claims,
     provenance,
+    overrideProvenance,
     state: () =>
       currentState
         ? structuredClone(currentState)
@@ -571,5 +589,62 @@ test("message-scoped correction requires a concrete target", async () => {
       ),
     (error) =>
       error?.code === "INVALID_COMMAND",
+  );
+});
+
+
+test("new self-correction supersedes prior same-key claim and replaces its ConversationState ref", async () => {
+  const existingState = createInitialContextState({
+    tenantId: TENANT,
+    conversationId: CONVERSATION,
+    membershipEpoch: 0,
+    erasureEpoch: 0,
+    policyVersion: 1,
+    strategyVersion: "context-state-v1",
+    now: NOW,
+  });
+  existingState.correctionClaimRefs = [
+    "old-claim",
+  ];
+
+  const f = fixture({
+    conversationRole: "MEMBER",
+    messageAuthorUserId: USER,
+    state: existingState,
+    supersededClaims: [{
+      claimId: "old-claim",
+      claimVersion: 2,
+    }],
+  });
+
+  const result = await f.service.createCorrection(
+    actor,
+    command({
+      target_message_id: MESSAGE,
+      target_source_revision: 1,
+    }),
+  );
+
+  assert.equal(result.status, "APPLIED");
+  assert.ok(result.claim_id);
+  assert.equal(f.overrideProvenance.length, 1);
+  assert.deepEqual(
+    {
+      oldId:
+        f.overrideProvenance[0].overriddenClaimId,
+      oldVersion:
+        f.overrideProvenance[0].overriddenClaimVersion,
+      replacement:
+        f.overrideProvenance[0].replacementClaimId,
+    },
+    {
+      oldId: "old-claim",
+      oldVersion: 2,
+      replacement: result.claim_id,
+    },
+  );
+  assert.deepEqual(
+    f.state().correctionClaimRefs,
+    [result.claim_id],
   );
 });
