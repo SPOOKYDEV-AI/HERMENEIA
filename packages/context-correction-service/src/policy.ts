@@ -121,28 +121,37 @@ export function normaliseCorrection(
   command: CorrectionCommand,
 ): NormalisedCorrection {
   if (command.kind === "TONE") {
-    const preferred =
-      command.payload.preferred_register;
+    const proposition =
+      parseSupportedClaimProposition({
+        schema_version:
+          command.payload.schema_version,
+        kind: "STYLE_PREFERENCE",
+        preferred_register:
+          command.payload.preferred_register,
+        ...(command.payload.target_language_tag
+          ? {
+              target_language_tag:
+                command.payload.target_language_tag,
+            }
+          : {}),
+      });
+
     if (
       command.payload.schema_version !== 1 ||
       command.payload.kind !== "TONE" ||
-      !["NEUTRAL", "FORMAL", "INFORMAL"].includes(
-        String(preferred),
-      )
+      !proposition ||
+      proposition.kind !== "STYLE_PREFERENCE"
     ) {
       throw new DomainError(
         "INVALID_COMMAND",
-        "TONE correction requires schema_version=1, kind=TONE and a supported preferred_register",
+        "TONE correction requires schema_version=1, kind=TONE, a supported preferred_register and an optional valid target_language_tag",
       );
     }
 
     return {
-      payload: {
-        schema_version: 1,
-        kind: "TONE",
-        preferred_register: preferred,
-      },
-      canBecomeClaim: false,
+      payload:
+        storedClaimProposition(proposition),
+      canBecomeClaim: true,
     };
   }
 
@@ -210,6 +219,18 @@ export function decideCorrectionPromotion(
       status: "NEEDS_CONFIRMATION",
       scope: null,
       subjectUserId: null,
+    };
+  }
+
+  if (
+    command.kind === "TONE" &&
+    command.requested_scope === "CONVERSATION"
+  ) {
+    return {
+      apply: true,
+      status: "APPLIED",
+      scope: "CONVERSATION",
+      subjectUserId: actorUserId,
     };
   }
 
