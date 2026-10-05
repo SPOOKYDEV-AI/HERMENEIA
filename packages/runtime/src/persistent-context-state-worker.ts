@@ -10,6 +10,9 @@ import type {
 import type {
   PostgresConversationContextStateRepository,
 } from "../../persistence-postgres/src/context-state.js";
+import type {
+  PostgresRecoveryCheckpointRepository,
+} from "../../persistence-postgres/src/recovery-checkpoints.js";
 import {
   ContextStateWorkerService,
   type ContextStateWorkerClock,
@@ -29,6 +32,7 @@ export interface PostgresContextStateWorkerDependencies {
   outboxService: PersistentOutboxService<SqlExecutor>;
   clock: ContextStateWorkerClock;
   transientSources?: TransientSourceStore;
+  recoveryCheckpoints?: PostgresRecoveryCheckpointRepository;
   retryBaseSeconds?: number;
   maxAttempts?: number;
 }
@@ -219,6 +223,7 @@ export function createPostgresContextStateWorker(
     outbox: deps.outboxService,
     clock: deps.clock,
     episodeDeriver,
+    checkpointWriter: deps.recoveryCheckpoints,
     retryBaseSeconds: deps.retryBaseSeconds,
     maxAttempts: deps.maxAttempts,
   });
