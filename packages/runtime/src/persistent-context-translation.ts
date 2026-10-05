@@ -106,7 +106,7 @@ export function createPostgresTranslationContextRuntime(
     deps.derivedCandidates ??
     (deps.claimRepository
       ? {
-          async load(input, state) {
+          async load(input, state, frame) {
             const referencedClaimIds = [
               ...(state.correctionClaimRefs ?? []),
               ...(state.terminologyClaimRefs ?? []),
@@ -120,10 +120,10 @@ export function createPostgresTranslationContextRuntime(
               return [];
             }
 
-            const now = deps.clock.now();
-            if (!Number.isFinite(Date.parse(now))) {
+            const asOf = frame.currentMessageAcceptedAt;
+            if (!Number.isFinite(Date.parse(asOf))) {
               throw new TypeError(
-                "Context candidate clock returned an invalid timestamp",
+                "Current message acceptance timestamp is invalid",
               );
             }
 
@@ -136,7 +136,7 @@ export function createPostgresTranslationContextRuntime(
                       tenantId: input.tenantId,
                       conversationId: input.conversationId,
                       claimIds: referencedClaimIds,
-                      now,
+                      asOf,
                     },
                   ),
               );
@@ -147,7 +147,7 @@ export function createPostgresTranslationContextRuntime(
               conversationId: input.conversationId,
               targetLanguageTag: input.targetLanguageTag,
               state,
-              now,
+              now: asOf,
             });
           },
         }
