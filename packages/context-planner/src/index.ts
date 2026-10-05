@@ -41,6 +41,14 @@ export interface ConversationContextStateSource {
   ): Promise<ConversationContextState | null>;
 }
 
+export interface DerivedContextCandidateSource {
+  load(
+    input: TranslationContextRequest,
+    state: ConversationContextState,
+    frame: ContextPlanningFrame,
+  ): Promise<ContextCandidate[]>;
+}
+
 export interface TranslationContextPlannerConfig {
   recentMessageLimit: number;
   budget: Omit<ContextBudget, "currentMessageTokens">;
@@ -66,6 +74,7 @@ export interface TranslationContextPlannerDependencies {
   metadata: ContextPlanningMetadataSource;
   transientSources: TransientSourceStore;
   stateSource?: ConversationContextStateSource;
+  derivedCandidates?: DerivedContextCandidateSource;
   config?: Omit<
     Partial<TranslationContextPlannerConfig>,
     "budget"
@@ -137,9 +146,23 @@ export class TranslationContextPlanner
       }),
     );
 
-    const candidates = resolved.filter(
+    const immediateCandidates = resolved.filter(
       (value): value is ContextCandidate => value !== null,
     );
+
+    const derivedCandidates =
+      state && this.deps.derivedCandidates
+        ? await this.safeLoadDerivedCandidates(
+            input,
+            state,
+            frame,
+          )
+        : [];
+
+    const candidates = [
+      ...immediateCandidates,
+      ...derivedCandidates,
+    ];
 
     const currentMessageTokens = Math.min(
       this.config.maxCurrentMessageTokens,
@@ -152,15 +175,10 @@ export class TranslationContextPlanner
     // sufficient. Until a state/recovery/correction adapter materialises at
     // least one derived candidate, selecting T2 would only relabel the same
     // recent-message window and overstate adaptive-context behaviour.
-    const hasDerivedCandidate = candidates.some(
-      (candidate) =>
-        candidate.candidateType !== "IMMEDIATE_MESSAGE",
-    );
-
     const strategy =
-      state !== null && hasDerivedCandidate
+      state !== null && derivedCandidates.length > 0
         ? "T2_ADAPTIVE_V1"
-        : candidates.length > 0
+        : immediateCandidates.length > 0
           ? "T1"
           : "T0";
 
@@ -176,6 +194,31 @@ export class TranslationContextPlanner
         currentMessageTokens,
       },
     };
+  }
+
+  private async safeLoadDerivedCandidates(
+    input: TranslationContextRequest,
+    state: ConversationContextState,
+    frame: ContextPlanningFrame,
+  ): Promise<ContextCandidate[]> {
+    try {
+      const candidates =
+        await this.deps.derivedCandidates!.load(
+          input,
+          structuredClone(state),
+          structuredClone(frame),
+        );
+      return Array.isArray(candidates)
+        ? candidates.map((candidate) =>
+            structuredClone(candidate),
+          )
+        : [];
+    } catch {
+      // Adaptive enrichment is optional to the critical path. A failed
+      // adapter degrades to exact transient T1/T0 context rather than
+      // blocking translation or fabricating derived evidence.
+      return [];
+    }
   }
 
   private async safeGetSource(input: {
