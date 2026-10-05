@@ -186,6 +186,7 @@ export function createHermeneiaHttpServer({
   deliveryService = null,
   translationRecoveryService = null,
   correctionService = null,
+  translationFeedbackService = null,
   deviceService = null,
   readinessService = null,
 }) {
@@ -224,6 +225,14 @@ export function createHermeneiaHttpServer({
   ) {
     throw new TypeError(
       "correctionService.createCorrection is required",
+    );
+  }
+  if (
+    translationFeedbackService !== null &&
+    typeof translationFeedbackService.createFeedback !== "function"
+  ) {
+    throw new TypeError(
+      "translationFeedbackService.createFeedback is required",
     );
   }
 
@@ -538,6 +547,57 @@ export function createHermeneiaHttpServer({
         });
 
         return json(res, 200, result);
+      }
+
+      const translationFeedbackMatch = matchPath(
+        requestUrl.pathname,
+        /^\/v1\/translations\/([^/]+)\/feedback$/,
+      );
+
+      if (req.method === "POST" && translationFeedbackMatch) {
+        if (!translationFeedbackService) {
+          throw new HttpError(
+            503,
+            "INTERNAL_ERROR",
+            "Translation feedback service unavailable",
+            true,
+          );
+        }
+
+        const body = await readJson(req);
+        requireProtocolV1(body);
+
+        if (
+          typeof body.command_id !== "string" ||
+          typeof body.kind !== "string" ||
+          (
+            body.note !== undefined &&
+            typeof body.note !== "string"
+          )
+        ) {
+          throw new HttpError(
+            400,
+            "INVALID_COMMAND",
+            "Invalid translation feedback payload",
+          );
+        }
+
+        const result =
+          await translationFeedbackService.createFeedback(
+            actor,
+            {
+              protocol_version: 1,
+              command_id: body.command_id,
+              translation_id:
+                translationFeedbackMatch[0],
+              kind: body.kind,
+              ...(body.note !== undefined
+                ? { note: body.note }
+                : {}),
+            },
+          );
+
+        return json(res, 202, result);
       }
 
       const correctionMatch = matchPath(

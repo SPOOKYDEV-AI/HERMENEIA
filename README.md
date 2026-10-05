@@ -98,7 +98,7 @@ The Context Engine is the main research and engineering differentiator. Messagin
 
 ## Repository status
 
-**Persistent Core V1, executable T0/T1 Context Engine runtime and the first durable ConversationState runtime are qualified against disposable PostgreSQL 16. Send, command recovery, edit/delete, tenant-scoped sync/ACK, session/device trust, translation outbox/recovery, metadata-only ContextSnapshots, bounded transient context, causal ContextState reduction, HPKE publication, recipient decrypt and ACK/payload purge execute through the real persistence/runtime path. The qualification suite currently passes 369/369 Node regressions, migrations and rollbacks through 0013, real process/SIGTERM checks and PostgreSQL translation E2E.**
+**Persistent Core V1, executable T0/T1 Context Engine runtime and the first durable ConversationState runtime are qualified against disposable PostgreSQL 16. Send, command recovery, edit/delete, tenant-scoped sync/ACK, session/device trust, translation outbox/recovery, metadata-only ContextSnapshots, bounded transient context, causal ContextState reduction, HPKE publication, recipient decrypt and ACK/payload purge execute through the real persistence/runtime path. The qualification suite currently passes 379/379 Node regressions, migrations and rollbacks through 0013, real process/SIGTERM checks and PostgreSQL translation E2E.**
 
 The runtime now persists bounded ConversationState, registers messaging operations independently of translation-provider availability, reduces them through fenced outbox jobs, and projects state causally before the message being translated so current/future evidence cannot leak backwards. Metadata-only state does not masquerade as T2: adaptive T2 is selected only when a derived candidate source materialises real evidence, and that enrichment boundary fails soft to T1/T0.
 
@@ -106,7 +106,9 @@ The first authoritative T2 semantic path is now executable end to end. Conversat
 
 Conversation-scoped structured corrections are promoted only for a conversation `MODERATOR` or tenant `ADMIN/OWNER`. Message-scoped corrections remain repair events, and tenant-wide or TONE corrections remain `NEEDS_CONFIRMATION` until their distribution/style semantics exist. Derived claims are evaluated strictly as-of the current **source revision** creation timestamp, preventing a correction submitted after a message/revision was accepted from leaking backwards into that translation. PostgreSQL E2E now proves `correction service -> repair event -> claim -> provenance -> ConversationState -> T2 ContextSnapshot -> provider`.
 
-Message edit/delete advance the conversation content-invalidation frontier, and translation publication rejects snapshots whose erasure epoch is stale before provider invocation/publication. Episode inference, pending-correction confirmation/moderation, tenant-wide policy distribution, TONE/style memory, translation-feedback ingestion, recovery-checkpoint materialisation, dependency-aware invalidation, independent cryptographic/platform review, live external-provider qualification with controlled credentials and target-deployment crash/restart recovery remain open gates. Translation workers are intentionally embedded for now: raw source is process-local transient state, so cross-process worker mode fails fast until HERMENEIA has a reviewed secure transient-source transport rather than silently degrading every message to source re-supply.
+Translation feedback is now executable through the persistent runtime. Feedback is recipient-only, accepted only for a READY translation of the current source revision, idempotent through the shared command ledger, and deliberately remains a repair/problem signal rather than automatically creating durable memory. Free-form feedback notes are never persisted in plaintext: Core stores only bounded note metadata while the command fingerprint carries an HMAC-protected note fingerprint.
+
+Message edit/delete advance the conversation content-invalidation frontier, and translation publication rejects snapshots whose erasure epoch is stale before provider invocation/publication. Episode inference, feedback/correction moderation, pending-correction approval, tenant-wide policy distribution, TONE/style memory, recovery-checkpoint materialisation, dependency-aware invalidation, independent cryptographic/platform review, live external-provider qualification with controlled credentials and target-deployment crash/restart recovery remain open gates. Translation workers are intentionally embedded for now: raw source is process-local transient state, so cross-process worker mode fails fast until HERMENEIA has a reviewed secure transient-source transport rather than silently degrading every message to source re-supply.
 
 ## Documentation
 
@@ -136,6 +138,7 @@ Message edit/delete advance the conversation content-invalidation frontier, and 
 - [Context Integrity, Provenance and Memory Safety — V1](docs/architecture/context-integrity-v1.md)
 - [OpenAI Translation Provider — V1](docs/engineering/openai-translation-provider-v1.md)
 - [Explicit Correction Ingestion — V1](docs/engineering/context-correction-ingestion-v1.md)
+- [Translation Feedback — V1](docs/engineering/translation-feedback-v1.md)
 - [Privacy and data minimisation](docs/security/privacy-data-minimisation.md)
 - [Ephemeral messages and corrective memory](docs/architecture/ephemeral-message-memory-v1.md)
 - [Sanitised recovery checkpoints](docs/architecture/recovery-checkpoint-v1.md)

@@ -244,3 +244,67 @@ test("HTTP correction is routed to the injected persistent correction service", 
     },
   }]);
 });
+
+
+test("HTTP translation feedback is routed to the injected persistent feedback service", async (t) => {
+  const calls = [];
+  const translationFeedbackService = {
+    async createFeedback(
+      receivedActor,
+      command,
+    ) {
+      calls.push({
+        actor: receivedActor,
+        command,
+      });
+      return {
+        protocol_version: 1,
+        repair_event_id: "repair-feedback-1",
+        status: "NEEDS_CONFIRMATION",
+      };
+    },
+  };
+
+  const server = createHermeneiaHttpServer({
+    core: coreThatMustNotMutate(),
+    translationFeedbackService,
+    authenticate() {
+      return actor;
+    },
+  });
+  t.after(() => server.close());
+
+  const base = await listen(server);
+  const response = await fetch(
+    `${base}/v1/translations/translation-1/feedback`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        protocol_version: 1,
+        command_id: "feedback-command-1",
+        kind: "WRONG_MEANING",
+        note: "CR was mistranslated",
+      }),
+    },
+  );
+
+  assert.equal(response.status, 202);
+  assert.deepEqual(await response.json(), {
+    protocol_version: 1,
+    repair_event_id: "repair-feedback-1",
+    status: "NEEDS_CONFIRMATION",
+  });
+  assert.deepEqual(calls, [{
+    actor,
+    command: {
+      protocol_version: 1,
+      command_id: "feedback-command-1",
+      translation_id: "translation-1",
+      kind: "WRONG_MEANING",
+      note: "CR was mistranslated",
+    },
+  }]);
+});

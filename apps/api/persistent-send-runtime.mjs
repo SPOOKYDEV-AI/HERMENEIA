@@ -20,6 +20,9 @@ import {
   PostgresContextCorrectionRepository,
 } from "../../.build/packages/persistence-postgres/src/context-corrections.js";
 import {
+  PostgresTranslationFeedbackRepository,
+} from "../../.build/packages/persistence-postgres/src/translation-feedback.js";
+import {
   SqlTransactionManager,
 } from "../../.build/packages/persistence/src/index.js";
 import {
@@ -55,6 +58,9 @@ import {
 import {
   createPostgresContextCorrectionService,
 } from "../../.build/packages/runtime/src/persistent-context-correction.js";
+import {
+  createPostgresTranslationFeedbackService,
+} from "../../.build/packages/runtime/src/persistent-translation-feedback.js";
 import {
   InMemoryTransientSourceStore,
 } from "../../.build/packages/transient-source/src/index.js";
@@ -313,6 +319,10 @@ export async function createPersistentSendRuntime({
       new PostgresContextCorrectionRepository(
         transactions,
       );
+    const translationFeedbackRepository =
+      new PostgresTranslationFeedbackRepository(
+        transactions,
+      );
     const contextStateStrategyVersion =
       "context-state-v1";
 
@@ -385,6 +395,16 @@ export async function createPersistentSendRuntime({
         clock,
         strategyVersion:
           contextStateStrategyVersion,
+      });
+
+    const translationFeedbackService =
+      createPostgresTranslationFeedbackService({
+        messagingRepository: repository,
+        feedbackRepository:
+          translationFeedbackRepository,
+        ids,
+        clock,
+        noteFingerprinter: fingerprinter,
       });
 
     const translationService =
@@ -547,6 +567,7 @@ export async function createPersistentSendRuntime({
       translationRecoveryService,
       translationWorker,
       correctionService,
+      translationFeedbackService,
       contextStateWorker,
       contextRuntime,
       readinessService,
@@ -559,6 +580,7 @@ export async function createPersistentSendRuntime({
       contextStateRepository,
       contextClaimRepository,
       contextCorrectionRepository,
+      translationFeedbackRepository,
       sessionRepository,
       transientSources,
       sqlPool,
