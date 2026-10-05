@@ -10,7 +10,7 @@ import type {
 import {
   createDegradedContextStateFromFloor,
   createInitialContextState,
-  linkConfirmedCorrectionClaim,
+  replaceConfirmedCorrectionClaim,
   rebaseContextStateAuthority,
 } from "../../context-state/src/index.js";
 import type {
@@ -220,6 +220,19 @@ export class ContextCorrectionService<Tx> {
     scope: "CONVERSATION" | "TENANT",
     now: string,
   ): Promise<void> {
+    const superseded =
+      await this.deps.corrections.invalidateSupersededCorrectionClaims(
+        tx,
+        {
+          tenantId: actor.tenantId,
+          conversationId:
+            command.conversation_id,
+          subjectUserId,
+          propositionRef,
+          invalidatedAt: now,
+        },
+      );
+
     await this.deps.corrections.insertConfirmedClaim(
       tx,
       {
@@ -257,12 +270,35 @@ export class ContextCorrectionService<Tx> {
       },
     );
 
+    for (const previous of superseded) {
+      await this.deps.corrections.insertClaimOverrideProvenance(
+        tx,
+        {
+          tenantId: actor.tenantId,
+          provenanceEdgeId:
+            this.deps.ids.next("provenance"),
+          overriddenClaimId:
+            previous.claimId,
+          overriddenClaimVersion:
+            previous.claimVersion,
+          replacementClaimId: claimId,
+          replacementClaimVersion: 1,
+          strategyVersion:
+            this.strategyVersion,
+          createdAt: now,
+        },
+      );
+    }
+
     await this.linkClaimIntoState(
       tx,
       actor,
       command.conversation_id,
       authority,
       claimId,
+      superseded.map(
+        (claim) => claim.claimId,
+      ),
       now,
     );
   }
@@ -356,6 +392,7 @@ export class ContextCorrectionService<Tx> {
     conversationId: UUID,
     authority: CorrectionAuthority,
     claimId: UUID,
+    removeClaimIds: UUID[],
     now: string,
   ): Promise<void> {
     const existing = await this.deps.state.loadState(
@@ -399,9 +436,13 @@ export class ContextCorrectionService<Tx> {
               now,
             });
 
-      created = linkConfirmedCorrectionClaim(
+      created = replaceConfirmedCorrectionClaim(
         created,
-        { claimId, now },
+        {
+          claimId,
+          removeClaimIds,
+          now,
+        },
       );
 
       const inserted =
@@ -429,9 +470,13 @@ export class ContextCorrectionService<Tx> {
         now,
       },
     );
-    next = linkConfirmedCorrectionClaim(
+    next = replaceConfirmedCorrectionClaim(
       next,
-      { claimId, now },
+      {
+        claimId,
+        removeClaimIds,
+        now,
+      },
     );
 
     if (
