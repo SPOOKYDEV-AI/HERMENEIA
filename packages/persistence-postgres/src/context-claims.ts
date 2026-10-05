@@ -17,9 +17,11 @@ interface ContextClaimRow extends Record<string, unknown> {
   authority_class:
     | "POLICY"
     | "APPROVED_GLOSSARY"
+    | "EXPLICIT_PREFERENCE"
     | "CONFIRMED_CORRECTION";
   retention_class:
     | "CORRECTIVE_DURABLE"
+    | "PREFERENCE_DURABLE"
     | "POLICY_REFERENCE";
   sensitivity_class: "NORMAL" | "RESTRICTED";
   confidence: string | number | null;
@@ -29,6 +31,7 @@ interface ContextClaimRow extends Record<string, unknown> {
     | "EXPLICIT_UI_CORRECTION"
     | "EXPLICIT_TEXTUAL_CORRECTION"
     | "APPROVED_GLOSSARY_CHANGE"
+    | "EXPLICIT_PREFERENCE_CHANGE"
     | "TENANT_POLICY_CHANGE"
     | null;
   valid_from: string | null;
@@ -185,6 +188,15 @@ export class PostgresContextClaimRepository {
                 'EXPLICIT_UI_CORRECTION',
                 'EXPLICIT_TEXTUAL_CORRECTION'
               )
+            )
+            OR (
+              authority_class = 'EXPLICIT_PREFERENCE'
+              AND retention_class = 'PREFERENCE_DURABLE'
+              AND modality = 'ASSERTION'
+              AND trigger_kind = 'EXPLICIT_PREFERENCE_CHANGE'
+              AND subject_user_id IS NOT NULL
+              AND scope_kind = 'CONVERSATION'
+              AND scope_conversation_id = $3
             )
             OR (
               authority_class = 'APPROVED_GLOSSARY'
