@@ -79,6 +79,7 @@ function put(store, messageId, sourceRevision, text) {
 function fixture({
   planningFrame = frame(),
   state = null,
+  derivedCandidates = undefined,
 } = {}) {
   const transientSources =
     new InMemoryTransientSourceStore({
@@ -104,6 +105,7 @@ function fixture({
               : null;
           },
         },
+    derivedCandidates,
   });
 
   return { planner, transientSources };
@@ -181,7 +183,7 @@ test("planner chooses T0 when no recent transient source survives", async () => 
   assert.equal(result.budget.currentMessageTokens, 128);
 });
 
-test("planner chooses T2 only with compatible derived ContextState", async () => {
+test("compatible state does not falsely upgrade immediate-only context to T2", async () => {
   const compatibleState = {
     conversationId: "conversation-1",
     contextVersion: 4,
@@ -200,8 +202,92 @@ test("planner chooses T2 only with compatible derived ContextState", async () =>
 
   const result = await planner.load(request());
 
-  assert.equal(result.strategy, "T2_ADAPTIVE_V1");
+  assert.equal(result.strategy, "T1");
   assert.deepEqual(result.state, compatibleState);
+});
+
+test("planner chooses T2 only when compatible state materialises a derived candidate", async () => {
+  const compatibleState = {
+    conversationId: "conversation-1",
+    contextVersion: 4,
+    processedPrefixOperationSequence: 7,
+    processingGapOperationSequences: [],
+    erasureEpoch: 2,
+    activeEpisodeId: "episode-1",
+    activeEpisodeVersion: 3,
+    updatedAt: "2026-10-04T19:59:59.000Z",
+  };
+
+  const { planner, transientSources } = fixture({
+    state: compatibleState,
+    derivedCandidates: {
+      async load(_input, state, planningFrame) {
+        assert.equal(state.contextVersion, 4);
+        assert.equal(planningFrame.currentOperationSequence, 8);
+        return [{
+          candidateId: "episode:episode-1:3",
+          candidateType: "ACTIVE_EPISODE",
+          content: "technical debugging episode",
+          sourceMessageSequence: null,
+          causalThroughOperationSequence: 7,
+          sourceRevisionRefs: [],
+          claimRefs: [],
+          semanticScore: 0.7,
+          temporalScore: 0.9,
+          confidence: 0.8,
+          importance: 0.7,
+          explicitReference: false,
+          activeEpisode: true,
+          tokenEstimate: 6,
+          privacyScope: "CHECKPOINT",
+          erasureEpoch: 2,
+          validUntil: null,
+          correctionTrigger: null,
+        }];
+      },
+    },
+  });
+
+  put(transientSources, "message-7", 1, "recent seven");
+
+  const result = await planner.load(request());
+
+  assert.equal(result.strategy, "T2_ADAPTIVE_V1");
+  assert.equal(result.candidates.length, 2);
+  assert.equal(
+    result.candidates[1].candidateId,
+    "episode:episode-1:3",
+  );
+});
+
+test("derived-candidate failure degrades to T1 without blocking translation", async () => {
+  const { planner, transientSources } = fixture({
+    state: {
+      conversationId: "conversation-1",
+      contextVersion: 4,
+      processedPrefixOperationSequence: 7,
+      processingGapOperationSequences: [],
+      erasureEpoch: 2,
+      activeEpisodeId: "episode-1",
+      activeEpisodeVersion: 3,
+      updatedAt: "2026-10-04T19:59:59.000Z",
+    },
+    derivedCandidates: {
+      async load() {
+        throw new Error("enrichment unavailable");
+      },
+    },
+  });
+
+  put(transientSources, "message-7", 1, "recent seven");
+
+  const result = await planner.load(request());
+
+  assert.equal(result.strategy, "T1");
+  assert.deepEqual(
+    result.candidates.map((candidate) => candidate.candidateId),
+    ["message:message-7:1"],
+  );
 });
 
 test("planner rejects stale derived state by degrading to T1 instead of fabricating compatibility", async () => {
