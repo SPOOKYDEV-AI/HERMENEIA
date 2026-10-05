@@ -38,6 +38,7 @@ function frame(overrides = {}) {
     currentSourceLanguageTag: "fr-FR",
     erasureEpoch: 2,
     policyVersion: 1,
+    tenantPolicyVersion: 1,
     recentMessages: [
       {
         messageId: "message-7",
@@ -425,4 +426,5 @@ test("planner rejects derived state from a stale policy version and degrades to 
   assert.equal(result.strategy, "T1");
   assert.equal(result.state, null);
   assert.equal(result.policyVersion, 2);
+  assert.equal(result.tenantPolicyVersion, 1);
 });
