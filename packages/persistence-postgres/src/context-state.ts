@@ -208,6 +208,9 @@ export function toEngineContextState(
     activeEpisodeId: value.activeEpisode?.episodeId ?? null,
     activeEpisodeVersion:
       value.activeEpisode?.episodeVersion ?? null,
+    terminologyClaimRefs: [...value.terminologyClaimRefs],
+    lexicalClaimRefs: [...value.lexicalClaimRefs],
+    correctionClaimRefs: [...value.correctionClaimRefs],
     updatedAt: value.updatedAt,
   };
 }
