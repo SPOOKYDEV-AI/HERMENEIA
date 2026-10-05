@@ -600,6 +600,55 @@ export function createHermeneiaHttpServer({
         return json(res, 202, result);
       }
 
+      const correctionReviewMatch = matchPath(
+        requestUrl.pathname,
+        /^\/v1\/conversations\/([^/]+)\/repairs\/([^/]+)\/review$/,
+      );
+
+      if (req.method === "POST" && correctionReviewMatch) {
+        if (
+          !correctionService ||
+          typeof correctionService.reviewCorrection !== "function"
+        ) {
+          throw new HttpError(
+            503,
+            "INTERNAL_ERROR",
+            "Correction review service unavailable",
+            true,
+          );
+        }
+
+        const body = await readJson(req);
+        requireProtocolV1(body);
+
+        if (
+          typeof body.command_id !== "string" ||
+          typeof body.decision !== "string"
+        ) {
+          throw new HttpError(
+            400,
+            "INVALID_COMMAND",
+            "Invalid correction review payload",
+          );
+        }
+
+        const result =
+          await correctionService.reviewCorrection(
+            actor,
+            {
+              protocol_version: 1,
+              command_id: body.command_id,
+              conversation_id:
+                correctionReviewMatch[0],
+              repair_event_id:
+                correctionReviewMatch[1],
+              decision: body.decision,
+            },
+          );
+
+        return json(res, 202, result);
+      }
+
       const correctionRevocationMatch = matchPath(
         requestUrl.pathname,
         /^\/v1\/conversations\/([^/]+)\/corrections\/([^/]+)\/revoke$/,
