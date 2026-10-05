@@ -10,6 +10,9 @@ import type {
 export interface CorrectionAuthority {
   tenantRole: "MEMBER" | "ADMIN" | "OWNER";
   conversationRole: "MEMBER" | "MODERATOR";
+  membershipEpoch: number;
+  erasureEpoch: number;
+  policyVersion: number;
 }
 
 export class PostgresContextCorrectionRepository {
@@ -33,9 +36,15 @@ export class PostgresContextCorrectionRepository {
     const result = await tx.query<{
       tenant_role: CorrectionAuthority["tenantRole"];
       conversation_role: CorrectionAuthority["conversationRole"];
+      membership_epoch: number;
+      erasure_epoch: number;
+      policy_version: number;
     }>(
       `SELECT tm.role AS tenant_role,
-              cm.role AS conversation_role
+              cm.role AS conversation_role,
+              c.membership_epoch,
+              c.erasure_epoch,
+              c.policy_version
          FROM conversations c
          JOIN conversation_members cm
            ON cm.tenant_id = c.tenant_id
@@ -66,6 +75,9 @@ export class PostgresContextCorrectionRepository {
       ? {
           tenantRole: row.tenant_role,
           conversationRole: row.conversation_role,
+          membershipEpoch: Number(row.membership_epoch),
+          erasureEpoch: Number(row.erasure_epoch),
+          policyVersion: Number(row.policy_version),
         }
       : undefined;
   }
