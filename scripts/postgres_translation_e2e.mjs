@@ -252,8 +252,14 @@ async function seed() {
            tenant_id, user_id, role, status
          ) VALUES
            ($1,$2,'MEMBER','ACTIVE'),
-           ($1,$3,'MEMBER','ACTIVE')`,
-        [ids.tenantId, ids.senderUserId, ids.recipientUserId],
+           ($1,$3,'MEMBER','ACTIVE'),
+           ($1,$4,'ADMIN','ACTIVE')`,
+        [
+          ids.tenantId,
+          ids.senderUserId,
+          ids.recipientUserId,
+          ids.tenantAdminUserId,
+        ],
       );
 
       await db.query(
@@ -262,7 +268,8 @@ async function seed() {
            public_material_ref, revocation_epoch, platform
          ) VALUES
            ($1,$2,'ACTIVE',1,$3,0,'DESKTOP'),
-           ($4,$5,'ACTIVE',1,$6,0,'DESKTOP')`,
+           ($4,$5,'ACTIVE',1,$6,0,'DESKTOP'),
+           ($7,$8,'ACTIVE',1,$9,0,'DESKTOP')`,
         [
           ids.senderDeviceId,
           ids.senderUserId,
@@ -270,6 +277,9 @@ async function seed() {
           ids.recipientDeviceId,
           ids.recipientUserId,
           recipientKeys.publicMaterialRef,
+          ids.tenantAdminDeviceId,
+          ids.tenantAdminUserId,
+          tenantAdminKeys.publicMaterialRef,
         ],
       );
 
@@ -1451,6 +1461,179 @@ try {
 
   runtimeNow = "2026-10-05T08:00:04.000Z";
 
+  const revocation =
+    await runtime.correctionService.revokeCorrection(
+      sender,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.correctionRevokeCommandId,
+        conversation_id: ids.conversationId,
+        claim_id: correctionClaimId,
+      },
+    );
+
+  assert.equal(revocation.status, "REVOKED");
+  assert.equal(
+    revocation.claim_id,
+    correctionClaimId,
+  );
+  assert.equal(revocation.claim_version, 1);
+
+  await withConnection(async (db) => {
+    const claim = await db.query(
+      `SELECT status,
+              valid_until
+         FROM context_claims
+        WHERE tenant_id = $1
+          AND claim_id = $2
+          AND claim_version = 1`,
+      [ids.tenantId, correctionClaimId],
+    );
+    assert.equal(claim.rowCount, 1);
+    assert.equal(
+      claim.rows[0].status,
+      "REVOKED",
+    );
+    assert.ok(claim.rows[0].valid_until);
+
+    const invalidation = await db.query(
+      `SELECT relation,
+              source_repair_event_id
+         FROM provenance_edges
+        WHERE tenant_id = $1
+          AND derived_claim_id = $2
+          AND derived_claim_version = 1
+          AND relation = 'INVALIDATED_BY'`,
+      [ids.tenantId, correctionClaimId],
+    );
+    assert.equal(invalidation.rowCount, 1);
+    assert.equal(
+      invalidation.rows[0].source_repair_event_id,
+      revocation.repair_event_id,
+    );
+
+    const repair = await db.query(
+      `SELECT kind,
+              status,
+              structured_payload
+         FROM translation_repair_events
+        WHERE tenant_id = $1
+          AND repair_event_id = $2`,
+      [
+        ids.tenantId,
+        revocation.repair_event_id,
+      ],
+    );
+    assert.equal(repair.rowCount, 1);
+    assert.equal(
+      repair.rows[0].kind,
+      "EXPLICIT_CORRECTION",
+    );
+    assert.equal(
+      repair.rows[0].status,
+      "APPLIED",
+    );
+    assert.deepEqual(
+      repair.rows[0].structured_payload,
+      {
+        schema_version: 1,
+        action: "REVOKE_CORRECTION",
+        claim_id: correctionClaimId,
+        claim_version: 1,
+      },
+    );
+
+    const state = await db.query(
+      `SELECT correction_claim_refs
+         FROM conversation_context_states
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(state.rowCount, 1);
+    assert.deepEqual(
+      state.rows[0].correction_claim_refs,
+      [],
+    );
+  });
+
+  runtimeNow = "2026-10-05T08:00:05.000Z";
+
+  const postRevokeAccepted =
+    await runtime.sendService.sendMessage(
+      sender,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.postRevokeCommandId,
+        client_message_id:
+          ids.postRevokeClientMessageId,
+        conversation_id: ids.conversationId,
+        source: {
+          text: POST_REVOKE_SOURCE_TEXT,
+          language_hint: "fr-FR",
+        },
+        client_authored_at: NOW,
+      },
+    );
+
+  assert.equal(
+    postRevokeAccepted.status,
+    "ACCEPTED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runFanoutOnce(),
+    "FANOUT_DONE",
+  );
+
+  await withConnection(async (db) => {
+    const snapshot = await db.query(
+      `SELECT strategy,
+              selected_claim_refs,
+              selected_candidate_ids
+         FROM context_snapshots
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND recipient_user_id = $3`,
+      [
+        ids.tenantId,
+        postRevokeAccepted.message_id,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(snapshot.rowCount, 1);
+    assert.equal(
+      snapshot.rows[0].strategy,
+      "T1",
+    );
+    assert.deepEqual(
+      snapshot.rows[0].selected_claim_refs,
+      [],
+    );
+    assert.equal(
+      snapshot.rows[0].selected_candidate_ids.some(
+        (id) =>
+          id.startsWith(
+            `claim:${correctionClaimId}:`,
+          ),
+      ),
+      false,
+    );
+  });
+
+  assert.equal(
+    await runtime.contextStateWorker.runOnce(),
+    "REDUCED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runExecuteOnce(),
+    "EXECUTION_DONE",
+  );
+  assert.equal(providerCalls, 3);
+
+  runtimeNow = "2026-10-05T08:00:05.100Z";
+
   const tenantPolicyCreated =
     await runtime.tenantPolicyService.upsertPolicy(
       tenantAdmin,
@@ -1558,161 +1741,18 @@ try {
       claim.rows[0].status,
       "ACTIVE",
     );
-
-    const state = await db.query(
-      `SELECT terminology_claim_refs,
-              lexical_claim_refs,
-              correction_claim_refs
-         FROM conversation_context_states
-        WHERE tenant_id = $1
-          AND conversation_id = $2`,
-      [ids.tenantId, ids.conversationId],
-    );
-    assert.equal(state.rowCount, 1);
-    assert.equal(
-      state.rows[0].terminology_claim_refs.includes(
-        tenantPolicyClaimId,
-      ),
-      false,
-    );
-    assert.equal(
-      state.rows[0].lexical_claim_refs.includes(
-        tenantPolicyClaimId,
-      ),
-      false,
-    );
-    assert.equal(
-      state.rows[0].correction_claim_refs.includes(
-        tenantPolicyClaimId,
-      ),
-      false,
-    );
-  });
-
-  runtimeNow = "2026-10-05T08:00:05.000Z";
-
-  const postRevokeAccepted =
-    await runtime.sendService.sendMessage(
-      sender,
+    assert.deepEqual(
+      claim.rows[0].proposition_ref,
       {
-        protocol_version: 1,
-        command_id:
-          ids.postRevokeCommandId,
-        client_message_id:
-          ids.postRevokeClientMessageId,
-        conversation_id: ids.conversationId,
-        source: {
-          text: POST_REVOKE_SOURCE_TEXT,
-          language_hint: "fr-FR",
-        },
-        client_authored_at: NOW,
+        schema_version: 1,
+        kind: "TERM_MEANING",
+        surface_form: "SLA",
+        meaning: "service level agreement",
+        source_language_tag: "fr-FR",
+        target_language_tag: TARGET_LANGUAGE,
       },
     );
 
-  assert.equal(
-    postRevokeAccepted.status,
-    "ACCEPTED",
-  );
-  assert.equal(
-    await runtime.translationWorker.runFanoutOnce(),
-    "FANOUT_DONE",
-  );
-
-  await withConnection(async (db) => {
-    const snapshot = await db.query(
-      `SELECT strategy,
-              selected_claim_refs,
-              selected_candidate_ids
-         FROM context_snapshots
-        WHERE tenant_id = $1
-          AND message_id = $2
-          AND recipient_user_id = $3`,
-      [
-        ids.tenantId,
-        postRevokeAccepted.message_id,
-        ids.recipientUserId,
-      ],
-    );
-    assert.equal(snapshot.rowCount, 1);
-    assert.equal(
-      snapshot.rows[0].strategy,
-      "T1",
-    );
-    assert.deepEqual(
-      snapshot.rows[0].selected_claim_refs,
-      [],
-    );
-    assert.equal(
-      snapshot.rows[0].selected_candidate_ids.some(
-        (id) =>
-          id.startsWith(
-            `claim:${correctionClaimId}:`,
-          ),
-      ),
-      false,
-    );
-  });
-
-  assert.equal(
-    await runtime.contextStateWorker.runOnce(),
-    "REDUCED",
-  );
-  assert.equal(
-    await runtime.translationWorker.runExecuteOnce(),
-    "EXECUTION_DONE",
-  );
-  assert.equal(providerCalls, 3);
-
-  runtimeNow = "2026-10-05T08:00:04.000Z";
-
-  await withConnection(async (db) => {
-    const inserted = await db.query(
-      `INSERT INTO context_claims(
-         tenant_id,
-         claim_id,
-         claim_version,
-         conversation_id,
-         message_id,
-         subject_user_id,
-         claim_type,
-         proposition_ref,
-         modality,
-         authority_class,
-         retention_class,
-         sensitivity_class,
-         confidence,
-         scope_kind,
-         scope_conversation_id,
-         trigger_kind,
-         valid_from,
-         valid_until,
-         status,
-         created_at
-       ) VALUES (
-         $1,$2,1,NULL,NULL,NULL,
-         'TERMINOLOGY',$3::jsonb,
-         'ASSERTION','APPROVED_GLOSSARY',
-         'POLICY_REFERENCE','NORMAL',1,
-         'TENANT',NULL,
-         'APPROVED_GLOSSARY_CHANGE',
-         $4,NULL,'ACTIVE',$4
-       )`,
-      [
-        ids.tenantId,
-        tenantPolicyClaimId,
-        JSON.stringify({
-          schema_version: 1,
-          kind: "TERM_MEANING",
-          surface_form: "SLA",
-          meaning: "service level agreement",
-          source_language_tag: "fr-FR",
-          target_language_tag: TARGET_LANGUAGE,
-        }),
-        runtimeNow,
-      ],
-    );
-    assert.equal(inserted.rowCount, 1);
-
     const state = await db.query(
       `SELECT terminology_claim_refs,
               lexical_claim_refs,
@@ -1743,7 +1783,8 @@ try {
     );
   });
 
-  runtimeNow = "2026-10-05T08:00:05.000Z";
+  runtimeNow = "2026-10-05T08:00:05.200Z";
+
 
   const tenantPolicyAccepted =
     await runtime.sendService.sendMessage(
@@ -1873,6 +1914,21 @@ try {
         `${tenantPolicyClaimId}:1`,
       ),
     );
+
+    const conversationPolicy = await db.query(
+      `SELECT policy_version
+         FROM conversations
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(conversationPolicy.rowCount, 1);
+    assert.equal(
+      Number(
+        conversationPolicy.rows[0].policy_version,
+      ),
+      1,
+    );
   });
 
   const tenantPolicyRevoked =
@@ -1918,6 +1974,17 @@ try {
       "REVOKED",
     );
 
+    const tenant = await db.query(
+      `SELECT policy_version
+         FROM tenants
+        WHERE tenant_id = $1`,
+      [ids.tenantId],
+    );
+    assert.equal(tenant.rowCount, 1);
+    assert.equal(
+      Number(tenant.rows[0].policy_version),
+      3,
+    );
 
     const conversationPolicy = await db.query(
       `SELECT policy_version
