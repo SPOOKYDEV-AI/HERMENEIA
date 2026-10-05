@@ -119,6 +119,8 @@ Resolve contextual candidates in this order:
 
 High confidence never grants a lower-authority source permission to override an approved higher-authority policy/glossary outside its allowed scope.
 
+The executable V1 materializer therefore resolves authority conflicts before ranking rather than converting authority into one confidence/utility score. For a typed semantic key, admissible `POLICY` / `APPROVED_GLOSSARY` claims form the approved control-plane level. If that level is internally contradictory, the key is omitted from T2. If no approved control-plane claim applies, a matching speaker-scoped confirmed correction is more scope-relevant than a generic correction. Contradictions within the applicable correction level also fail closed. The translation provider is never used as an authority tie-breaker.
+
 A user's correction of their own intended meaning can override an earlier inference in the justified scope. It does not automatically create tenant-wide policy.
 
 The executable V1 runtime enforces this with a speaker subject fence. A supported correction anchored to the actor's own source revision may become a `CONFIRMED_CORRECTION` with `subject_user_id = actor_user_id`. Context planning obtains the author of the source revision currently being translated, and the claim materializer rejects a subject-scoped claim unless those identities match. Corrections from an ordinary member about another speaker therefore cannot silently become durable authority over that speaker's future messages.
@@ -458,6 +460,8 @@ Tests must include:
 - deletion during a background worker job;
 - stale worker finishing after a newer worker;
 - contradictory facts that are both temporally valid;
+- contradictory approved claims being withheld from provider context rather than model-resolved;
+- speaker-scoped correction competing with a generic correction;
 - malicious message attempting to create policy/glossary state;
 - translation text differing from original and never becoming authority;
 - rebuild after complete derived-state deletion.

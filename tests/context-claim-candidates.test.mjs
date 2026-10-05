@@ -205,6 +205,8 @@ test("claim created at current message acceptance is excluded to prevent retroac
         "claim-correction",
       ],
       conversationId: "conversation-1",
+      currentSourceAuthorUserId:
+        "speaker-a",
       targetLanguageTag: "es-CO",
       state: state({
         correctionClaimRefs: [
@@ -261,4 +263,279 @@ test("speaker-scoped correction materialises only for the matching source author
 
   assert.equal(matching.length, 1);
   assert.deepEqual(otherSpeaker, []);
+});
+
+
+test("speaker-scoped correction overrides conflicting generic correction for the matching speaker", () => {
+  const generic = correction({
+    claimId: "generic-correction",
+    subjectUserId: null,
+    propositionRef: {
+      schema_version: 1,
+      kind: "TERM_MEANING",
+      surface_form: "CR",
+      meaning: "change request",
+      source_language_tag: "fr-FR",
+    },
+  });
+  const speaker = correction({
+    claimId: "speaker-correction",
+    subjectUserId: "speaker-a",
+    propositionRef: {
+      schema_version: 1,
+      kind: "TERM_MEANING",
+      surface_form: "CR",
+      meaning: "compte rendu",
+      source_language_tag: "fr-FR",
+    },
+  });
+
+  const candidates =
+    materializeReferencedClaimCandidates({
+      claims: [generic, speaker],
+      referencedClaimIds: [
+        generic.claimId,
+        speaker.claimId,
+      ],
+      conversationId: "conversation-1",
+      currentSourceAuthorUserId:
+        "speaker-a",
+      targetLanguageTag: "es-CO",
+      state: state(),
+      now: NOW,
+    });
+
+  assert.equal(candidates.length, 1);
+  assert.deepEqual(
+    JSON.parse(candidates[0].content),
+    {
+      kind: "trusted_term_meaning",
+      surface_form: "CR",
+      meaning: "compte rendu",
+      source_language_tag: "fr-FR",
+    },
+  );
+  assert.deepEqual(
+    candidates[0].claimRefs,
+    ["speaker-correction:3"],
+  );
+});
+
+test("approved glossary suppresses a conflicting correction instead of asking the provider to choose", () => {
+  const speaker = correction({
+    claimId: "speaker-correction",
+    subjectUserId: "speaker-a",
+    propositionRef: {
+      schema_version: 1,
+      kind: "PREFERRED_RENDERING",
+      source_form: "CR",
+      target_form: "informe",
+      source_language_tag: "fr-FR",
+      target_language_tag: "es-CO",
+    },
+  });
+  const glossary = correction({
+    claimId: "approved-glossary",
+    subjectUserId: null,
+    propositionRef: {
+      schema_version: 1,
+      kind: "PREFERRED_RENDERING",
+      source_form: "CR",
+      target_form: "solicitud de cambio",
+      source_language_tag: "fr-FR",
+      target_language_tag: "es-CO",
+    },
+    modality: "ASSERTION",
+    authorityClass: "APPROVED_GLOSSARY",
+    retentionClass: "POLICY_REFERENCE",
+    triggerKind: "APPROVED_GLOSSARY_CHANGE",
+  });
+
+  const candidates =
+    materializeReferencedClaimCandidates({
+      claims: [speaker, glossary],
+      referencedClaimIds: [
+        speaker.claimId,
+        glossary.claimId,
+      ],
+      conversationId: "conversation-1",
+      currentSourceAuthorUserId:
+        "speaker-a",
+      targetLanguageTag: "es-CO",
+      state: state(),
+      now: NOW,
+    });
+
+  assert.equal(candidates.length, 1);
+  assert.equal(
+    candidates[0].candidateType,
+    "APPROVED_POLICY",
+  );
+  assert.deepEqual(
+    JSON.parse(candidates[0].content),
+    {
+      kind: "trusted_preferred_rendering",
+      source_form: "CR",
+      target_form: "solicitud de cambio",
+      source_language_tag: "fr-FR",
+      target_language_tag: "es-CO",
+    },
+  );
+  assert.deepEqual(
+    candidates[0].claimRefs,
+    ["approved-glossary:3"],
+  );
+});
+
+test("conflicting approved control-plane claims fail closed for that semantic key", () => {
+  const glossary = correction({
+    claimId: "approved-glossary",
+    propositionRef: {
+      schema_version: 1,
+      kind: "PREFERRED_RENDERING",
+      source_form: "CR",
+      target_form: "solicitud de cambio",
+      source_language_tag: "fr-FR",
+      target_language_tag: "es-CO",
+    },
+    modality: "ASSERTION",
+    authorityClass: "APPROVED_GLOSSARY",
+    retentionClass: "POLICY_REFERENCE",
+    triggerKind: "APPROVED_GLOSSARY_CHANGE",
+  });
+  const policy = correction({
+    claimId: "tenant-policy",
+    propositionRef: {
+      schema_version: 1,
+      kind: "PREFERRED_RENDERING",
+      source_form: "CR",
+      target_form: "informe",
+      source_language_tag: "fr-FR",
+      target_language_tag: "es-CO",
+    },
+    modality: "ASSERTION",
+    authorityClass: "POLICY",
+    retentionClass: "POLICY_REFERENCE",
+    scopeKind: "TENANT",
+    scopeConversationId: null,
+    triggerKind: "TENANT_POLICY_CHANGE",
+  });
+
+  const candidates =
+    materializeReferencedClaimCandidates({
+      claims: [glossary, policy],
+      referencedClaimIds: [
+        glossary.claimId,
+        policy.claimId,
+      ],
+      conversationId: "conversation-1",
+      currentSourceAuthorUserId:
+        "speaker-a",
+      targetLanguageTag: "es-CO",
+      state: state(),
+      now: NOW,
+    });
+
+  assert.deepEqual(candidates, []);
+});
+
+test("identical approved claims collapse to one candidate while preserving all claim provenance", () => {
+  const glossary = correction({
+    claimId: "approved-glossary",
+    claimVersion: 2,
+    propositionRef: {
+      schema_version: 1,
+      kind: "TERM_MEANING",
+      surface_form: "CR",
+      meaning: "change request",
+      source_language_tag: "fr-FR",
+    },
+    modality: "ASSERTION",
+    authorityClass: "APPROVED_GLOSSARY",
+    retentionClass: "POLICY_REFERENCE",
+    triggerKind: "APPROVED_GLOSSARY_CHANGE",
+  });
+  const policy = correction({
+    claimId: "tenant-policy",
+    claimVersion: 4,
+    propositionRef: {
+      schema_version: 1,
+      kind: "TERM_MEANING",
+      surface_form: "CR",
+      meaning: "change request",
+      source_language_tag: "fr-FR",
+    },
+    modality: "ASSERTION",
+    authorityClass: "POLICY",
+    retentionClass: "POLICY_REFERENCE",
+    scopeKind: "TENANT",
+    scopeConversationId: null,
+    triggerKind: "TENANT_POLICY_CHANGE",
+  });
+
+  const candidates =
+    materializeReferencedClaimCandidates({
+      claims: [policy, glossary],
+      referencedClaimIds: [
+        policy.claimId,
+        glossary.claimId,
+      ],
+      conversationId: "conversation-1",
+      currentSourceAuthorUserId:
+        "speaker-a",
+      targetLanguageTag: "es-CO",
+      state: state(),
+      now: NOW,
+    });
+
+  assert.equal(candidates.length, 1);
+  assert.deepEqual(
+    candidates[0].claimRefs,
+    [
+      "approved-glossary:2",
+      "tenant-policy:4",
+    ],
+  );
+});
+
+test("contradictory speaker-scoped corrections fail closed even if persistence invariants regress", () => {
+  const left = correction({
+    claimId: "speaker-left",
+    subjectUserId: "speaker-a",
+    propositionRef: {
+      schema_version: 1,
+      kind: "TERM_MEANING",
+      surface_form: "CR",
+      meaning: "change request",
+      source_language_tag: "fr-FR",
+    },
+  });
+  const right = correction({
+    claimId: "speaker-right",
+    subjectUserId: "speaker-a",
+    propositionRef: {
+      schema_version: 1,
+      kind: "TERM_MEANING",
+      surface_form: "CR",
+      meaning: "compte rendu",
+      source_language_tag: "fr-FR",
+    },
+  });
+
+  const candidates =
+    materializeReferencedClaimCandidates({
+      claims: [left, right],
+      referencedClaimIds: [
+        left.claimId,
+        right.claimId,
+      ],
+      conversationId: "conversation-1",
+      currentSourceAuthorUserId:
+        "speaker-a",
+      targetLanguageTag: "es-CO",
+      state: state(),
+      now: NOW,
+    });
+
+  assert.deepEqual(candidates, []);
 });
