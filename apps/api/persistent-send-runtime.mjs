@@ -392,6 +392,7 @@ export async function createPersistentSendRuntime({
         stateRepository: contextStateRepository,
         outboxRepository,
         outboxService,
+        transientSources,
         clock,
       });
 
