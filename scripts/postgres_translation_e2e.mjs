@@ -214,7 +214,7 @@ async function seed() {
            membership_version
          ) VALUES
            ($1,$2,$3,'MEMBER','ACTIVE','fr-FR',NULL,1),
-           ($1,$2,$4,'MODERATOR','ACTIVE','es-CO',NULL,1)`,
+           ($1,$2,$4,'MEMBER','ACTIVE','es-CO',NULL,1)`,
         [
           ids.tenantId,
           ids.conversationId,
@@ -754,12 +754,13 @@ try {
 
   const correction =
     await runtime.correctionService.createCorrection(
-      recipient,
+      sender,
       {
         protocol_version: 1,
         command_id: ids.correctionCommandId,
         conversation_id: ids.conversationId,
-        target_translation_id: durable.translationId,
+        target_message_id: accepted.message_id,
+        target_source_revision: 1,
         kind: "TERMINOLOGY",
         requested_scope: "CONVERSATION",
         payload: {
@@ -799,7 +800,7 @@ try {
     assert.equal(repair.rows[0].status, "APPLIED");
     assert.equal(
       repair.rows[0].target_translation_id,
-      durable.translationId,
+      null,
     );
     assert.equal(
       repair.rows[0].target_message_id,
@@ -813,6 +814,7 @@ try {
     const claim = await db.query(
       `SELECT authority_class,
               retention_class,
+              subject_user_id,
               scope_kind,
               scope_conversation_id,
               trigger_kind,
@@ -831,6 +833,10 @@ try {
     assert.equal(
       claim.rows[0].retention_class,
       "CORRECTIVE_DURABLE",
+    );
+    assert.equal(
+      claim.rows[0].subject_user_id,
+      ids.senderUserId,
     );
     assert.equal(
       claim.rows[0].scope_kind,
@@ -1105,7 +1111,7 @@ try {
     "POSTGRES_TRANSLATION_E2E=PASS " +
     "send=accepted fanout=done execute=done " +
     "feedback=repair-only " +
-    "correction=service-applied " +
+    "correction=speaker-scoped-self-applied " +
     "t2=confirmed-correction-context " +
     "hpke=original+translation sync=2 ack=purged " +
     "erasure_epoch=stale-context-superseded\n",
