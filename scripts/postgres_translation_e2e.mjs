@@ -40,6 +40,8 @@ const NOW = "2026-10-05T08:00:00.000Z";
 let runtimeNow = NOW;
 const SOURCE_TEXT = "Bonjour monde 👋";
 const T2_SOURCE_TEXT = "On fait le CR demain.";
+const FEEDBACK_NOTE =
+  "private feedback detail that must not persist";
 const TRANSLATED_TEXT = "Hola mundo 👋";
 const TARGET_LANGUAGE = "es-CO";
 
@@ -54,6 +56,7 @@ const ids = {
   clientMessageId: randomUUID(),
   t2CommandId: randomUUID(),
   t2ClientMessageId: randomUUID(),
+  feedbackCommandId: randomUUID(),
   correctionCommandId: randomUUID(),
   staleContextCommandId: randomUUID(),
   staleContextClientMessageId: randomUUID(),
@@ -653,6 +656,102 @@ try {
     assert.equal(Number(state.rows[0].last_acked_offset), 2);
   });
 
+  const feedback =
+    await runtime.translationFeedbackService.createFeedback(
+      recipient,
+      {
+        protocol_version: 1,
+        command_id: ids.feedbackCommandId,
+        translation_id: durable.translationId,
+        kind: "WRONG_MEANING",
+        note: FEEDBACK_NOTE,
+      },
+    );
+
+  assert.equal(
+    feedback.status,
+    "NEEDS_CONFIRMATION",
+  );
+
+  await withConnection(async (db) => {
+    const repair = await db.query(
+      `SELECT kind,
+              status,
+              target_translation_id,
+              target_message_id,
+              target_source_revision,
+              structured_payload::text AS structured_payload_text
+         FROM translation_repair_events
+        WHERE tenant_id = $1
+          AND repair_event_id = $2`,
+      [
+        ids.tenantId,
+        feedback.repair_event_id,
+      ],
+    );
+
+    assert.equal(repair.rowCount, 1);
+    assert.equal(
+      repair.rows[0].kind,
+      "MEANING_CORRECTION",
+    );
+    assert.equal(
+      repair.rows[0].status,
+      "NEEDS_CONFIRMATION",
+    );
+    assert.equal(
+      repair.rows[0].target_translation_id,
+      durable.translationId,
+    );
+    assert.equal(
+      repair.rows[0].target_message_id,
+      accepted.message_id,
+    );
+    assert.equal(
+      Number(repair.rows[0].target_source_revision),
+      1,
+    );
+    assert.equal(
+      repair.rows[0].structured_payload_text.includes(
+        FEEDBACK_NOTE,
+      ),
+      false,
+    );
+
+    const receipt = await db.query(
+      `SELECT command_fingerprint
+         FROM command_receipts
+        WHERE tenant_id = $1
+          AND command_id = $2`,
+      [
+        ids.tenantId,
+        ids.feedbackCommandId,
+      ],
+    );
+    assert.equal(receipt.rowCount, 1);
+    assert.equal(
+      receipt.rows[0].command_fingerprint.includes(
+        FEEDBACK_NOTE,
+      ),
+      false,
+    );
+    assert.match(
+      receipt.rows[0].command_fingerprint,
+      /hmac-sha256:/,
+    );
+
+    const claims = await db.query(
+      `SELECT count(*)::int AS count
+         FROM context_claims
+        WHERE tenant_id = $1`,
+      [ids.tenantId],
+    );
+    assert.equal(
+      Number(claims.rows[0].count),
+      0,
+    );
+  });
+
   const correction =
     await runtime.correctionService.createCorrection(
       recipient,
@@ -1005,6 +1104,7 @@ try {
   process.stdout.write(
     "POSTGRES_TRANSLATION_E2E=PASS " +
     "send=accepted fanout=done execute=done " +
+    "feedback=repair-only " +
     "correction=service-applied " +
     "t2=confirmed-correction-context " +
     "hpke=original+translation sync=2 ack=purged " +
