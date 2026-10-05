@@ -34,6 +34,7 @@ export interface ConversationContextState {
   processedPrefixOperationSequence: number;
   processingGapOperationSequences: number[];
   erasureEpoch: number;
+  policyVersion: number;
   activeEpisodeId: UUID | null;
   activeEpisodeVersion: number | null;
   terminologyClaimRefs?: UUID[];
@@ -131,6 +132,7 @@ export interface BuildContextInput {
    * the derived ConversationContextState cache is absent.
    */
   erasureEpoch: number;
+  policyVersion: number;
   now: string;
   strategy: ContextStrategy;
   state: ConversationContextState | null;
@@ -173,6 +175,7 @@ export interface ContextSnapshot {
   processedPrefixOperationSequence: number;
   processingGapOperationSequences: number[];
   erasureEpoch: number;
+  policyVersion: number;
   tokenEstimate: number;
   recoveryMode: ContextRecoveryMode;
   createdAt: string;
@@ -306,6 +309,7 @@ export class ContextEngine {
       processedPrefixOperationSequence,
       processingGapOperationSequences,
       erasureEpoch,
+      policyVersion: input.policyVersion,
       tokenEstimate,
       recoveryMode,
       createdAt: input.now,
@@ -655,6 +659,14 @@ function validateInput(input: BuildContextInput): void {
   ) {
     throw new TypeError(
       "erasureEpoch must be a non-negative integer",
+    );
+  }
+  if (
+    !Number.isInteger(input.policyVersion) ||
+    input.policyVersion < 1
+  ) {
+    throw new TypeError(
+      "policyVersion must be a positive integer",
     );
   }
   if (!Number.isFinite(Date.parse(input.now))) {
