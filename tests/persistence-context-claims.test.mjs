@@ -145,3 +145,33 @@ test("PostgreSQL claim loader avoids a query for an empty bounded reference set"
     ["BEGIN", "COMMIT"],
   );
 });
+
+
+test("PostgreSQL claim loader rejects malformed durable claim references before SQL casting", async () => {
+  const connection = new ScriptedConnection();
+  const repository = new PostgresContextClaimRepository(
+    new SqlTransactionManager(
+      new SingleConnectionPool(connection),
+    ),
+  );
+
+  await assert.rejects(
+    () =>
+      repository.withTransaction((tx) =>
+        repository.loadReferencedClaims(tx, {
+          tenantId:
+            "33333333-3333-4333-8333-333333333333",
+          conversationId:
+            "22222222-2222-4222-8222-222222222222",
+          claimIds: ["not-a-uuid"],
+          now: "2026-10-05T10:00:00.000Z",
+        }),
+      ),
+    /canonical UUID/,
+  );
+
+  assert.deepEqual(
+    connection.queries.map((query) => query.text),
+    ["BEGIN", "ROLLBACK"],
+  );
+});
