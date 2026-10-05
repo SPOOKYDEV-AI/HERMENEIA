@@ -40,6 +40,8 @@ Translation feedback is now recorded as a durable repair/problem signal without 
 
 Promoted correction memory is also supersession-safe: a new correction invalidates older ACTIVE confirmed corrections with the same conversation, subject and semantic key, writes `OVERRIDDEN_BY` claim-to-claim provenance and removes the stale refs from ConversationState before the transaction commits. This prevents contradictory historical meanings from remaining simultaneously eligible for T2.
 
+A second conflict fence runs during claim materialisation, before candidate ranking. Claims are grouped by typed semantic key. Approved `POLICY` / `APPROVED_GLOSSARY` evidence is considered first; when no such approved control-plane evidence applies, a matching speaker-scoped correction is more relevant than a generic correction for that speaker. The applicable level must have value consensus. Contradictory values at the same applicable authority/scope level cause that semantic key to be omitted from T2, not scored against each other. Identical claims are collapsed to one provider candidate with all supporting versioned claim refs retained for snapshot provenance.
+
 Semantic episode derivation, feedback-to-correction moderation, pending-correction confirmation, tenant-wide policy distribution, TONE/style memory, recovery-checkpoint materialisation, dependency-aware invalidation and a production cross-process worker transport remain future work. The current raw-source store is process-local and transient, so `TRANSLATION_WORKER_MODE=external` fails fast rather than pretending a separate process can access plaintext that it does not own.
 
 ## 2. Design principle: understand progressively
