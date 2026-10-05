@@ -15,13 +15,15 @@ export type ContextCandidateType =
   | "ACTIVE_EPISODE"
   | "RECOVERY_CHECKPOINT"
   | "CORRECTION_MEMORY"
-  | "APPROVED_POLICY";
+  | "APPROVED_POLICY"
+  | "STYLE_PROFILE";
 
 export type ContextPrivacyScope =
   | "TRANSIENT"
   | "CHECKPOINT"
   | "CORRECTION"
-  | "POLICY";
+  | "POLICY"
+  | "STYLE";
 
 export type CorrectionTrigger =
   | "EXPLICIT_UI"
@@ -40,6 +42,17 @@ export interface ConversationContextState {
   terminologyClaimRefs?: UUID[];
   lexicalClaimRefs?: UUID[];
   correctionClaimRefs?: UUID[];
+  styleProfiles?: Array<{
+    speakerUserId: UUID;
+    preferredRegister:
+      | "NEUTRAL"
+      | "FORMAL"
+      | "INFORMAL";
+    sourceRepairEventId: UUID;
+    confidence: number;
+    updatedAt: string;
+    expiresAt?: string;
+  }>;
   updatedAt: string;
 }
 
@@ -154,6 +167,7 @@ export interface SelectedContextItem {
     | "IMMEDIATE_CONTEXT"
     | "ACTIVE_EPISODE"
     | "CORRECTION_OR_POLICY"
+    | "STYLE_PROFILE"
     | "RECOVERY_CHECKPOINT"
     | "ADAPTIVE_UTILITY";
 }
@@ -423,6 +437,7 @@ export class ContextEngine {
         | "IMMEDIATE_CONTEXT"
         | "ACTIVE_EPISODE"
         | "CORRECTION_OR_POLICY"
+        | "STYLE_PROFILE"
         | "RECOVERY_CHECKPOINT"
         | "ADAPTIVE_UTILITY",
       softBand:
@@ -537,6 +552,17 @@ export class ContextEngine {
       "ACTIVE_EPISODE",
       "episode",
       input.budget.activeEpisodeReserveTokens,
+    );
+
+    selectFrom(
+      scored.filter(
+        ({ candidate }) =>
+          candidate.candidateType ===
+          "STYLE_PROFILE",
+      ),
+      "STYLE_PROFILE",
+      "memory",
+      input.budget.memoryReserveTokens,
     );
 
     selectFrom(

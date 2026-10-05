@@ -17,6 +17,8 @@ import {
   replaceConfirmedCorrectionClaim,
   rebaseContextStateAuthority,
   unlinkConfirmedCorrectionClaim,
+  setConversationSpeakerStyle,
+  clearConversationSpeakerStyle,
 } from "../../context-state/src/index.js";
 import type {
   CorrectionAuthority,
@@ -25,6 +27,7 @@ import type {
 import {
   correctionRepairKind,
   decideCorrectionPromotion,
+  decideToneStyleApplication,
   normaliseCorrection,
   validateCorrectionCommand,
   isUuid,
@@ -129,20 +132,38 @@ export class ContextCorrectionService<Tx> {
           actor,
           command,
         );
-        const promotion =
-          decideCorrectionPromotion(
-            command,
-            authority,
-            normalised.canBecomeClaim,
-            actor.userId,
-            target.authorUserId,
-          );
+        const toneStyle =
+          command.kind === "TONE"
+            ? decideToneStyleApplication(
+                command,
+                actor.userId,
+                target.authorUserId,
+              )
+            : null;
+        const claimPromotion =
+          toneStyle
+            ? null
+            : decideCorrectionPromotion(
+                command,
+                authority,
+                normalised.canBecomeClaim,
+                actor.userId,
+                target.authorUserId,
+              );
+        const status =
+          toneStyle?.status ??
+          claimPromotion!.status;
+        const appliedScope =
+          toneStyle
+            ? toneStyle.scope
+            : claimPromotion!.scope;
 
         const repairEventId =
           this.deps.ids.next("repair");
-        const claimId = promotion.apply
-          ? this.deps.ids.next("claim")
-          : null;
+        const claimId =
+          claimPromotion?.apply
+            ? this.deps.ids.next("claim")
+            : null;
 
         await this.deps.corrections.insertRepairEvent(
           tx,
@@ -160,7 +181,7 @@ export class ContextCorrectionService<Tx> {
             kind: correctionRepairKind(
               command.kind,
             ),
-            status: promotion.status,
+            status,
             structuredPayload:
               normalised.payload,
             commandId: command.command_id,
@@ -175,11 +196,29 @@ export class ContextCorrectionService<Tx> {
             command,
             authority,
             target.messageId,
-            promotion.subjectUserId,
+            claimPromotion!.subjectUserId,
             claimId,
             repairEventId,
             normalised.payload,
-            promotion.scope!,
+            claimPromotion!.scope!,
+            now,
+          );
+        }
+
+        if (toneStyle?.apply) {
+          await this.applyToneStyleToState(
+            tx,
+            actor,
+            command.conversation_id,
+            authority,
+            repairEventId,
+            String(
+              normalised.payload.preferred_register,
+            ) as
+              | "DEFAULT"
+              | "NEUTRAL"
+              | "FORMAL"
+              | "INFORMAL",
             now,
           );
         }
@@ -187,10 +226,10 @@ export class ContextCorrectionService<Tx> {
         const result: CorrectionResult = {
           protocol_version: 1,
           repair_event_id: repairEventId,
-          status: promotion.status,
+          status,
           requested_scope:
             command.requested_scope,
-          applied_scope: promotion.scope,
+          applied_scope: appliedScope,
           claim_id: claimId,
           claim_version: claimId ? 1 : null,
         };
@@ -813,6 +852,147 @@ export class ContextCorrectionService<Tx> {
       sourceRevision,
       authorUserId,
     };
+  }
+
+  private async applyToneStyleToState(
+    tx: Tx,
+    actor: ActorContext,
+    conversationId: UUID,
+    authority: CorrectionAuthority,
+    repairEventId: UUID,
+    preferredRegister:
+      | "DEFAULT"
+      | "NEUTRAL"
+      | "FORMAL"
+      | "INFORMAL",
+    now: string,
+  ): Promise<void> {
+    const existing = await this.deps.state.loadState(
+      tx,
+      {
+        tenantId: actor.tenantId,
+        conversationId,
+        forUpdate: true,
+      },
+    );
+
+    if (!existing) {
+      if (preferredRegister === "DEFAULT") {
+        return;
+      }
+
+      let created =
+        authority.nextOperationSequence <= 1
+          ? createInitialContextState({
+              tenantId: actor.tenantId,
+              conversationId,
+              membershipEpoch:
+                authority.membershipEpoch,
+              erasureEpoch:
+                authority.erasureEpoch,
+              policyVersion:
+                authority.policyVersion,
+              strategyVersion:
+                this.strategyVersion,
+              now,
+            })
+          : createDegradedContextStateFromFloor({
+              tenantId: actor.tenantId,
+              conversationId,
+              causalFloorOpSeq:
+                authority.nextOperationSequence - 1,
+              membershipEpoch:
+                authority.membershipEpoch,
+              erasureEpoch:
+                authority.erasureEpoch,
+              policyVersion:
+                authority.policyVersion,
+              strategyVersion:
+                this.strategyVersion,
+              now,
+            });
+
+      created = setConversationSpeakerStyle(
+        created,
+        {
+          speakerUserId: actor.userId,
+          preferredRegister,
+          sourceRepairEventId:
+            repairEventId,
+          now,
+        },
+      );
+
+      const inserted =
+        await this.deps.state.insertState(
+          tx,
+          created,
+        );
+      if (!inserted) {
+        throw new Error(
+          "ConversationState appeared concurrently during tone correction",
+        );
+      }
+      return;
+    }
+
+    const expectedStateVersion =
+      existing.stateVersion;
+    let next = rebaseContextStateAuthority(
+      existing,
+      {
+        membershipEpoch:
+          authority.membershipEpoch,
+        erasureEpoch:
+          authority.erasureEpoch,
+        policyVersion:
+          authority.policyVersion,
+        now,
+      },
+    );
+
+    next =
+      preferredRegister === "DEFAULT"
+        ? clearConversationSpeakerStyle(
+            next,
+            {
+              speakerUserId:
+                actor.userId,
+              now,
+            },
+          )
+        : setConversationSpeakerStyle(
+            next,
+            {
+              speakerUserId:
+                actor.userId,
+              preferredRegister,
+              sourceRepairEventId:
+                repairEventId,
+              now,
+            },
+          );
+
+    if (
+      next.stateVersion ===
+      expectedStateVersion
+    ) {
+      return;
+    }
+
+    const updated =
+      await this.deps.state.updateState(
+        tx,
+        {
+          expectedStateVersion,
+          state: next,
+        },
+      );
+    if (!updated) {
+      throw new Error(
+        "ConversationState changed despite tone correction row lock",
+      );
+    }
   }
 
   private async unlinkClaimFromState(

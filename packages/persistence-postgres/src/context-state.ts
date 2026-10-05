@@ -212,6 +212,9 @@ export function toEngineContextState(
     terminologyClaimRefs: [...value.terminologyClaimRefs],
     lexicalClaimRefs: [...value.lexicalClaimRefs],
     correctionClaimRefs: [...value.correctionClaimRefs],
+    styleProfiles: structuredClone(
+      value.styleState.profiles ?? [],
+    ),
     updatedAt: value.updatedAt,
   };
 }

@@ -380,3 +380,54 @@ test("OpenAI refusal is terminal and never exposes provider text", async () => {
     latencyMs: 0,
   });
 });
+
+
+test("OpenAI adapter carries STYLE_PROFILE only as untrusted input data", async () => {
+  const calls = [];
+  const provider = createOpenAIResponsesTranslationProvider({
+    env: env(),
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return new Response(
+        JSON.stringify(completedBody()),
+        { status: 200 },
+      );
+    },
+  });
+
+  const request = input();
+  request.contextItems = [{
+    candidateId: "style:repair-1",
+    candidateType: "STYLE_PROFILE",
+    selectionReason: "STYLE_PROFILE",
+    content: JSON.stringify({
+      kind: "trusted_conversation_style",
+      preferred_register: "FORMAL",
+    }),
+  }];
+
+  const result = await provider.translate(request);
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+
+  const body = JSON.parse(calls[0].init.body);
+  const providerInput = JSON.parse(body.input);
+  assert.deepEqual(
+    providerInput.context_items,
+    [{
+      candidate_id: "style:repair-1",
+      candidate_type: "STYLE_PROFILE",
+      selection_reason: "STYLE_PROFILE",
+      content: JSON.stringify({
+        kind: "trusted_conversation_style",
+        preferred_register: "FORMAL",
+      }),
+    }],
+  );
+  assert.equal(
+    body.instructions.includes(
+      "preferred_register",
+    ),
+    false,
+  );
+});

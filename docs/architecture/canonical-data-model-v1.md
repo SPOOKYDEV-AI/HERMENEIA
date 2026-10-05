@@ -781,7 +781,20 @@ Derived from:
 
 Ephemeral/working value object keyed by speaker and optionally recipient direction.
 
-Not a durable personal profile.
+Executable V1 currently implements the speaker-only form inside bounded ConversationState `style_state`:
+
+```text
+speaker_user_id
+preferred_register enum(NEUTRAL, FORMAL, INFORMAL)
+source_repair_event_id
+confidence
+updated_at
+expires_at nullable
+```
+
+The provider projection deliberately omits `speaker_user_id` and carries only the bounded register instruction as untrusted translation context. `DEFAULT` is an input action that removes the explicit profile and is not stored as a register value.
+
+Not a durable personal profile and not a ContextClaim.
 
 ### NetworkProfile
 

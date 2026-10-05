@@ -29,14 +29,20 @@ export interface ActiveEpisodeState {
   continuityConfidence: number;
 }
 
-export interface ConversationStyleState {
-  formality?: "LOW" | "MEDIUM" | "HIGH";
-  warmth?: "LOW" | "MEDIUM" | "HIGH";
-  directness?: "LOW" | "MEDIUM" | "HIGH";
-  brevity?: "LOW" | "MEDIUM" | "HIGH";
-  technicality?: "LOW" | "MEDIUM" | "HIGH";
-  confidence?: number;
+export interface ConversationStyleProfile {
+  speakerUserId: UUID;
+  preferredRegister:
+    | "NEUTRAL"
+    | "FORMAL"
+    | "INFORMAL";
+  sourceRepairEventId: UUID;
+  confidence: number;
+  updatedAt: string;
   expiresAt?: string;
+}
+
+export interface ConversationStyleState {
+  profiles?: ConversationStyleProfile[];
 }
 
 export interface PragmaticStateCoarse {
@@ -191,6 +197,118 @@ export function cloneValidatedContextState(
 ): ConversationContextState {
   validateState(state);
   return structuredClone(state);
+}
+
+export function setConversationSpeakerStyle(
+  state: ConversationContextState,
+  input: {
+    speakerUserId: UUID;
+    preferredRegister:
+      | "NEUTRAL"
+      | "FORMAL"
+      | "INFORMAL";
+    sourceRepairEventId: UUID;
+    now: string;
+    expiresAt?: string;
+  },
+): ConversationContextState {
+  validateState(state);
+  requireOpaqueIdentifier(
+    input.speakerUserId,
+    "speakerUserId",
+  );
+  requireOpaqueIdentifier(
+    input.sourceRepairEventId,
+    "sourceRepairEventId",
+  );
+  requireTimestamp(input.now, "now");
+  if (
+    !["NEUTRAL", "FORMAL", "INFORMAL"].includes(
+      input.preferredRegister,
+    )
+  ) {
+    throw new ContextStateConflictError(
+      "INVALID_STATE",
+      "preferredRegister is unsupported",
+    );
+  }
+  if (input.expiresAt) {
+    requireTimestamp(input.expiresAt, "expiresAt");
+  }
+
+  const profiles = [
+    ...(state.styleState.profiles ?? []).filter(
+      (profile) =>
+        profile.speakerUserId !== input.speakerUserId,
+    ),
+    {
+      speakerUserId: input.speakerUserId,
+      preferredRegister: input.preferredRegister,
+      sourceRepairEventId:
+        input.sourceRepairEventId,
+      confidence: 1,
+      updatedAt: input.now,
+      ...(input.expiresAt
+        ? { expiresAt: input.expiresAt }
+        : {}),
+    },
+  ].sort((left, right) =>
+    left.speakerUserId.localeCompare(
+      right.speakerUserId,
+    ),
+  );
+
+  if (profiles.length > 16) {
+    throw new ContextStateConflictError(
+      "INVALID_STATE",
+      "style profiles exceed bounded size",
+    );
+  }
+
+  const next = structuredClone(state);
+  next.styleState = { profiles };
+  next.stateVersion += 1;
+  next.updatedAt = input.now;
+  validateState(next);
+  return next;
+}
+
+export function clearConversationSpeakerStyle(
+  state: ConversationContextState,
+  input: {
+    speakerUserId: UUID;
+    now: string;
+  },
+): ConversationContextState {
+  validateState(state);
+  requireOpaqueIdentifier(
+    input.speakerUserId,
+    "speakerUserId",
+  );
+  requireTimestamp(input.now, "now");
+
+  const profiles = (
+    state.styleState.profiles ?? []
+  ).filter(
+    (profile) =>
+      profile.speakerUserId !== input.speakerUserId,
+  );
+  if (
+    profiles.length ===
+    (state.styleState.profiles ?? []).length
+  ) {
+    return structuredClone(state);
+  }
+
+  const next = structuredClone(state);
+  next.styleState =
+    profiles.length > 0
+      ? { profiles }
+      : {};
+  next.stateVersion += 1;
+  next.updatedAt = input.now;
+  validateState(next);
+  return next;
 }
 
 export function unlinkConfirmedCorrectionClaim(
@@ -921,13 +1039,76 @@ function validateEpisode(
 function validateStyleState(
   style: ConversationStyleState,
 ): ConversationStyleState {
-  if (style.confidence !== undefined) {
-    requireProbability(style.confidence, "style.confidence");
+  const keys = Object.keys(style);
+  if (
+    keys.some((key) => key !== "profiles")
+  ) {
+    throw new ContextStateConflictError(
+      "INVALID_STATE",
+      "styleState contains unsupported fields",
+    );
   }
-  if (style.expiresAt) {
-    requireTimestamp(style.expiresAt, "style.expiresAt");
+
+  const profiles = style.profiles ?? [];
+  if (
+    !Array.isArray(profiles) ||
+    profiles.length > 16
+  ) {
+    throw new ContextStateConflictError(
+      "INVALID_STATE",
+      "style profiles exceed bounded size",
+    );
   }
-  return structuredClone(style);
+
+  const speakers = new Set<string>();
+  for (const profile of profiles) {
+    requireOpaqueIdentifier(
+      profile.speakerUserId,
+      "style.speakerUserId",
+    );
+    requireOpaqueIdentifier(
+      profile.sourceRepairEventId,
+      "style.sourceRepairEventId",
+    );
+    if (speakers.has(profile.speakerUserId)) {
+      throw new ContextStateConflictError(
+        "INVALID_STATE",
+        "style profiles contain duplicate speakers",
+      );
+    }
+    speakers.add(profile.speakerUserId);
+
+    if (
+      !["NEUTRAL", "FORMAL", "INFORMAL"].includes(
+        profile.preferredRegister,
+      )
+    ) {
+      throw new ContextStateConflictError(
+        "INVALID_STATE",
+        "style preferredRegister is unsupported",
+      );
+    }
+    requireProbability(
+      profile.confidence,
+      "style.confidence",
+    );
+    requireTimestamp(
+      profile.updatedAt,
+      "style.updatedAt",
+    );
+    if (profile.expiresAt) {
+      requireTimestamp(
+        profile.expiresAt,
+        "style.expiresAt",
+      );
+    }
+  }
+
+  return structuredClone(
+    profiles.length > 0
+      ? { profiles }
+      : {},
+  );
 }
 
 function validatePragmaticState(

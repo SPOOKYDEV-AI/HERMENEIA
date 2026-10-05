@@ -87,7 +87,7 @@ The HTTP contract tests cover:
 - refusal handling;
 - durable worker propagation of `Retry-After`.
 
-The PostgreSQL E2E additionally proves that a successful provider result travels through the real durable path to a decryptable HPKE TRANSLATION envelope, recipient sync and ACK-triggered ciphertext purge. The claim-backed T2 slice also proves a confirmed correction is selected into a ContextSnapshot and reaches the provider interface as bounded contextual evidence.
+The PostgreSQL E2E additionally proves that a successful provider result travels through the real durable path to a decryptable HPKE TRANSLATION envelope, recipient sync and ACK-triggered ciphertext purge. Claim-backed T2 proves confirmed corrections and approved tenant policy reach the provider as bounded contextual evidence. Explicit speaker style also reaches the adapter through the same untrusted-data boundary as a `STYLE_PROFILE` item containing only a bounded `preferred_register`; the speaker/user identifier is not serialized into that style payload, and the style content is never concatenated into provider instructions.
 
 A real external API request is intentionally not executed on every push. Use the manual workflow:
 

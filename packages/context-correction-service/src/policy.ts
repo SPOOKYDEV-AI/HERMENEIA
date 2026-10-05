@@ -15,6 +15,15 @@ export interface NormalisedCorrection {
   canBecomeClaim: boolean;
 }
 
+export interface ToneStyleDecision {
+  apply: boolean;
+  status:
+    | "RECORDED"
+    | "NEEDS_CONFIRMATION"
+    | "APPLIED";
+  scope: "CONVERSATION" | null;
+}
+
 export interface CorrectionPromotionDecision {
   apply: boolean;
   status:
@@ -126,9 +135,12 @@ export function normaliseCorrection(
     if (
       command.payload.schema_version !== 1 ||
       command.payload.kind !== "TONE" ||
-      !["NEUTRAL", "FORMAL", "INFORMAL"].includes(
-        String(preferred),
-      )
+      ![
+        "DEFAULT",
+        "NEUTRAL",
+        "FORMAL",
+        "INFORMAL",
+      ].includes(String(preferred))
     ) {
       throw new DomainError(
         "INVALID_COMMAND",
@@ -171,6 +183,51 @@ export function normaliseCorrection(
     payload:
       storedClaimProposition(proposition),
     canBecomeClaim: true,
+  };
+}
+
+export function decideToneStyleApplication(
+  command: CorrectionCommand,
+  actorUserId: string,
+  targetAuthorUserId: string | null,
+): ToneStyleDecision {
+  if (command.kind !== "TONE") {
+    throw new TypeError(
+      "decideToneStyleApplication requires TONE correction",
+    );
+  }
+
+  if (command.requested_scope === "MESSAGE") {
+    return {
+      apply: false,
+      status: "RECORDED",
+      scope: null,
+    };
+  }
+
+  if (command.requested_scope === "TENANT") {
+    return {
+      apply: false,
+      status: "NEEDS_CONFIRMATION",
+      scope: null,
+    };
+  }
+
+  if (
+    targetAuthorUserId !== null &&
+    targetAuthorUserId !== actorUserId
+  ) {
+    return {
+      apply: false,
+      status: "NEEDS_CONFIRMATION",
+      scope: null,
+    };
+  }
+
+  return {
+    apply: true,
+    status: "APPLIED",
+    scope: "CONVERSATION",
   };
 }
 

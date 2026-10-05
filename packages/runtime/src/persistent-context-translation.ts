@@ -104,7 +104,7 @@ export function createPostgresTranslationContextRuntime(
 
   const derivedCandidates: DerivedContextCandidateSource | undefined =
     deps.derivedCandidates ??
-    (deps.claimRepository
+    (deps.claimRepository || stateSource
       ? {
           async load(input, state, frame) {
             const referencedClaimIds = [
@@ -126,8 +126,8 @@ export function createPostgresTranslationContextRuntime(
             const {
               claims,
               materializedClaimIds,
-            } =
-              await deps.claimRepository!.withTransaction(
+            } = deps.claimRepository
+              ? await deps.claimRepository.withTransaction(
                 async (tx) => {
                   const referencedClaims =
                     referencedClaimIds.length === 0
@@ -170,24 +170,83 @@ export function createPostgresTranslationContextRuntime(
                     materializedClaimIds,
                   };
                 },
+              )
+              : {
+                  claims: [],
+                  materializedClaimIds: [],
+                };
+
+            const claimCandidates =
+              materializedClaimIds.length === 0
+                ? []
+                : materializeReferencedClaimCandidates({
+                    claims,
+                    referencedClaimIds:
+                      materializedClaimIds,
+                    conversationId:
+                      input.conversationId,
+                    currentSourceAuthorUserId:
+                      frame.currentSourceAuthorUserId,
+                    currentSourceLanguageTag:
+                      frame.currentSourceLanguageTag,
+                    targetLanguageTag:
+                      input.targetLanguageTag,
+                    state,
+                    now: asOf,
+                  });
+
+            const profile =
+              state.styleProfiles?.find(
+                (candidate) =>
+                  candidate.speakerUserId ===
+                  frame.currentSourceAuthorUserId,
               );
 
-            if (materializedClaimIds.length === 0) {
-              return [];
-            }
+            const styleCandidates =
+              profile &&
+              Date.parse(profile.updatedAt) <
+                Date.parse(asOf) &&
+              (
+                !profile.expiresAt ||
+                Date.parse(profile.expiresAt) >
+                  Date.parse(asOf)
+              )
+                ? [{
+                    candidateId:
+                      `style:${profile.sourceRepairEventId}`,
+                    candidateType:
+                      "STYLE_PROFILE" as const,
+                    content: JSON.stringify({
+                      kind:
+                        "trusted_conversation_style",
+                      preferred_register:
+                        profile.preferredRegister,
+                    }),
+                    causalThroughOperationSequence:
+                      state.processedPrefixOperationSequence,
+                    sourceRevisionRefs: [],
+                    claimRefs: [],
+                    semanticScore: 1,
+                    temporalScore: 1,
+                    confidence:
+                      profile.confidence,
+                    importance: 1,
+                    explicitReference: false,
+                    activeEpisode: false,
+                    privacyScope:
+                      "STYLE" as const,
+                    erasureEpoch:
+                      state.erasureEpoch,
+                    validUntil:
+                      profile.expiresAt ?? null,
+                    correctionTrigger: null,
+                  }]
+                : [];
 
-            return materializeReferencedClaimCandidates({
-              claims,
-              referencedClaimIds: materializedClaimIds,
-              conversationId: input.conversationId,
-              currentSourceAuthorUserId:
-                frame.currentSourceAuthorUserId,
-              currentSourceLanguageTag:
-                frame.currentSourceLanguageTag,
-              targetLanguageTag: input.targetLanguageTag,
-              state,
-              now: asOf,
-            });
+            return [
+              ...claimCandidates,
+              ...styleCandidates,
+            ];
           },
         }
       : undefined);
