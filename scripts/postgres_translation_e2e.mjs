@@ -1887,8 +1887,9 @@ try {
     );
   });
 
-  runtimeNow = "2026-10-05T08:00:05.200Z";
-
+  // Claims are admissible strictly before the source revision timestamp,
+  // so the message must be causally later than the replacement policy claim.
+  runtimeNow = "2026-10-05T08:00:05.201Z";
 
   const tenantPolicyAccepted =
     await runtime.sendService.sendMessage(
