@@ -34,7 +34,6 @@ const env = {
   ),
   SOURCE_FINGERPRINT_VERIFICATION_KEYS_JSON:
     process.env.SOURCE_FINGERPRINT_VERIFICATION_KEYS_JSON || "[]",
-  TRANSLATION_WORKER_MODE: "external",
 };
 
 let processRuntime;
