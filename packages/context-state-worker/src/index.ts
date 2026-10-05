@@ -34,6 +34,15 @@ export interface ContextStateWorkerStore<Tx> {
     },
   ): Promise<boolean>;
 
+  isTranslationFanoutPending(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      messageId: UUID;
+      sourceRevision: number;
+    },
+  ): Promise<boolean>;
+
   completeJob(
     tx: Tx,
     input: {
