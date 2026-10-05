@@ -188,7 +188,7 @@ function job(opSeq, overrides = {}) {
   };
 }
 
-function fixture(state, jobs) {
+function fixture(state, jobs, options = {}) {
   let now = "2026-10-05T09:01:00.000Z";
   const clock = {
     now() {
@@ -208,6 +208,8 @@ function fixture(state, jobs) {
     store,
     outbox,
     clock,
+    episodeDeriver:
+      options.episodeDeriver,
     retryBaseSeconds: 1,
     maxAttempts: 4,
   });
@@ -410,4 +412,112 @@ test("context reducer continues an active episode for causally adjacent messages
     store.state.activeEpisode.lastActivityAt,
     "2026-10-05T09:00:02.000Z",
   );
+});
+
+
+test("semantic episode deriver can override the temporal boundary with a bounded structural patch", async () => {
+  let state = createInitialContextState({
+    tenantId: "tenant-1",
+    conversationId: "conversation-1",
+    membershipEpoch: 0,
+    erasureEpoch: 0,
+    policyVersion: 1,
+    strategyVersion: "context-state-v1",
+    now: "2026-10-05T09:00:00.000Z",
+  });
+  state = registerContextOperation(state, {
+    opSeq: 1,
+    operationId: "op-1",
+    kind: "MESSAGE_CREATED",
+    messageId: "message-1",
+    sourceRevision: 1,
+    registeredAt:
+      "2026-10-05T09:00:00.000Z",
+  });
+  state = registerContextOperation(state, {
+    opSeq: 2,
+    operationId: "op-2",
+    kind: "MESSAGE_CREATED",
+    messageId: "message-2",
+    sourceRevision: 1,
+    registeredAt:
+      "2026-10-05T09:30:00.000Z",
+  });
+
+  let calls = 0;
+  const { worker, store, setNow } = fixture(
+    state,
+    [job(1), job(2)],
+    {
+      episodeDeriver: {
+        async derive(_tx, input) {
+          calls += 1;
+          if (!input.state.activeEpisode) {
+            return undefined;
+          }
+          return {
+            activeEpisode: {
+              ...input.state.activeEpisode,
+              episodeVersion:
+                input.state.activeEpisode.episodeVersion + 1,
+              continuityConfidence: 0.91,
+              lastOperationSequence:
+                input.operation.opSeq,
+              lastActivityAt:
+                input.operation.registeredAt,
+            },
+          };
+        },
+      },
+    },
+  );
+
+  assert.equal(await worker.runOnce(), "REDUCED");
+  setNow("2026-10-05T09:31:00.000Z");
+  assert.equal(await worker.runOnce(), "REDUCED");
+
+  assert.equal(calls, 2);
+  assert.equal(
+    store.state.activeEpisode.episodeId,
+    "op-1",
+  );
+  assert.equal(
+    store.state.activeEpisode.episodeVersion,
+    2,
+  );
+  assert.equal(
+    store.state.activeEpisode.continuityConfidence,
+    0.91,
+  );
+  assert.equal(
+    store.state.activeEpisode.lastOperationSequence,
+    2,
+  );
+});
+
+test("semantic episode deriver failure preserves temporal V1 reduction", async () => {
+  const { worker, store } = fixture(
+    stateWithOperations([1]),
+    [job(1)],
+    {
+      episodeDeriver: {
+        async derive() {
+          throw new Error("transient unavailable");
+        },
+      },
+    },
+  );
+
+  assert.equal(await worker.runOnce(), "REDUCED");
+  assert.deepEqual(store.state.activeEpisode, {
+    episodeId: "op-1",
+    episodeVersion: 1,
+    continuityConfidence: 1,
+    startOperationSequence: 1,
+    lastOperationSequence: 1,
+    startedAt:
+      "2026-10-05T09:00:01.000Z",
+    lastActivityAt:
+      "2026-10-05T09:00:01.000Z",
+  });
 });
