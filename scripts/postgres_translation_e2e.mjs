@@ -916,57 +916,6 @@ try {
       1,
     );
 
-    const supersededClaim = await db.query(
-      `SELECT status,
-              proposition_ref
-         FROM context_claims
-        WHERE tenant_id = $1
-          AND claim_id = $2
-          AND claim_version = 1`,
-      [
-        ids.tenantId,
-        supersededTenantPolicyClaimId,
-      ],
-    );
-    assert.equal(
-      supersededClaim.rowCount,
-      1,
-    );
-    assert.equal(
-      supersededClaim.rows[0].status,
-      "INVALIDATED",
-    );
-    assert.equal(
-      supersededClaim.rows[0].proposition_ref.meaning,
-      "service level accord",
-    );
-
-    const overrideProvenance =
-      await db.query(
-        `SELECT relation,
-                derived_claim_id,
-                source_claim_id
-           FROM provenance_edges
-          WHERE tenant_id = $1
-            AND derived_claim_id = $2
-            AND derived_claim_version = 1
-            AND source_claim_id = $3
-            AND source_claim_version = 1`,
-        [
-          ids.tenantId,
-          supersededTenantPolicyClaimId,
-          tenantPolicyClaimId,
-        ],
-      );
-    assert.equal(
-      overrideProvenance.rowCount,
-      1,
-    );
-    assert.equal(
-      overrideProvenance.rows[0].relation,
-      "OVERRIDDEN_BY",
-    );
-
     const claim = await db.query(
       `SELECT authority_class,
               retention_class,
@@ -1799,6 +1748,57 @@ try {
         adminConversationMembership.rows[0].count,
       ),
       0,
+    );
+
+    const supersededClaim = await db.query(
+      `SELECT status,
+              proposition_ref
+         FROM context_claims
+        WHERE tenant_id = $1
+          AND claim_id = $2
+          AND claim_version = 1`,
+      [
+        ids.tenantId,
+        supersededTenantPolicyClaimId,
+      ],
+    );
+    assert.equal(
+      supersededClaim.rowCount,
+      1,
+    );
+    assert.equal(
+      supersededClaim.rows[0].status,
+      "INVALIDATED",
+    );
+    assert.equal(
+      supersededClaim.rows[0].proposition_ref.meaning,
+      "service level accord",
+    );
+
+    const overrideProvenance =
+      await db.query(
+        `SELECT relation,
+                derived_claim_id,
+                source_claim_id
+           FROM provenance_edges
+          WHERE tenant_id = $1
+            AND derived_claim_id = $2
+            AND derived_claim_version = 1
+            AND source_claim_id = $3
+            AND source_claim_version = 1`,
+        [
+          ids.tenantId,
+          supersededTenantPolicyClaimId,
+          tenantPolicyClaimId,
+        ],
+      );
+    assert.equal(
+      overrideProvenance.rowCount,
+      1,
+    );
+    assert.equal(
+      overrideProvenance.rows[0].relation,
+      "OVERRIDDEN_BY",
     );
 
     const claim = await db.query(
