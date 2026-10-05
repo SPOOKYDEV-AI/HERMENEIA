@@ -186,6 +186,84 @@ export function createInitialContextState(input: {
   };
 }
 
+export function cloneValidatedContextState(
+  state: ConversationContextState,
+): ConversationContextState {
+  validateState(state);
+  return structuredClone(state);
+}
+
+export function rebaseContextStateAuthority(
+  state: ConversationContextState,
+  input: {
+    membershipEpoch: number;
+    erasureEpoch: number;
+    policyVersion: number;
+    now: string;
+  },
+): ConversationContextState {
+  validateState(state);
+  requireSafeInteger(
+    input.membershipEpoch,
+    "membershipEpoch",
+    0,
+  );
+  requireSafeInteger(
+    input.erasureEpoch,
+    "erasureEpoch",
+    0,
+  );
+  requireSafeInteger(
+    input.policyVersion,
+    "policyVersion",
+    1,
+  );
+  requireTimestamp(input.now, "now");
+
+  if (
+    input.membershipEpoch < state.membershipEpoch ||
+    input.erasureEpoch < state.erasureEpoch ||
+    input.policyVersion < state.policyVersion
+  ) {
+    throw new ContextStateConflictError(
+      "EPOCH_MISMATCH",
+      "Context authority epochs cannot move backwards",
+    );
+  }
+
+  if (
+    input.membershipEpoch === state.membershipEpoch &&
+    input.erasureEpoch === state.erasureEpoch &&
+    input.policyVersion === state.policyVersion
+  ) {
+    return structuredClone(state);
+  }
+
+  const next = structuredClone(state);
+  next.membershipEpoch = input.membershipEpoch;
+  next.erasureEpoch = input.erasureEpoch;
+  next.policyVersion = input.policyVersion;
+
+  // Epoch/policy changes can invalidate any derived semantic material. V1
+  // fails closed by clearing it rather than relabelling stale derivations with
+  // the new authoritative frontier. Durable corrections remain recoverable
+  // from their provenance tables and can be rehydrated explicitly.
+  next.activeEpisode = undefined;
+  next.terminologyClaimRefs = [];
+  next.lexicalClaimRefs = [];
+  next.correctionClaimRefs = [];
+  next.entityHandles = [];
+  next.unresolvedReferenceHandles = [];
+  next.styleState = {};
+  next.pragmaticState = {};
+  next.status = "DEGRADED";
+  next.stateVersion += 1;
+  next.updatedAt = input.now;
+
+  validateState(next);
+  return next;
+}
+
 export function createDegradedContextStateFromFloor(input: {
   tenantId: UUID;
   conversationId: UUID;
