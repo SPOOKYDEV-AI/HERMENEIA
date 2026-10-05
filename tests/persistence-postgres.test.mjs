@@ -336,6 +336,41 @@ test("inbox offset allocation is tenant-local and never consumes the global devi
   ]);
 });
 
+test("inbox event metadata parameters are explicitly typed for nullable PostgreSQL values", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 1 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  await repository.withTransaction((tx) =>
+    repository.insertInboxEvent(tx, {
+      deviceId: "device-1",
+      inboxEpoch: 1,
+      offset: 1,
+      eventId: "event-1",
+      eventType: "message.available",
+      tenantId: "tenant-1",
+      conversationId: "conversation-1",
+      messageId: "message-1",
+      envelopeId: "envelope-1",
+      sourceRevision: 1,
+      createdAt: "2026-10-05T08:00:00.000Z",
+    }),
+  );
+
+  const sql = connection.queries[1];
+  assert.match(sql.text, /'source_revision',\$10::integer/);
+  assert.match(sql.text, /'translation_id',\$11::uuid/);
+  assert.match(sql.text, /'source_ref',\$12::text/);
+  assert.deepEqual(sql.params.slice(9, 12), [
+    1,
+    null,
+    null,
+  ]);
+});
+
 test("device sync state is authorised and isolated by tenant", async () => {
   const connection = new ScriptedConnection([
     {

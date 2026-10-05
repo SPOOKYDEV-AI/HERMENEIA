@@ -1353,9 +1353,9 @@ export class PostgresMessagingRepository {
          $1,$2,$3,$4,$5,$6,$7,$8,$9,
          jsonb_strip_nulls(
            jsonb_build_object(
-             'source_revision',$10,
-             'translation_id',$11,
-             'source_ref',$12
+             'source_revision',$10::integer,
+             'translation_id',$11::uuid,
+             'source_ref',$12::text
            )
          ),
          $13
