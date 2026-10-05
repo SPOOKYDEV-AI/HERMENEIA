@@ -391,6 +391,7 @@ def main() -> int:
         "erasure_epoch bigint NOT NULL CHECK (erasure_epoch >= 0)",
         "retention_class <> 'CORRECTIVE_DURABLE'",
         "'EXPLICIT_TEXTUAL_CORRECTION'",
+        "trigger_kind IS NOT NULL",
         "'APPROVED_GLOSSARY_CHANGE'",
         "'TENANT_POLICY_CHANGE'",
         "recovery_checkpoints_one_active_idx",
