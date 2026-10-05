@@ -26,6 +26,7 @@ import {
 import {
   TranslationContextPlanner,
   type ConversationContextStateSource,
+  type ControlPlaneContextCandidateSource,
   type DerivedContextCandidateSource,
   type TranslationContextPlannerConfig,
 } from "../../context-planner/src/index.js";
@@ -53,6 +54,7 @@ export interface PersistentContextTranslationDependencies {
   stateSource?: ConversationContextStateSource;
   stateRepository?: PostgresConversationContextStateRepository;
   derivedCandidates?: DerivedContextCandidateSource;
+  controlPlaneCandidates?: ControlPlaneContextCandidateSource;
   claimRepository?: PostgresContextClaimRepository;
   plannerConfig?: Omit<
     Partial<TranslationContextPlannerConfig>,
@@ -116,6 +118,10 @@ export function createPostgresTranslationContextRuntime(
                 values.indexOf(value) === index,
             );
 
+            if (referencedClaimIds.length === 0) {
+              return [];
+            }
+
             const asOf = frame.currentMessageAcceptedAt;
             if (!Number.isFinite(Date.parse(asOf))) {
               throw new TypeError(
@@ -123,69 +129,88 @@ export function createPostgresTranslationContextRuntime(
               );
             }
 
-            const {
-              claims,
-              materializedClaimIds,
-            } =
+            const claims =
               await deps.claimRepository!.withTransaction(
-                async (tx) => {
-                  const referencedClaims =
-                    referencedClaimIds.length === 0
-                      ? []
-                      : await deps.claimRepository!.loadReferencedClaims(
-                          tx,
-                          {
-                            tenantId: input.tenantId,
-                            conversationId:
-                              input.conversationId,
-                            claimIds:
-                              referencedClaimIds,
-                            asOf,
-                          },
-                        );
-
-                  const tenantPolicyClaims =
-                    await deps.claimRepository!.loadTenantPolicyClaims(
-                      tx,
-                      {
-                        tenantId: input.tenantId,
-                        asOf,
-                      },
-                    );
-
-                  const materializedClaimIds = [
-                    ...new Set([
-                      ...referencedClaimIds,
-                      ...tenantPolicyClaims.map(
-                        (claim) => claim.claimId,
-                      ),
-                    ]),
-                  ];
-
-                  return {
-                    claims: [
-                      ...referencedClaims,
-                      ...tenantPolicyClaims,
-                    ],
-                    materializedClaimIds,
-                  };
-                },
+                (tx) =>
+                  deps.claimRepository!.loadReferencedClaims(
+                    tx,
+                    {
+                      tenantId: input.tenantId,
+                      conversationId:
+                        input.conversationId,
+                      claimIds: referencedClaimIds,
+                      asOf,
+                    },
+                  ),
               );
-
-            if (materializedClaimIds.length === 0) {
-              return [];
-            }
 
             return materializeReferencedClaimCandidates({
               claims,
-              referencedClaimIds: materializedClaimIds,
+              referencedClaimIds,
               conversationId: input.conversationId,
               currentSourceAuthorUserId:
                 frame.currentSourceAuthorUserId,
               currentSourceLanguageTag:
                 frame.currentSourceLanguageTag,
               targetLanguageTag: input.targetLanguageTag,
-              state,
+              causalThroughOperationSequence:
+                state.processedPrefixOperationSequence,
+              erasureEpoch: state.erasureEpoch,
+              now: asOf,
+            });
+          },
+        }
+      : undefined);
+
+  const controlPlaneCandidates:
+    | ControlPlaneContextCandidateSource
+    | undefined =
+    deps.controlPlaneCandidates ??
+    (deps.claimRepository
+      ? {
+          async load(input, frame) {
+            const asOf = frame.currentMessageAcceptedAt;
+            if (!Number.isFinite(Date.parse(asOf))) {
+              throw new TypeError(
+                "Current message acceptance timestamp is invalid",
+              );
+            }
+
+            const claims =
+              await deps.claimRepository!.withTransaction(
+                (tx) =>
+                  deps.claimRepository!.loadTenantPolicyClaims(
+                    tx,
+                    {
+                      tenantId: input.tenantId,
+                      asOf,
+                    },
+                  ),
+              );
+
+            if (claims.length === 0) {
+              return [];
+            }
+
+            const claimIds = claims.map(
+              (claim) => claim.claimId,
+            );
+
+            return materializeReferencedClaimCandidates({
+              claims,
+              referencedClaimIds: claimIds,
+              conversationId: input.conversationId,
+              currentSourceAuthorUserId:
+                frame.currentSourceAuthorUserId,
+              currentSourceLanguageTag:
+                frame.currentSourceLanguageTag,
+              targetLanguageTag: input.targetLanguageTag,
+              causalThroughOperationSequence:
+                Math.max(
+                  0,
+                  frame.currentOperationSequence - 1,
+                ),
+              erasureEpoch: frame.erasureEpoch,
               now: asOf,
             });
           },
@@ -214,6 +239,7 @@ export function createPostgresTranslationContextRuntime(
     transientSources: deps.transientSources,
     stateSource,
     derivedCandidates,
+    controlPlaneCandidates,
     config: deps.plannerConfig,
   });
 
