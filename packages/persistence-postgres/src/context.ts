@@ -262,7 +262,8 @@ export class PostgresContextPlanningRepository {
               mr.created_at::text AS accepted_at,
               mm.author_user_id,
               mr.declared_source_language,
-              c.erasure_epoch
+              c.erasure_epoch,
+               c.policy_version
          FROM message_metadata mm
          JOIN message_revisions mr
            ON mr.tenant_id = mm.tenant_id
