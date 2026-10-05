@@ -167,6 +167,32 @@ export interface ContextCorrectionStore<Tx> {
     },
   ): Promise<boolean>;
 
+  invalidateSupersededStylePreferenceClaims(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+      subjectUserId: UUID;
+      invalidatedAt: string;
+    },
+  ): Promise<Array<{
+    claimId: UUID;
+    claimVersion: number;
+  }>>;
+
+  insertExplicitStylePreferenceClaim(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      claimId: UUID;
+      conversationId: UUID;
+      messageId: UUID | null;
+      subjectUserId: UUID;
+      propositionRef: Record<string, unknown>;
+      createdAt: string;
+    },
+  ): Promise<void>;
+
   invalidateSupersededCorrectionClaims(
     tx: Tx,
     input: {
