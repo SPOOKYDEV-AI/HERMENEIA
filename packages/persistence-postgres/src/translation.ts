@@ -31,6 +31,7 @@ type TranslationRow = {
   recipient_user_id: UUID;
   target_language_tag: string;
   target_profile_version: number;
+  preferred_register: "NEUTRAL" | "FORMAL" | "INFORMAL" | null;
   context_snapshot_id: UUID | null;
   strategy_version: string;
   status: TranslationExecutionRecord["status"];
@@ -52,6 +53,7 @@ function mapTranslation(
     recipientUserId: row.recipient_user_id,
     targetLanguageTag: row.target_language_tag,
     targetProfileVersion: Number(row.target_profile_version),
+    preferredRegister: row.preferred_register,
     contextSnapshotId: row.context_snapshot_id,
     strategyVersion: row.strategy_version,
     status: row.status,
@@ -108,26 +110,39 @@ export class PostgresTranslationRepository {
       user_id: UUID;
       target_language_tag: string;
       membership_version: number;
+      preferred_register:
+        | "NEUTRAL"
+        | "FORMAL"
+        | "INFORMAL"
+        | null;
     }>(
       `SELECT cm.user_id,
               COALESCE(
                 NULLIF(trim(cm.target_locale_override), ''),
-                NULLIF(trim(cm.target_language_tag), '')
+                NULLIF(trim(cm.target_language_tag), ''),
+                NULLIF(trim(ulp.target_locale_override), ''),
+                NULLIF(trim(ulp.target_language_tag), '')
               ) AS target_language_tag,
-              cm.membership_version
+              cm.membership_version,
+              ulp.preferred_register
          FROM message_metadata mm
          JOIN conversation_members cm
            ON cm.tenant_id = mm.tenant_id
           AND cm.conversation_id = mm.conversation_id
           AND cm.status = 'ACTIVE'
           AND cm.user_id <> mm.author_user_id
+         LEFT JOIN user_language_preferences ulp
+           ON ulp.tenant_id = cm.tenant_id
+          AND ulp.user_id = cm.user_id
         WHERE mm.tenant_id = $1
           AND mm.message_id = $2
           AND mm.current_revision = $3
           AND mm.status = 'ACTIVE'
           AND COALESCE(
                 NULLIF(trim(cm.target_locale_override), ''),
-                NULLIF(trim(cm.target_language_tag), '')
+                NULLIF(trim(cm.target_language_tag), ''),
+                NULLIF(trim(ulp.target_locale_override), ''),
+                NULLIF(trim(ulp.target_language_tag), '')
               ) IS NOT NULL
         ORDER BY cm.user_id`,
       [
@@ -145,6 +160,7 @@ export class PostgresTranslationRepository {
         recipientUserId: row.user_id,
         targetLanguageTag: row.target_language_tag,
         targetProfileVersion: Number(row.membership_version),
+        preferredRegister: row.preferred_register,
       })),
     };
   }
