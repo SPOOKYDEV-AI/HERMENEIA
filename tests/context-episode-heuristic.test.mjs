@@ -159,7 +159,7 @@ test("ambiguous continuity stays uncertain instead of fabricating a boundary", (
   const current = source({
     messageId:
       "20000000-0000-4000-8000-000000000002",
-    text: "Ok pour demain",
+    text: "Ok je regarde",
     createdAt: "2026-10-05T09:10:00.000Z",
   });
 
