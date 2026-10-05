@@ -139,10 +139,10 @@ export function normaliseCorrection(
     return {
       payload: {
         schema_version: 1,
-        kind: "TONE",
+        kind: "STYLE_PREFERENCE",
         preferred_register: preferred,
       },
-      canBecomeClaim: false,
+      canBecomeClaim: true,
     };
   }
 
@@ -198,6 +198,36 @@ export function decideCorrectionPromotion(
       status: "NEEDS_CONFIRMATION",
       scope: null,
       subjectUserId: null,
+    };
+  }
+
+  if (command.kind === "TONE") {
+    if (command.requested_scope === "TENANT") {
+      return {
+        apply: false,
+        status: "NEEDS_CONFIRMATION",
+        scope: null,
+        subjectUserId: null,
+      };
+    }
+
+    if (
+      targetAuthorUserId !== null &&
+      targetAuthorUserId !== actorUserId
+    ) {
+      return {
+        apply: false,
+        status: "NEEDS_CONFIRMATION",
+        scope: null,
+        subjectUserId: null,
+      };
+    }
+
+    return {
+      apply: true,
+      status: "APPLIED",
+      scope: "CONVERSATION",
+      subjectUserId: actorUserId,
     };
   }
 
