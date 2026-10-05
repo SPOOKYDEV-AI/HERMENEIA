@@ -308,6 +308,7 @@ test("planner excludes the current operation from historical processing gaps", a
       processedPrefixOperationSequence: 6,
       processingGapOperationSequences: [7, 8],
       erasureEpoch: 2,
+      policyVersion: 1,
       activeEpisodeId: null,
       activeEpisodeVersion: null,
       updatedAt: "2026-10-04T19:59:59.000Z",
