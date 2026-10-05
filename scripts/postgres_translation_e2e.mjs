@@ -71,8 +71,15 @@ const translationProvider = {
     assert.equal(input.source.language_hint, "fr-FR");
     assert.equal(input.targetLanguageTag, TARGET_LANGUAGE);
     assert.equal(input.targetProfileVersion, 1);
-    assert.equal(input.strategyVersion, "t0-v1");
-    assert.equal(input.contextSnapshotId, null);
+    assert.equal(
+      input.strategyVersion,
+      "adaptive-context-v1",
+    );
+    assert.match(
+      input.contextSnapshotId,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    assert.deepEqual(input.contextItems, []);
 
     return {
       ok: true,
@@ -221,6 +228,10 @@ async function cleanup() {
         tenant,
       );
       await db.query(
+        "DELETE FROM context_snapshots WHERE tenant_id = $1",
+        tenant,
+      );
+      await db.query(
         "DELETE FROM message_revisions WHERE tenant_id = $1",
         tenant,
       );
@@ -356,6 +367,40 @@ try {
     assert.equal(
       Number(translation.rows[0].target_profile_version),
       1,
+    );
+
+    const snapshots = await db.query(
+      `SELECT strategy,
+              strategy_version,
+              selected_candidate_ids,
+              token_estimate
+         FROM context_snapshots
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND recipient_user_id = $3`,
+      [
+        ids.tenantId,
+        accepted.message_id,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(snapshots.rowCount, 1);
+    assert.deepEqual(
+      {
+        strategy: snapshots.rows[0].strategy,
+        strategyVersion:
+          snapshots.rows[0].strategy_version,
+        selectedCandidateIds:
+          snapshots.rows[0].selected_candidate_ids,
+        tokenEstimate:
+          Number(snapshots.rows[0].token_estimate),
+      },
+      {
+        strategy: "T0",
+        strategyVersion: "adaptive-context-v1",
+        selectedCandidateIds: [],
+        tokenEstimate: 0,
+      },
     );
 
     const attempts = await db.query(
