@@ -343,6 +343,10 @@ try {
     "FANOUT_DONE",
   );
   assert.equal(
+    await runtime.contextStateWorker.runOnce(),
+    "REDUCED",
+  );
+  assert.equal(
     await runtime.translationWorker.runExecuteOnce(),
     "EXECUTION_DONE",
   );
@@ -441,6 +445,24 @@ try {
       },
     );
 
+    const contextState = await db.query(
+      `SELECT processed_prefix_sequence,
+              pending_operations
+         FROM conversation_context_states
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(contextState.rowCount, 1);
+    assert.equal(
+      Number(contextState.rows[0].processed_prefix_sequence),
+      1,
+    );
+    assert.deepEqual(
+      contextState.rows[0].pending_operations,
+      [],
+    );
+
     const jobs = await db.query(
       `SELECT job_type, status
          FROM outbox_jobs
@@ -451,6 +473,7 @@ try {
     assert.deepEqual(
       jobs.rows.map((row) => [row.job_type, row.status]),
       [
+        ["context.reduce", "DONE"],
         ["translation.execute", "DONE"],
         ["translation.request", "DONE"],
       ],
