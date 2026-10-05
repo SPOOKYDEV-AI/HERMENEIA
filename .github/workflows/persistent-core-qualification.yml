@@ -6,7 +6,6 @@ on:
       - main
       - feat/persistent-send-service-v1
       - feat/context-engine-runtime-v1
-      - restack/context-engine-runtime-v1-20261005
   workflow_dispatch:
 
 permissions:
