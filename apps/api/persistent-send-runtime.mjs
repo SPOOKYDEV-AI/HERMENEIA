@@ -14,6 +14,9 @@ import {
   PostgresConversationContextStateRepository,
 } from "../../.build/packages/persistence-postgres/src/context-state.js";
 import {
+  PostgresContextClaimRepository,
+} from "../../.build/packages/persistence-postgres/src/context-claims.js";
+import {
   SqlTransactionManager,
 } from "../../.build/packages/persistence/src/index.js";
 import {
@@ -298,6 +301,8 @@ export async function createPersistentSendRuntime({
       new PostgresConversationContextStateRepository(
         transactions,
       );
+    const contextClaimRepository =
+      new PostgresContextClaimRepository(transactions);
 
     // ConversationState registration is part of durable messaging semantics,
     // not translation-provider availability. In external-worker mode the API
@@ -347,8 +352,8 @@ export async function createPersistentSendRuntime({
     });
 
     // Keep the reducer independently composable from the translation
-    // provider. The HTTP process may leave it idle in external-worker mode,
-    // while an embedded/external worker host can drain the same durable jobs.
+    // provider. Today it is drained by the embedded worker runner; a future
+    // split-process topology must provide a reviewed transient-source transport.
     const contextStateWorker =
       createPostgresContextStateWorker({
         stateRepository: contextStateRepository,
@@ -381,6 +386,7 @@ export async function createPersistentSendRuntime({
           snapshotRepository: contextSnapshotRepository,
           planningRepository: contextPlanningRepository,
           stateRepository: contextStateRepository,
+          claimRepository: contextClaimRepository,
           transientSources,
           ids,
           clock,
@@ -525,6 +531,7 @@ export async function createPersistentSendRuntime({
       contextSnapshotRepository,
       contextPlanningRepository,
       contextStateRepository,
+      contextClaimRepository,
       sessionRepository,
       transientSources,
       sqlPool,
