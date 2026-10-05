@@ -12,17 +12,20 @@ import type {
 export type CandidateClaimAuthority =
   | "POLICY"
   | "APPROVED_GLOSSARY"
+  | "EXPLICIT_PREFERENCE"
   | "CONFIRMED_CORRECTION";
 
 export type CandidateClaimRetention =
   | "CORRECTIVE_DURABLE"
-  | "POLICY_REFERENCE";
+  | "POLICY_REFERENCE"
+  | "PREFERENCE_REFERENCE";
 
 export type CandidateClaimTrigger =
   | "EXPLICIT_UI_CORRECTION"
   | "EXPLICIT_TEXTUAL_CORRECTION"
   | "APPROVED_GLOSSARY_CHANGE"
-  | "TENANT_POLICY_CHANGE";
+  | "TENANT_POLICY_CHANGE"
+  | "EXPLICIT_STYLE_PREFERENCE";
 
 export interface CandidateClaimRecord {
   claimId: UUID;
@@ -48,6 +51,7 @@ export interface MaterializeReferencedClaimsInput {
   referencedClaimIds: UUID[];
   conversationId: UUID;
   currentSourceAuthorUserId: UUID;
+  recipientUserId: UUID;
   currentSourceLanguageTag: string | null;
   targetLanguageTag: string;
   state: ConversationContextState;
@@ -70,6 +74,16 @@ export type SupportedProposition =
       targetForm: string;
       sourceLanguageTag: string | null;
       targetLanguageTag: string;
+    }
+  | {
+      schemaVersion: 1;
+      kind: "STYLE_PREFERENCE";
+      preferredRegister:
+        | "NEUTRAL"
+        | "FORMAL"
+        | "INFORMAL";
+      sourceLanguageTag: null;
+      targetLanguageTag: string | null;
     };
 
 export function materializeReferencedClaimCandidates(
@@ -154,7 +168,9 @@ export function materializeReferencedClaimCandidates(
       candidateType:
         claim.authorityClass === "CONFIRMED_CORRECTION"
           ? "CORRECTION_MEMORY"
-          : "APPROVED_POLICY",
+          : claim.authorityClass === "EXPLICIT_PREFERENCE"
+            ? "EXPLICIT_PREFERENCE"
+            : "APPROVED_POLICY",
       content: renderProposition(proposition),
       causalThroughOperationSequence:
         input.state.processedPrefixOperationSequence,
@@ -170,7 +186,9 @@ export function materializeReferencedClaimCandidates(
       privacyScope:
         claim.authorityClass === "CONFIRMED_CORRECTION"
           ? "CORRECTION"
-          : "POLICY",
+          : claim.authorityClass === "EXPLICIT_PREFERENCE"
+            ? "PREFERENCE"
+            : "POLICY",
       erasureEpoch: input.state.erasureEpoch,
       validUntil: arbitrated.validUntil,
       correctionTrigger,
@@ -211,12 +229,14 @@ function isAdmissibleClaim(
     return false;
   }
 
-  if (
-    claim.subjectUserId !== null &&
-    claim.subjectUserId !==
-      input.currentSourceAuthorUserId
-  ) {
-    return false;
+  if (claim.subjectUserId !== null) {
+    const expectedSubject =
+      claim.authorityClass === "EXPLICIT_PREFERENCE"
+        ? input.recipientUserId
+        : input.currentSourceAuthorUserId;
+    if (claim.subjectUserId !== expectedSubject) {
+      return false;
+    }
   }
 
   const now = Date.parse(input.now);
@@ -252,6 +272,17 @@ function isAdmissibleClaim(
     );
   }
 
+  if (claim.authorityClass === "EXPLICIT_PREFERENCE") {
+    return (
+      claim.retentionClass === "PREFERENCE_REFERENCE" &&
+      claim.modality === "ASSERTION" &&
+      claim.triggerKind === "EXPLICIT_STYLE_PREFERENCE" &&
+      claim.subjectUserId !== null &&
+      claim.scopeKind === "CONVERSATION" &&
+      claim.scopeConversationId === input.conversationId
+    );
+  }
+
   return (
     claim.authorityClass === "POLICY" &&
     claim.retentionClass === "POLICY_REFERENCE" &&
@@ -283,6 +314,33 @@ export function parseSupportedClaimProposition(
       sourceLanguageTag: optionalLanguageTag(
         value.source_language_tag,
       ),
+      targetLanguageTag: optionalLanguageTag(
+        value.target_language_tag,
+      ),
+    };
+  }
+
+  if (value.kind === "STYLE_PREFERENCE") {
+    const preferredRegister = String(
+      value.preferred_register ?? "",
+    );
+    if (
+      !["NEUTRAL", "FORMAL", "INFORMAL"].includes(
+        preferredRegister,
+      )
+    ) {
+      return null;
+    }
+
+    return {
+      schemaVersion: 1,
+      kind: "STYLE_PREFERENCE",
+      preferredRegister:
+        preferredRegister as
+          | "NEUTRAL"
+          | "FORMAL"
+          | "INFORMAL",
+      sourceLanguageTag: null,
       targetLanguageTag: optionalLanguageTag(
         value.target_language_tag,
       ),
@@ -338,6 +396,21 @@ export function storedClaimProposition(
     };
   }
 
+  if (proposition.kind === "STYLE_PREFERENCE") {
+    return {
+      schema_version: 1,
+      kind: proposition.kind,
+      preferred_register:
+        proposition.preferredRegister,
+      ...(proposition.targetLanguageTag
+        ? {
+            target_language_tag:
+              proposition.targetLanguageTag,
+          }
+        : {}),
+    };
+  }
+
   return {
     schema_version: 1,
     kind: proposition.kind,
@@ -364,6 +437,20 @@ function renderProposition(
               proposition.sourceLanguageTag,
           }
         : {}),
+      ...(proposition.targetLanguageTag
+        ? {
+            target_language_tag:
+              proposition.targetLanguageTag,
+          }
+        : {}),
+    });
+  }
+
+  if (proposition.kind === "STYLE_PREFERENCE") {
+    return JSON.stringify({
+      kind: "trusted_style_preference",
+      preferred_register:
+        proposition.preferredRegister,
       ...(proposition.targetLanguageTag
         ? {
             target_language_tag:
