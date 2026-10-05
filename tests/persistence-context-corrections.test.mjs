@@ -633,3 +633,115 @@ test("PostgreSQL repair persistence accepts explicit correction revocation audit
     },
   );
 });
+
+
+test("PostgreSQL pending repair review locks the repair and recovers its original command fingerprint", async () => {
+  const { repository, connection } =
+    repositoryWith([{
+      rows: [{
+        repair_event_id: "repair-1",
+        actor_user_id: "user-proposer",
+        target_message_id: "message-1",
+        target_source_revision: 2,
+        kind: "TERMINOLOGY_CORRECTION",
+        structured_payload: {
+          schema_version: 1,
+          kind: "TERM_MEANING",
+          surface_form: "CR",
+          meaning: "change request",
+        },
+        command_id: "command-original",
+        command_type: "context.correction",
+        command_fingerprint:
+          '{"v":1,"type":"context.correction"}',
+      }],
+      rowCount: 1,
+    }]);
+
+  const repair =
+    await repository.withTransaction((tx) =>
+      repository.loadReviewableRepairEvent(
+        tx,
+        {
+          tenantId: "tenant-1",
+          conversationId:
+            "conversation-1",
+          repairEventId: "repair-1",
+        },
+      ),
+    );
+
+  assert.deepEqual(repair, {
+    repairEventId: "repair-1",
+    actorUserId: "user-proposer",
+    targetMessageId: "message-1",
+    targetSourceRevision: 2,
+    kind: "TERMINOLOGY_CORRECTION",
+    structuredPayload: {
+      schema_version: 1,
+      kind: "TERM_MEANING",
+      surface_form: "CR",
+      meaning: "change request",
+    },
+    originalCommandId: "command-original",
+    commandType: "context.correction",
+    commandFingerprint:
+      '{"v":1,"type":"context.correction"}',
+  });
+
+  const query = connection.queries[1];
+  assert.match(
+    query.text,
+    /JOIN command_receipts cr/,
+  );
+  assert.match(
+    query.text,
+    /tre\.status = 'NEEDS_CONFIRMATION'/,
+  );
+  assert.match(
+    query.text,
+    /FOR UPDATE OF tre/,
+  );
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "conversation-1",
+    "repair-1",
+  ]);
+});
+
+test("PostgreSQL pending repair review transitions only NEEDS_CONFIRMATION to terminal review status", async () => {
+  for (const status of [
+    "APPLIED",
+    "REJECTED",
+  ]) {
+    const { repository, connection } =
+      repositoryWith([{
+        rows: [],
+        rowCount: 1,
+      }]);
+
+    const updated =
+      await repository.withTransaction((tx) =>
+        repository.updateRepairReviewStatus(
+          tx,
+          {
+            tenantId: "tenant-1",
+            repairEventId: "repair-1",
+            status,
+          },
+        ),
+      );
+
+    assert.equal(updated, true);
+    const query = connection.queries[1];
+    assert.match(
+      query.text,
+      /status = 'NEEDS_CONFIRMATION'/,
+    );
+    assert.deepEqual(query.params, [
+      "tenant-1",
+      "repair-1",
+      status,
+    ]);
+  }
+});

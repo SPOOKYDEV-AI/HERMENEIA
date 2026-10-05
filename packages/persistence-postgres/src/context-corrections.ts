@@ -240,6 +240,112 @@ export class PostgresContextCorrectionRepository {
     }
   }
 
+  async loadReviewableRepairEvent(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+      repairEventId: UUID;
+    },
+  ): Promise<{
+    repairEventId: UUID;
+    actorUserId: UUID;
+    targetMessageId: UUID | null;
+    targetSourceRevision: number | null;
+    kind:
+      | "PROBLEM_REPORT"
+      | "MEANING_CORRECTION"
+      | "TONE_CORRECTION"
+      | "TERMINOLOGY_CORRECTION";
+    structuredPayload: Record<string, unknown>;
+    originalCommandId: UUID;
+    commandType: string;
+    commandFingerprint: string | null;
+  } | undefined> {
+    const result = await tx.query<{
+      repair_event_id: UUID;
+      actor_user_id: UUID;
+      target_message_id: UUID | null;
+      target_source_revision: number | null;
+      kind:
+        | "PROBLEM_REPORT"
+        | "MEANING_CORRECTION"
+        | "TONE_CORRECTION"
+        | "TERMINOLOGY_CORRECTION";
+      structured_payload: Record<string, unknown>;
+      command_id: UUID;
+      command_type: string;
+      command_fingerprint: string | null;
+    }>(
+      `SELECT tre.repair_event_id,
+              tre.actor_user_id,
+              tre.target_message_id,
+              tre.target_source_revision,
+              tre.kind,
+              tre.structured_payload,
+              tre.command_id,
+              cr.command_type,
+              cr.command_fingerprint
+         FROM translation_repair_events tre
+         JOIN command_receipts cr
+           ON cr.tenant_id = tre.tenant_id
+          AND cr.command_id = tre.command_id
+        WHERE tre.tenant_id = $1
+          AND tre.conversation_id = $2
+          AND tre.repair_event_id = $3
+          AND tre.status = 'NEEDS_CONFIRMATION'
+        FOR UPDATE OF tre`,
+      [
+        input.tenantId,
+        input.conversationId,
+        input.repairEventId,
+      ],
+    );
+
+    const row = result.rows[0];
+    return row
+      ? {
+          repairEventId: row.repair_event_id,
+          actorUserId: row.actor_user_id,
+          targetMessageId: row.target_message_id,
+          targetSourceRevision:
+            row.target_source_revision === null
+              ? null
+              : Number(row.target_source_revision),
+          kind: row.kind,
+          structuredPayload:
+            structuredClone(row.structured_payload),
+          originalCommandId: row.command_id,
+          commandType: row.command_type,
+          commandFingerprint:
+            row.command_fingerprint,
+        }
+      : undefined;
+  }
+
+  async updateRepairReviewStatus(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      repairEventId: UUID;
+      status: "APPLIED" | "REJECTED";
+    },
+  ): Promise<boolean> {
+    const result = await tx.query(
+      `UPDATE translation_repair_events
+          SET status = $3
+        WHERE tenant_id = $1
+          AND repair_event_id = $2
+          AND status = 'NEEDS_CONFIRMATION'`,
+      [
+        input.tenantId,
+        input.repairEventId,
+        input.status,
+      ],
+    );
+    return result.rowCount === 1;
+  }
+
   async loadRevocableCorrectionClaim(
     tx: SqlExecutor,
     input: {

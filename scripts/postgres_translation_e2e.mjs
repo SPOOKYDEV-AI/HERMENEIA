@@ -62,6 +62,9 @@ const ids = {
   correctionCommandId: randomUUID(),
   correctionOverrideCommandId: randomUUID(),
   correctionRevokeCommandId: randomUUID(),
+  pendingReviewCorrectionCommandId: randomUUID(),
+  pendingReviewCommandId: randomUUID(),
+  reviewedClaimRevokeCommandId: randomUUID(),
   postRevokeCommandId: randomUUID(),
   postRevokeClientMessageId: randomUUID(),
   staleContextCommandId: randomUUID(),
@@ -1149,6 +1152,233 @@ try {
 
   runtimeNow = "2026-10-05T08:00:02.000Z";
 
+  const pendingReviewCorrection =
+    await runtime.correctionService.createCorrection(
+      recipient,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.pendingReviewCorrectionCommandId,
+        conversation_id: ids.conversationId,
+        target_message_id: accepted.message_id,
+        target_source_revision: 1,
+        kind: "TERMINOLOGY",
+        requested_scope: "CONVERSATION",
+        payload: {
+          schema_version: 1,
+          kind: "TERM_MEANING",
+          surface_form: "BR",
+          meaning: "business requirement",
+          source_language_tag: "fr-FR",
+        },
+      },
+    );
+
+  assert.equal(
+    pendingReviewCorrection.status,
+    "NEEDS_CONFIRMATION",
+  );
+  assert.equal(
+    pendingReviewCorrection.claim_id,
+    null,
+  );
+
+  await withConnection(async (db) => {
+    const promoted = await db.query(
+      `UPDATE conversation_members
+          SET role = 'MODERATOR'
+        WHERE tenant_id = $1
+          AND conversation_id = $2
+          AND user_id = $3
+      RETURNING role`,
+      [
+        ids.tenantId,
+        ids.conversationId,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(promoted.rowCount, 1);
+    assert.equal(
+      promoted.rows[0].role,
+      "MODERATOR",
+    );
+  });
+
+  const review =
+    await runtime.correctionService.reviewCorrection(
+      recipient,
+      {
+        protocol_version: 1,
+        command_id: ids.pendingReviewCommandId,
+        conversation_id: ids.conversationId,
+        repair_event_id:
+          pendingReviewCorrection.repair_event_id,
+        decision: "APPROVE",
+      },
+    );
+
+  assert.equal(review.status, "APPLIED");
+  assert.ok(review.claim_id);
+  assert.equal(review.claim_version, 1);
+  const reviewedClaimId = review.claim_id;
+
+  await withConnection(async (db) => {
+    const proposal = await db.query(
+      `SELECT status
+         FROM translation_repair_events
+        WHERE tenant_id = $1
+          AND repair_event_id = $2`,
+      [
+        ids.tenantId,
+        pendingReviewCorrection.repair_event_id,
+      ],
+    );
+    assert.equal(proposal.rowCount, 1);
+    assert.equal(
+      proposal.rows[0].status,
+      "APPLIED",
+    );
+
+    const reviewEvent = await db.query(
+      `SELECT actor_user_id,
+              kind,
+              status,
+              structured_payload
+         FROM translation_repair_events
+        WHERE tenant_id = $1
+          AND repair_event_id = $2`,
+      [
+        ids.tenantId,
+        review.review_event_id,
+      ],
+    );
+    assert.equal(reviewEvent.rowCount, 1);
+    assert.equal(
+      reviewEvent.rows[0].actor_user_id,
+      ids.recipientUserId,
+    );
+    assert.equal(
+      reviewEvent.rows[0].kind,
+      "EXPLICIT_CORRECTION",
+    );
+    assert.equal(
+      reviewEvent.rows[0].status,
+      "APPLIED",
+    );
+    assert.equal(
+      reviewEvent.rows[0].structured_payload.action,
+      "APPROVE_PENDING_CORRECTION",
+    );
+    assert.equal(
+      reviewEvent.rows[0].structured_payload
+        .source_repair_event_id,
+      pendingReviewCorrection.repair_event_id,
+    );
+
+    const claim = await db.query(
+      `SELECT status,
+              subject_user_id,
+              proposition_ref
+         FROM context_claims
+        WHERE tenant_id = $1
+          AND claim_id = $2
+          AND claim_version = 1`,
+      [ids.tenantId, reviewedClaimId],
+    );
+    assert.equal(claim.rowCount, 1);
+    assert.equal(
+      claim.rows[0].status,
+      "ACTIVE",
+    );
+    assert.equal(
+      claim.rows[0].subject_user_id,
+      null,
+    );
+    assert.deepEqual(
+      claim.rows[0].proposition_ref,
+      {
+        schema_version: 1,
+        kind: "TERM_MEANING",
+        surface_form: "BR",
+        meaning: "business requirement",
+        source_language_tag: "fr-FR",
+      },
+    );
+
+    const provenance = await db.query(
+      `SELECT relation,
+              source_repair_event_id
+         FROM provenance_edges
+        WHERE tenant_id = $1
+          AND derived_claim_id = $2
+          AND derived_claim_version = 1
+          AND relation = 'CORRECTED_BY'`,
+      [ids.tenantId, reviewedClaimId],
+    );
+    assert.equal(provenance.rowCount, 1);
+    assert.equal(
+      provenance.rows[0].source_repair_event_id,
+      review.review_event_id,
+    );
+
+    const state = await db.query(
+      `SELECT correction_claim_refs
+         FROM conversation_context_states
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(state.rowCount, 1);
+    assert.ok(
+      state.rows[0].correction_claim_refs.includes(
+        correctionClaimId,
+      ),
+    );
+    assert.ok(
+      state.rows[0].correction_claim_refs.includes(
+        reviewedClaimId,
+      ),
+    );
+  });
+
+  runtimeNow = "2026-10-05T08:00:03.000Z";
+
+  const reviewedClaimRevocation =
+    await runtime.correctionService.revokeCorrection(
+      recipient,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.reviewedClaimRevokeCommandId,
+        conversation_id: ids.conversationId,
+        claim_id: reviewedClaimId,
+      },
+    );
+  assert.equal(
+    reviewedClaimRevocation.status,
+    "REVOKED",
+  );
+
+  await withConnection(async (db) => {
+    const restored = await db.query(
+      `UPDATE conversation_members
+          SET role = 'MEMBER'
+        WHERE tenant_id = $1
+          AND conversation_id = $2
+          AND user_id = $3
+      RETURNING role`,
+      [
+        ids.tenantId,
+        ids.conversationId,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(restored.rowCount, 1);
+    assert.equal(restored.rows[0].role, "MEMBER");
+  });
+
+  runtimeNow = "2026-10-05T08:00:04.000Z";
+
   const revocation =
     await runtime.correctionService.revokeCorrection(
       sender,
@@ -1246,7 +1476,7 @@ try {
     );
   });
 
-  runtimeNow = "2026-10-05T08:00:03.000Z";
+  runtimeNow = "2026-10-05T08:00:05.000Z";
 
   const postRevokeAccepted =
     await runtime.sendService.sendMessage(
@@ -1427,6 +1657,8 @@ try {
     "feedback=repair-only " +
     "correction=speaker-scoped-self-applied " +
     "supersession=old-invalidated " +
+    "review=pending-approved " +
+    "reviewed-claim=revoked " +
     "revocation=claim-revoked " +
     "post-revoke=correction-absent " +
     "t2=confirmed-correction-context " +

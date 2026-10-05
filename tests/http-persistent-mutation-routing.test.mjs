@@ -377,3 +377,75 @@ test("HTTP correction revocation is routed to the persistent correction service"
     },
   }]);
 });
+
+
+test("HTTP pending repair review is routed to the persistent correction service", async (t) => {
+  const calls = [];
+  const correctionService = {
+    async createCorrection() {
+      throw new Error("unused");
+    },
+    async reviewCorrection(
+      receivedActor,
+      command,
+    ) {
+      calls.push({
+        actor: receivedActor,
+        command,
+      });
+      return {
+        protocol_version: 1,
+        repair_event_id: "repair-pending-1",
+        review_event_id: "repair-review-1",
+        status: "APPLIED",
+        claim_id: "claim-reviewed-1",
+        claim_version: 1,
+      };
+    },
+  };
+
+  const server = createHermeneiaHttpServer({
+    core: coreThatMustNotMutate(),
+    correctionService,
+    authenticate() {
+      return actor;
+    },
+  });
+  t.after(() => server.close());
+
+  const base = await listen(server);
+  const response = await fetch(
+    `${base}/v1/conversations/conversation-1/repairs/repair-pending-1/review`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        protocol_version: 1,
+        command_id: "review-command-1",
+        decision: "APPROVE",
+      }),
+    },
+  );
+
+  assert.equal(response.status, 202);
+  assert.deepEqual(await response.json(), {
+    protocol_version: 1,
+    repair_event_id: "repair-pending-1",
+    review_event_id: "repair-review-1",
+    status: "APPLIED",
+    claim_id: "claim-reviewed-1",
+    claim_version: 1,
+  });
+  assert.deepEqual(calls, [{
+    actor,
+    command: {
+      protocol_version: 1,
+      command_id: "review-command-1",
+      conversation_id: "conversation-1",
+      repair_event_id: "repair-pending-1",
+      decision: "APPROVE",
+    },
+  }]);
+});

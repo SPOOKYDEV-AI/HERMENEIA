@@ -125,6 +125,8 @@ A user's correction of their own intended meaning can override an earlier infere
 
 The executable V1 runtime enforces this with a speaker subject fence. A supported correction anchored to the actor's own source revision may become a `CONFIRMED_CORRECTION` with `subject_user_id = actor_user_id`. Context planning obtains the author of the source revision currently being translated, and the claim materializer rejects a subject-scoped claim unless those identities match. Corrections from an ordinary member about another speaker therefore cannot silently become durable authority over that speaker's future messages.
 
+A pending cross-speaker proposal also cannot self-elevate merely because it exists in `translation_repair_events`. Review requires a separate authorised application action by a moderator/admin. Approval must resolve back to the original durable `context.correction` command fingerprint and exactly match its normalised structured proposition; the reviewer cannot rewrite the meaning while approving it. Vague feedback has no approvable semantic proposition and may only be rejected/closed until a new explicit structured correction is supplied.
+
 ## 6. No self-reinforcement
 
 A claim cannot gain confidence merely because HERMENEIA generated several artifacts from the same source.

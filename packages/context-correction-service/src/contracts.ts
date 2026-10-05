@@ -112,6 +112,38 @@ export interface ContextCorrectionStore<Tx> {
     },
   ): Promise<void>;
 
+  loadReviewableRepairEvent(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+      repairEventId: UUID;
+    },
+  ): Promise<{
+    repairEventId: UUID;
+    actorUserId: UUID;
+    targetMessageId: UUID | null;
+    targetSourceRevision: number | null;
+    kind:
+      | "PROBLEM_REPORT"
+      | "MEANING_CORRECTION"
+      | "TONE_CORRECTION"
+      | "TERMINOLOGY_CORRECTION";
+    structuredPayload: Record<string, unknown>;
+    originalCommandId: UUID;
+    commandType: string;
+    commandFingerprint: string | null;
+  } | undefined>;
+
+  updateRepairReviewStatus(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      repairEventId: UUID;
+      status: "APPLIED" | "REJECTED";
+    },
+  ): Promise<boolean>;
+
   loadRevocableCorrectionClaim(
     tx: Tx,
     input: {

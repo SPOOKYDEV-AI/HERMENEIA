@@ -161,6 +161,27 @@ export interface CorrectionCommand {
   payload: Record<string, unknown>;
 }
 
+export type CorrectionReviewDecision =
+  | "APPROVE"
+  | "REJECT";
+
+export interface CorrectionReviewCommand {
+  protocol_version: 1;
+  command_id: UUID;
+  conversation_id: UUID;
+  repair_event_id: UUID;
+  decision: CorrectionReviewDecision;
+}
+
+export interface CorrectionReviewResult {
+  protocol_version: 1;
+  repair_event_id: UUID;
+  review_event_id: UUID;
+  status: "APPLIED" | "REJECTED";
+  claim_id: UUID | null;
+  claim_version: number | null;
+}
+
 export interface CorrectionRevocationCommand {
   protocol_version: 1;
   command_id: UUID;
