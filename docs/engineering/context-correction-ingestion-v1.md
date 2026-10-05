@@ -119,7 +119,7 @@ Still separate work:
 - moderation/approval endpoint for `NEEDS_CONFIRMATION` corrections;
 - tenant-wide glossary/policy distribution;
 - typed TONE/style memory;
-- `POST /v1/translations/{translation_id}/feedback` ingestion/promotion;
+- moderation flow that converts `NEEDS_CONFIRMATION` feedback into an explicit structured correction;
 - claim revocation/supersession workflow;
 - dependency-aware invalidation;
 - semantic episode derivation and recovery checkpoints.
