@@ -347,14 +347,19 @@ test("translation publish device query locks active devices with public material
     publicMaterialRef: "pub:b1",
   }]);
   const sql = connection.queries[1];
+  assert.match(sql.text, /FROM devices d/);
+  assert.match(sql.text, /tenant_memberships tm/);
+  assert.match(sql.text, /EXISTS \(/);
   assert.match(sql.text, /FROM delivery_envelopes de/);
   assert.match(sql.text, /de\.recipient_user_id = \$2/);
+  assert.match(sql.text, /de\.recipient_device_id = d\.device_id/);
   assert.match(sql.text, /de\.message_id = \$3/);
   assert.match(sql.text, /de\.source_revision = \$4/);
   assert.match(sql.text, /de\.rendition_type = 'ORIGINAL'/);
   assert.match(sql.text, /d\.status = 'ACTIVE'/);
   assert.match(sql.text, /length\(d\.public_material_ref\) > 0/);
   assert.match(sql.text, /FOR SHARE OF d/);
+  assert.doesNotMatch(sql.text, /SELECT DISTINCT/);
   assert.deepEqual(sql.params, [
     "tenant-1",
     "user-b",

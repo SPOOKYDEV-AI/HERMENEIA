@@ -549,24 +549,27 @@ export class PostgresTranslationRepository {
       credential_version: number;
       public_material_ref: string;
     }>(
-      `SELECT DISTINCT d.device_id,
+      `SELECT d.device_id,
               d.credential_version,
               d.public_material_ref
-         FROM delivery_envelopes de
-         JOIN devices d
-           ON d.device_id = de.recipient_device_id
-          AND d.user_id = de.recipient_user_id
-          AND d.status = 'ACTIVE'
+         FROM devices d
          JOIN tenant_memberships tm
-           ON tm.tenant_id = de.tenant_id
-          AND tm.user_id = de.recipient_user_id
+           ON tm.tenant_id = $1
+          AND tm.user_id = $2
           AND tm.status = 'ACTIVE'
-        WHERE de.tenant_id = $1
-          AND de.recipient_user_id = $2
-          AND de.message_id = $3
-          AND de.source_revision = $4
-          AND de.rendition_type = 'ORIGINAL'
+        WHERE d.user_id = $2
+          AND d.status = 'ACTIVE'
           AND length(d.public_material_ref) > 0
+          AND EXISTS (
+            SELECT 1
+              FROM delivery_envelopes de
+             WHERE de.tenant_id = $1
+               AND de.recipient_user_id = $2
+               AND de.recipient_device_id = d.device_id
+               AND de.message_id = $3
+               AND de.source_revision = $4
+               AND de.rendition_type = 'ORIGINAL'
+          )
         ORDER BY d.device_id
         FOR SHARE OF d`,
       [
