@@ -28,6 +28,8 @@ const CLAIM =
   "10000000-0000-4000-8000-000000000009";
 const OTHER_CLAIM =
   "10000000-0000-4000-8000-000000000010";
+const PENDING_REPAIR =
+  "10000000-0000-4000-8000-000000000011";
 const NOW = "2026-10-05T11:00:00.000Z";
 
 const actor = {
@@ -80,6 +82,40 @@ function fixture({
     claimVersion: 1,
     subjectUserId: USER,
   },
+  reviewableRepair = {
+    repairEventId: PENDING_REPAIR,
+    actorUserId: OTHER_USER,
+    targetMessageId: MESSAGE,
+    targetSourceRevision: 1,
+    kind: "TERMINOLOGY_CORRECTION",
+    structuredPayload: {
+      schema_version: 1,
+      kind: "TERM_MEANING",
+      surface_form: "CR",
+      meaning: "change request",
+      source_language_tag: "fr-FR",
+    },
+    originalCommandId:
+      "12000000-0000-4000-8000-000000000001",
+    commandType: "context.correction",
+    commandFingerprint: JSON.stringify({
+      v: 1,
+      type: "context.correction",
+      conversation_id: CONVERSATION,
+      target_message_id: MESSAGE,
+      target_source_revision: 1,
+      target_translation_id: null,
+      kind: "TERMINOLOGY",
+      requested_scope: "CONVERSATION",
+      payload: {
+        schema_version: 1,
+        kind: "TERM_MEANING",
+        surface_form: "CR",
+        meaning: "change request",
+        source_language_tag: "fr-FR",
+      },
+    }),
+  },
 } = {}) {
   const receipts = new Map();
   const events = [];
@@ -88,6 +124,7 @@ function fixture({
   const overrideProvenance = [];
   const invalidationProvenance = [];
   const revocations = [];
+  const reviewTransitions = [];
   let currentState = state
     ? structuredClone(state)
     : undefined;
@@ -167,6 +204,29 @@ function fixture({
 
     async insertRepairEvent(_tx, input) {
       events.push(structuredClone(input));
+    },
+
+    async loadReviewableRepairEvent(
+      _tx,
+      input,
+    ) {
+      return (
+        reviewableRepair &&
+        input.repairEventId ===
+          reviewableRepair.repairEventId
+      )
+        ? structuredClone(reviewableRepair)
+        : undefined;
+    },
+
+    async updateRepairReviewStatus(
+      _tx,
+      input,
+    ) {
+      reviewTransitions.push(
+        structuredClone(input),
+      );
+      return true;
     },
 
     async loadRevocableCorrectionClaim(
@@ -276,6 +336,7 @@ function fixture({
     overrideProvenance,
     invalidationProvenance,
     revocations,
+    reviewTransitions,
     state: () =>
       currentState
         ? structuredClone(currentState)
@@ -921,4 +982,275 @@ test("inactive or unavailable correction claim fails closed without revealing it
 
   assert.equal(f.events.length, 0);
   assert.equal(f.revocations.length, 0);
+});
+
+
+function reviewCommand(overrides = {}) {
+  return {
+    protocol_version: 1,
+    command_id:
+      "13000000-0000-4000-8000-000000000001",
+    conversation_id: CONVERSATION,
+    repair_event_id: PENDING_REPAIR,
+    decision: "APPROVE",
+    ...overrides,
+  };
+}
+
+test("ordinary member cannot review pending correction signals", async () => {
+  const f = fixture({
+    tenantRole: "MEMBER",
+    conversationRole: "MEMBER",
+  });
+
+  await assert.rejects(
+    () =>
+      f.service.reviewCorrection(
+        actor,
+        reviewCommand(),
+      ),
+    (error) =>
+      error?.code === "NOT_AUTHORIZED",
+  );
+
+  assert.equal(f.events.length, 0);
+  assert.equal(f.claims.length, 0);
+});
+
+test("moderator approval promotes the original structured proposal as generic conversation correction", async () => {
+  const f = fixture({
+    tenantRole: "MEMBER",
+    conversationRole: "MODERATOR",
+  });
+
+  const result = await f.service.reviewCorrection(
+    actor,
+    reviewCommand(),
+  );
+
+  assert.equal(result.status, "APPLIED");
+  assert.ok(result.claim_id);
+  assert.equal(result.claim_version, 1);
+  assert.equal(f.reviewTransitions.length, 1);
+  assert.deepEqual(
+    f.reviewTransitions[0],
+    {
+      tenantId: TENANT,
+      repairEventId: PENDING_REPAIR,
+      status: "APPLIED",
+    },
+  );
+
+  const reviewEvent = f.events.at(-1);
+  assert.equal(
+    reviewEvent.kind,
+    "EXPLICIT_CORRECTION",
+  );
+  assert.equal(reviewEvent.status, "APPLIED");
+  assert.deepEqual(
+    reviewEvent.structuredPayload,
+    {
+      schema_version: 1,
+      action:
+        "APPROVE_PENDING_CORRECTION",
+      source_repair_event_id:
+        PENDING_REPAIR,
+      proposal_actor_user_id:
+        OTHER_USER,
+    },
+  );
+
+  assert.equal(f.claims.length, 1);
+  assert.equal(
+    f.claims[0].subjectUserId,
+    null,
+  );
+  assert.equal(
+    f.claims[0].scopeKind,
+    "CONVERSATION",
+  );
+  assert.deepEqual(
+    f.claims[0].propositionRef,
+    {
+      schema_version: 1,
+      kind: "TERM_MEANING",
+      surface_form: "CR",
+      meaning: "change request",
+      source_language_tag: "fr-FR",
+    },
+  );
+  assert.equal(f.provenance.length, 1);
+  assert.equal(
+    f.provenance[0].repairEventId,
+    result.review_event_id,
+  );
+  assert.deepEqual(
+    f.state().correctionClaimRefs,
+    [result.claim_id],
+  );
+});
+
+test("vague feedback cannot be approved as semantic correction memory", async () => {
+  const f = fixture({
+    reviewableRepair: {
+      repairEventId: PENDING_REPAIR,
+      actorUserId: OTHER_USER,
+      targetMessageId: MESSAGE,
+      targetSourceRevision: 1,
+      kind: "MEANING_CORRECTION",
+      structuredPayload: {
+        schema_version: 1,
+        feedback_kind: "WRONG_MEANING",
+        note_present: true,
+        note_length: 12,
+      },
+      originalCommandId:
+        "12000000-0000-4000-8000-000000000002",
+      commandType: "translation.feedback",
+      commandFingerprint:
+        JSON.stringify({
+          v: 1,
+          type: "translation.feedback",
+        }),
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      f.service.reviewCorrection(
+        actor,
+        reviewCommand(),
+      ),
+    (error) =>
+      error?.code === "INVALID_COMMAND",
+  );
+  assert.equal(f.claims.length, 0);
+  assert.equal(f.events.length, 0);
+});
+
+test("moderator may reject a vague pending feedback without creating memory", async () => {
+  const f = fixture({
+    reviewableRepair: {
+      repairEventId: PENDING_REPAIR,
+      actorUserId: OTHER_USER,
+      targetMessageId: MESSAGE,
+      targetSourceRevision: 1,
+      kind: "MEANING_CORRECTION",
+      structuredPayload: {
+        schema_version: 1,
+        feedback_kind: "WRONG_MEANING",
+        note_present: false,
+        note_length: 0,
+      },
+      originalCommandId:
+        "12000000-0000-4000-8000-000000000003",
+      commandType: "translation.feedback",
+      commandFingerprint: null,
+    },
+  });
+
+  const result = await f.service.reviewCorrection(
+    actor,
+    reviewCommand({
+      decision: "REJECT",
+    }),
+  );
+
+  assert.equal(result.status, "REJECTED");
+  assert.equal(result.claim_id, null);
+  assert.equal(result.claim_version, null);
+  assert.equal(f.claims.length, 0);
+  assert.deepEqual(
+    f.reviewTransitions,
+    [{
+      tenantId: TENANT,
+      repairEventId: PENDING_REPAIR,
+      status: "REJECTED",
+    }],
+  );
+  assert.equal(
+    f.events.at(-1).structuredPayload.action,
+    "REJECT_PENDING_REPAIR",
+  );
+});
+
+test("pending tenant-wide correction cannot be approved through conversation review", async () => {
+  const f = fixture({
+    tenantRole: "OWNER",
+    conversationRole: "MODERATOR",
+    reviewableRepair: {
+      repairEventId: PENDING_REPAIR,
+      actorUserId: OTHER_USER,
+      targetMessageId: null,
+      targetSourceRevision: null,
+      kind: "TERMINOLOGY_CORRECTION",
+      structuredPayload: {
+        schema_version: 1,
+        kind: "TERM_MEANING",
+        surface_form: "CR",
+        meaning: "change request",
+      },
+      originalCommandId:
+        "12000000-0000-4000-8000-000000000004",
+      commandType: "context.correction",
+      commandFingerprint:
+        JSON.stringify({
+          v: 1,
+          type: "context.correction",
+          conversation_id: CONVERSATION,
+          target_message_id: null,
+          target_source_revision: null,
+          target_translation_id: null,
+          kind: "TERMINOLOGY",
+          requested_scope: "TENANT",
+          payload: {
+            schema_version: 1,
+            kind: "TERM_MEANING",
+            surface_form: "CR",
+            meaning: "change request",
+          },
+        }),
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      f.service.reviewCorrection(
+        actor,
+        reviewCommand(),
+      ),
+    (error) =>
+      error?.code === "INVALID_COMMAND",
+  );
+  assert.equal(f.claims.length, 0);
+});
+
+test("pending correction review is idempotent and decision changes conflict", async () => {
+  const f = fixture();
+
+  const first = await f.service.reviewCorrection(
+    actor,
+    reviewCommand(),
+  );
+  const replay = await f.service.reviewCorrection(
+    actor,
+    reviewCommand(),
+  );
+
+  assert.deepEqual(replay, first);
+  assert.equal(f.reviewTransitions.length, 1);
+  assert.equal(f.claims.length, 1);
+
+  await assert.rejects(
+    () =>
+      f.service.reviewCorrection(
+        actor,
+        reviewCommand({
+          decision: "REJECT",
+        }),
+      ),
+    (error) =>
+      error?.code ===
+      "IDEMPOTENCY_CONFLICT",
+  );
 });
