@@ -19,8 +19,8 @@ function state(overrides = {}) {
   return {
     conversationId: "conversation-1",
     contextVersion: 3,
-    processedPrefixSequence: 7,
-    processingGaps: [],
+    processedPrefixOperationSequence: 7,
+    processingGapOperationSequences: [],
     erasureEpoch: 2,
     activeEpisodeId: "episode-1",
     activeEpisodeVersion: 4,
@@ -30,11 +30,18 @@ function state(overrides = {}) {
 }
 
 function candidate(overrides = {}) {
+  const sourceMessageSequence =
+    overrides.sourceMessageSequence ?? 7;
+  const causalThroughOperationSequence =
+    overrides.causalThroughOperationSequence ??
+    sourceMessageSequence;
+
   return {
     candidateId: "candidate-1",
     candidateType: "IMMEDIATE_MESSAGE",
     content: "context",
-    sourceSequence: 7,
+    sourceMessageSequence,
+    causalThroughOperationSequence,
     sourceRevisionRefs: ["message-7:1"],
     claimRefs: [],
     semanticScore: 0.8,
@@ -61,7 +68,8 @@ function input(overrides = {}) {
     recipientUserId: "user-b",
     targetLanguageTag: "fr-FR",
     targetProfileVersion: 3,
-    currentSequence: 8,
+    currentMessageSequence: 8,
+    currentOperationSequence: 8,
     erasureEpoch: 2,
     now: "2026-10-04T20:00:00.000Z",
     strategy: "T2_ADAPTIVE_V1",
@@ -104,35 +112,36 @@ test("T1 selects the most recent causal window in chronological payload order", 
 
   const result = engine.build(input({
     strategy: "T1",
-    currentSequence: 10,
+    currentMessageSequence: 10,
+    currentOperationSequence: 10,
     messageId: "message-10",
     state: state({
-      processedPrefixSequence: 9,
+      processedPrefixOperationSequence: 9,
     }),
     candidates: [
       candidate({
         candidateId: "m5",
-        sourceSequence: 5,
+        sourceMessageSequence: 5,
         content: "five",
       }),
       candidate({
         candidateId: "m7",
-        sourceSequence: 7,
+        sourceMessageSequence: 7,
         content: "seven",
       }),
       candidate({
         candidateId: "m8",
-        sourceSequence: 8,
+        sourceMessageSequence: 8,
         content: "eight",
       }),
       candidate({
         candidateId: "m9",
-        sourceSequence: 9,
+        sourceMessageSequence: 9,
         content: "nine",
       }),
       candidate({
         candidateId: "future",
-        sourceSequence: 10,
+        sourceMessageSequence: 10,
         content: "future must not leak",
       }),
     ],
@@ -154,16 +163,17 @@ test("T2 reconciles causal gaps even when their utility is low", () => {
   });
 
   const result = engine.build(input({
-    currentSequence: 11,
+    currentMessageSequence: 11,
+    currentOperationSequence: 11,
     messageId: "message-11",
     state: state({
-      processedPrefixSequence: 8,
-      processingGaps: [9, 10],
+      processedPrefixOperationSequence: 8,
+      processingGapOperationSequences: [9, 10],
     }),
     candidates: [
       candidate({
         candidateId: "gap-9",
-        sourceSequence: 9,
+        sourceMessageSequence: 9,
         content: "gap nine",
         semanticScore: 0,
         temporalScore: 0,
@@ -172,7 +182,7 @@ test("T2 reconciles causal gaps even when their utility is low", () => {
       }),
       candidate({
         candidateId: "gap-10",
-        sourceSequence: 10,
+        sourceMessageSequence: 10,
         content: "gap ten",
         semanticScore: 0,
         temporalScore: 0,
@@ -196,10 +206,58 @@ test("T2 reconciles causal gaps even when their utility is low", () => {
   );
   assert.equal(result.snapshot.recoveryMode, "PARTIAL");
   assert.deepEqual(
-    result.snapshot.processingGapRefs,
+    result.snapshot.processingGapOperationSequences,
     [9, 10],
   );
-  assert.equal(result.metrics.contextFreshnessGap, 2);
+  assert.equal(result.metrics.contextFreshnessOperationGap, 2);
+});
+
+test("message order and operation causality stay independent after an edit", () => {
+  const engine = new ContextEngine({
+    minAdaptiveUtility: 0.95,
+  });
+
+  const result = engine.build(input({
+    currentMessageSequence: 8,
+    currentOperationSequence: 10,
+    messageId: "message-8",
+    state: state({
+      processedPrefixOperationSequence: 8,
+      processingGapOperationSequences: [9],
+    }),
+    candidates: [
+      candidate({
+        candidateId: "edited-prior-message",
+        sourceMessageSequence: 7,
+        causalThroughOperationSequence: 9,
+        content: "edited previous message",
+        semanticScore: 0,
+        temporalScore: 0,
+        confidence: 0,
+        importance: 0,
+      }),
+      candidate({
+        candidateId: "current-message-must-not-leak",
+        sourceMessageSequence: 8,
+        causalThroughOperationSequence: 9,
+        content: "current message",
+      }),
+    ],
+  }));
+
+  assert.deepEqual(
+    result.selected.map((item) => item.candidateId),
+    ["edited-prior-message"],
+  );
+  assert.equal(
+    result.selected[0].selectionReason,
+    "FRESHNESS_RECONCILIATION",
+  );
+  assert.equal(result.metrics.contextFreshnessOperationGap, 1);
+  assert.deepEqual(
+    result.snapshot.processingGapOperationSequences,
+    [9],
+  );
 });
 
 test("future source sequences are never eligible for context", () => {
@@ -209,7 +267,7 @@ test("future source sequences are never eligible for context", () => {
     candidates: [
       candidate({
         candidateId: "future",
-        sourceSequence: 8,
+        sourceMessageSequence: 8,
         content: "future",
         explicitReference: true,
       }),
@@ -229,8 +287,8 @@ test("cold state can use a sanitised recovery checkpoint without fabricating his
       candidate({
         candidateId: "checkpoint",
         candidateType: "RECOVERY_CHECKPOINT",
-        sourceSequence: null,
-        causalThroughSequence: 7,
+        sourceMessageSequence: null,
+        causalThroughOperationSequence: 7,
         content: "validated terminology handles only",
         privacyScope: "CHECKPOINT",
         erasureEpoch: 2,
@@ -260,17 +318,18 @@ test("explicit old-topic reference bypasses adaptive utility threshold", () => {
   });
 
   const result = engine.build(input({
-    currentSequence: 100,
+    currentMessageSequence: 100,
+    currentOperationSequence: 100,
     messageId: "message-100",
     state: state({
-      processedPrefixSequence: 99,
+      processedPrefixOperationSequence: 99,
     }),
     candidates: [
       candidate({
         candidateId: "old-topic",
         candidateType: "ACTIVE_EPISODE",
-        sourceSequence: 12,
-        causalThroughSequence: 12,
+        sourceMessageSequence: 12,
+        causalThroughOperationSequence: 12,
         content: "old topic handle",
         semanticScore: 0.1,
         temporalScore: 0.01,
@@ -313,7 +372,7 @@ test("stale memory loses to fresher context under a one-item budget", () => {
     candidates: [
       candidate({
         candidateId: "stale",
-        sourceSequence: 6,
+        sourceMessageSequence: 6,
         content: "stale",
         tokenEstimate: 16,
         semanticScore: 1,
@@ -323,7 +382,7 @@ test("stale memory loses to fresher context under a one-item budget", () => {
       }),
       candidate({
         candidateId: "fresh",
-        sourceSequence: 7,
+        sourceMessageSequence: 7,
         content: "fresh",
         tokenEstimate: 16,
         semanticScore: 0.85,
@@ -383,8 +442,8 @@ test("durable correction memory requires an explicit correction trigger", () => 
           candidate({
             candidateId: "bad-memory",
             candidateType: "CORRECTION_MEMORY",
-            sourceSequence: null,
-            causalThroughSequence: 7,
+            sourceMessageSequence: null,
+            causalThroughOperationSequence: 7,
             privacyScope: "CORRECTION",
             correctionTrigger: null,
           }),
@@ -402,8 +461,8 @@ test("explicit correction memory is admissible at bounded scope", () => {
       candidate({
         candidateId: "correction",
         candidateType: "CORRECTION_MEMORY",
-        sourceSequence: null,
-        causalThroughSequence: 7,
+        sourceMessageSequence: null,
+        causalThroughOperationSequence: 7,
         content: "CR means change request in this conversation",
         privacyScope: "CORRECTION",
         correctionTrigger: "EXPLICIT_REPAIR",
@@ -523,8 +582,8 @@ test("derived checkpoint from the future is never eligible", () => {
       candidate({
         candidateId: "future-checkpoint",
         candidateType: "RECOVERY_CHECKPOINT",
-        sourceSequence: null,
-        causalThroughSequence: 8,
+        sourceMessageSequence: null,
+        causalThroughOperationSequence: 8,
         content: "must not leak from future state",
         privacyScope: "CHECKPOINT",
       }),
@@ -539,17 +598,18 @@ test("derived episode from the future is never eligible", () => {
   const engine = new ContextEngine();
 
   const result = engine.build(input({
-    currentSequence: 20,
+    currentMessageSequence: 20,
+    currentOperationSequence: 20,
     messageId: "message-20",
     state: state({
-      processedPrefixSequence: 19,
+      processedPrefixOperationSequence: 19,
     }),
     candidates: [
       candidate({
         candidateId: "future-episode",
         candidateType: "ACTIVE_EPISODE",
-        sourceSequence: null,
-        causalThroughSequence: 20,
+        sourceMessageSequence: null,
+        causalThroughOperationSequence: 20,
         content: "future episode projection",
         activeEpisode: true,
       }),
@@ -573,12 +633,12 @@ test("derived episode and checkpoint candidates require a causal frontier", () =
             candidate({
               candidateId: `missing-frontier-${candidateType}`,
               candidateType,
-              sourceSequence: null,
-              causalThroughSequence: undefined,
+              sourceMessageSequence: null,
+              causalThroughOperationSequence: undefined,
             }),
           ],
         })),
-      /require causalThroughSequence/,
+      /require causalThroughOperationSequence/,
     );
   }
 });
@@ -593,14 +653,14 @@ test("correction memory requires a causal frontier in addition to a trigger", ()
           candidate({
             candidateId: "correction-without-frontier",
             candidateType: "CORRECTION_MEMORY",
-            sourceSequence: null,
-            causalThroughSequence: null,
+            sourceMessageSequence: null,
+            causalThroughOperationSequence: null,
             privacyScope: "CORRECTION",
             correctionTrigger: "EXPLICIT_REPAIR",
           }),
         ],
       })),
-    /Correction memory requires causalThroughSequence/,
+    /Correction memory requires causalThroughOperationSequence/,
   );
 });
 
@@ -611,14 +671,15 @@ test("ContextState rejects processing gaps at or behind the processed prefix", (
   assert.throws(
     () =>
       engine.build(input({
-        currentSequence: 10,
+        currentMessageSequence: 10,
+        currentOperationSequence: 10,
         messageId: "message-10",
         state: state({
-          processedPrefixSequence: 7,
-          processingGaps: [7, 8],
+          processedPrefixOperationSequence: 7,
+          processingGapOperationSequences: [7, 8],
         }),
       })),
-    /processingGaps must be strictly after the processed prefix/,
+    /processingGapOperationSequences must be strictly after the processed prefix/,
   );
 });
 
@@ -643,8 +704,8 @@ test("correction and checkpoint candidates share one soft memory reserve", () =>
       candidate({
         candidateId: "correction-first",
         candidateType: "CORRECTION_MEMORY",
-        sourceSequence: null,
-        causalThroughSequence: 7,
+        sourceMessageSequence: null,
+        causalThroughOperationSequence: 7,
         content: "corrected term",
         privacyScope: "CORRECTION",
         correctionTrigger: "EXPLICIT_REPAIR",
@@ -657,8 +718,8 @@ test("correction and checkpoint candidates share one soft memory reserve", () =>
       candidate({
         candidateId: "checkpoint-second",
         candidateType: "RECOVERY_CHECKPOINT",
-        sourceSequence: null,
-        causalThroughSequence: 7,
+        sourceMessageSequence: null,
+        causalThroughOperationSequence: 7,
         content: "checkpoint state",
         privacyScope: "CHECKPOINT",
         tokenEstimate: 10,
@@ -697,7 +758,7 @@ test("cold context uses authoritative erasure epoch without fabricating ContextS
     candidates: [
       candidate({
         candidateId: "recent-current-epoch",
-        sourceSequence: 7,
+        sourceMessageSequence: 7,
         content: "authorised transient recent source",
         erasureEpoch: 5,
       }),
