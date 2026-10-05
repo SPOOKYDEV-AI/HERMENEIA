@@ -133,6 +133,7 @@ export interface BuildContextInput {
    */
   erasureEpoch: number;
   policyVersion: number;
+  tenantPolicyVersion: number;
   now: string;
   strategy: ContextStrategy;
   state: ConversationContextState | null;
@@ -176,6 +177,7 @@ export interface ContextSnapshot {
   processingGapOperationSequences: number[];
   erasureEpoch: number;
   policyVersion: number;
+  tenantPolicyVersion: number;
   tokenEstimate: number;
   recoveryMode: ContextRecoveryMode;
   createdAt: string;
@@ -310,6 +312,7 @@ export class ContextEngine {
       processingGapOperationSequences,
       erasureEpoch,
       policyVersion: input.policyVersion,
+      tenantPolicyVersion: input.tenantPolicyVersion,
       tokenEstimate,
       recoveryMode,
       createdAt: input.now,
@@ -667,6 +670,14 @@ function validateInput(input: BuildContextInput): void {
   ) {
     throw new TypeError(
       "policyVersion must be a positive integer",
+    );
+  }
+  if (
+    !Number.isInteger(input.tenantPolicyVersion) ||
+    input.tenantPolicyVersion < 1
+  ) {
+    throw new TypeError(
+      "tenantPolicyVersion must be a positive integer",
     );
   }
   if (!Number.isFinite(Date.parse(input.now))) {
