@@ -111,6 +111,7 @@ export function createPostgresTranslationContextRuntime(
               ...(state.correctionClaimRefs ?? []),
               ...(state.terminologyClaimRefs ?? []),
               ...(state.lexicalClaimRefs ?? []),
+              ...(state.styleClaimRefs ?? []),
             ].filter(
               (value, index, values) =>
                 values.indexOf(value) === index,
