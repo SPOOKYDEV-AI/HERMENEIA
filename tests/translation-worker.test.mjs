@@ -37,6 +37,7 @@ class FakeWorkerStore {
         recipientUserId: "user-b",
         targetLanguageTag: "es-CO",
         targetProfileVersion: 3,
+        preferredRegister: null,
       }],
     };
     this.current = true;
@@ -202,6 +203,7 @@ class FakeWorkerStore {
       key.recipientUserId,
       key.targetLanguageTag,
       key.targetProfileVersion,
+      key.preferredRegister ?? "",
       key.contextSnapshotId ?? "",
       key.strategyVersion,
     ].join("|");
@@ -454,6 +456,10 @@ function fixture({
       providerInputs.push(clone(input));
       assert.ok(input.requestId);
       assert.equal(input.targetLanguageTag, "es-CO");
+      assert.equal(
+        input.preferredRegister,
+        store.fanoutPlan.targets[0]?.preferredRegister ?? null,
+      );
       if (typeof onProviderTranslate === "function") {
         await onProviderTranslate({ store, input });
       }
@@ -638,11 +644,13 @@ test("fanout creates one child execution per target and skips exact same-languag
     recipientUserId: "user-c",
     targetLanguageTag: "fr-FR",
     targetProfileVersion: 1,
+    preferredRegister: null,
   });
   f.store.fanoutPlan.targets.push({
     recipientUserId: "user-d",
     targetLanguageTag: "en-US",
     targetProfileVersion: 2,
+    preferredRegister: null,
   });
 
   assert.equal(await f.worker.runFanoutOnce(), "FANOUT_DONE");
