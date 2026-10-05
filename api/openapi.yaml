@@ -893,7 +893,8 @@ components:
           type: string
           minLength: 1
           maxLength: 35
-          pattern: '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*      type: object
+          pattern: '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*
+      type: object
       additionalProperties: false
       required:
         - protocol_version
@@ -1156,7 +1157,8 @@ components:
           type: string
           minLength: 1
           maxLength: 35
-          pattern: '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*      type: object
+          pattern: '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*
+      type: object
       additionalProperties: false
       required:
         - protocol_version
@@ -1443,7 +1445,8 @@ components:
           type: string
           minLength: 1
           maxLength: 35
-          pattern: '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*      type: object
+          pattern: '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*
+      type: object
       additionalProperties: false
       required:
         - protocol_version
@@ -1706,7 +1709,8 @@ components:
           type: string
           minLength: 1
           maxLength: 35
-          pattern: '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*      type: object
+          pattern: '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*
+      type: object
       additionalProperties: false
       required:
         - protocol_version
