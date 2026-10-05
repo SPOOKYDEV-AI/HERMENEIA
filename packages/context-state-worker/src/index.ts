@@ -5,6 +5,8 @@ import type {
 } from "../../outbox-service/src/index.js";
 import {
   applyContextDerivation,
+  type ContextOperationRef,
+  type ContextStatePatch,
   type ConversationContextState,
 } from "../../context-state/src/index.js";
 
@@ -54,10 +56,19 @@ export interface ContextStateWorkerStore<Tx> {
   ): Promise<boolean>;
 }
 
+export interface ContextStateEpisodeDeriver {
+  derive(input: {
+    tenantId: UUID;
+    state: ConversationContextState;
+    operation: ContextOperationRef;
+  }): Promise<ContextStatePatch | undefined>;
+}
+
 export interface ContextStateWorkerDependencies<Tx> {
   store: ContextStateWorkerStore<Tx>;
   outbox: PersistentOutboxService<Tx>;
   clock: ContextStateWorkerClock;
+  episodeDeriver?: ContextStateEpisodeDeriver;
   retryBaseSeconds?: number;
   maxAttempts?: number;
 }
@@ -178,6 +189,28 @@ export class ContextStateWorkerService<Tx> {
           }
         }
 
+        let patch: ContextStatePatch | undefined;
+        if (
+          this.deps.episodeDeriver &&
+          operation.kind !== "MESSAGE_DELETED" &&
+          operation.messageId &&
+          operation.sourceRevision !== undefined
+        ) {
+          try {
+            patch =
+              await this.deps.episodeDeriver.derive({
+                tenantId: lease.tenantId,
+                state: structuredClone(state),
+                operation: structuredClone(operation),
+              });
+          } catch {
+            // Episode enrichment is optional to the critical causal reducer.
+            // Missing transient source or a heuristic failure must not block
+            // message ordering or fabricate derived state.
+            patch = undefined;
+          }
+        }
+
         const next = applyContextDerivation(state, {
           conversationId: state.conversationId,
           operationId: operation.operationId,
@@ -188,6 +221,7 @@ export class ContextStateWorkerService<Tx> {
           policyVersion: state.policyVersion,
           strategyVersion: state.strategyVersion,
           outcome: "PROCESSED",
+          ...(patch ? { patch } : {}),
           completedAt: this.now(),
         });
 
