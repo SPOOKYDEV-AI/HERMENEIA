@@ -25,8 +25,9 @@ The current V1 runtime implements and tests:
 - exact source revision, recipient profile and active-conversation fences before translation publication;
 - a conversation content-invalidation frontier carried by `erasure_epoch`;
 - edit and delete advancing that frontier transactionally;
-- stale ContextSnapshots being rejected when their epoch no longer matches the authoritative conversation epoch;
-- a real PostgreSQL E2E proving stale contextual work is superseded before another provider call and cannot publish a TRANSLATION envelope.
+- a policy-invalidation frontier carried by the authoritative conversation `policy_version` and copied into each newly prepared ContextSnapshot;
+- stale ContextSnapshots being rejected when either their erasure epoch or policy version no longer matches the authoritative conversation;
+- a real PostgreSQL E2E proving both stale-content and stale-policy contextual work are superseded before another provider call and cannot publish a TRANSLATION envelope.
 
 The persistent runtime does **not** yet make T2 production-complete. Migration 0013 provides the bounded durable ConversationState/claim/provenance/checkpoint schema; PostgreSQL persistence, messaging-operation registration, a fenced `context.reduce` worker and the ConversationState-to-planner boundary are now executable. Context planning projects state strictly before the current operation, strips current/future pending operations from historical gap checks, and rejects state that has already processed the message being translated. A compatible state alone is not called T2: T2 requires material derived candidates, and enrichment failure degrades to T1/T0.
 
@@ -324,6 +325,7 @@ It should identify:
     processed_prefix_sequence
     processing_gap_refs
     erasure_epoch
+    policy_version
     token_estimate
     created_at
 
@@ -333,7 +335,7 @@ The snapshot must be sufficient to explain and reproduce evaluation decisions wi
 
 The executable V1 schema persists snapshot metadata/provenance only. Selected plaintext remains in the bounded transient context payload store. A T0 decision still receives a durable snapshot with an empty selected-candidate set.
 
-`erasure_epoch` is the authoritative **content-invalidation frontier** for prepared context in the current V1 runtime. Replacing a source through edit or removing it through delete advances the epoch in the same transaction as the mutation. Publication locks the active conversation and accepts a referenced ContextSnapshot only when its recorded epoch still equals the current conversation epoch. This deliberately invalidates more prepared context than a future fine-grained dependency index may need, but it fails closed and prevents old text from being reintroduced.
+`erasure_epoch` is the authoritative **content-invalidation frontier** for prepared context in the current V1 runtime. Replacing a source through edit or removing it through delete advances the epoch in the same transaction as the mutation. `policy_version` is the parallel **policy-invalidation frontier**: planning projects the current conversation policy version, compatible ConversationState must match it, every new ContextSnapshot persists it, and translation publication accepts a referenced snapshot only when both frontiers still match. Migration 0014 backfills/omitted-writer snapshots with sentinel policy version `0`; because real conversation policy versions are always >= 1, legacy snapshots fail closed rather than being accidentally revalidated. These coarse fences deliberately invalidate more prepared context than a future fine-grained dependency index may need, but they prevent old content or old tenant policy from being reintroduced.
 
 ## 14. Fast-path stale-state reconciliation
 
@@ -462,7 +464,7 @@ Deletion/invalidation may affect:
 
 Caches must not resurrect deleted data after authoritative deletion.
 
-For the executable T0/T1 baseline, edit/delete invalidation is intentionally conversation-wide through `erasure_epoch`. Transient payload bytes may remain resident until their bounded TTL expires, but a stale snapshot cannot pass the authoritative publish fence after the epoch advances. Future T2 dependency indexing may narrow invalidation while preserving the same fail-closed publication rule.
+For the executable persistent baseline, edit/delete invalidation is intentionally conversation-wide through `erasure_epoch`, while tenant-policy invalidation is fenced by `policy_version`. Transient payload bytes may remain resident until their bounded TTL expires, but a stale snapshot cannot pass the authoritative publish fence after either frontier advances. Future T2 dependency indexing may narrow invalidation while preserving the same fail-closed publication rule.
 
 ## 22. Latency SLO candidates
 
