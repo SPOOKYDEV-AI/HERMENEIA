@@ -1,3 +1,7 @@
+import {
+  arbitrateCandidateClaims,
+  type ParsedCandidateClaim,
+} from "./arbitration.js";
 import type { UUID } from "../../domain/src/index.js";
 import type {
   ContextCandidate,
@@ -76,7 +80,7 @@ export function materializeReferencedClaimCandidates(
 
   const referenced = new Set(input.referencedClaimIds);
   const seen = new Set<string>();
-  const candidates: ContextCandidate[] = [];
+  const parsed: ParsedCandidateClaim[] = [];
 
   for (const claim of input.claims) {
     if (!referenced.has(claim.claimId)) continue;
@@ -95,10 +99,28 @@ export function materializeReferencedClaimCandidates(
       continue;
     }
 
+    const identity =
+      `${claim.claimId}:${claim.claimVersion}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+
+    parsed.push({
+      claim,
+      proposition,
+    });
+  }
+
+  const candidates: ContextCandidate[] = [];
+
+  for (
+    const arbitrated of arbitrateCandidateClaims(
+      parsed,
+    )
+  ) {
+    const { claim, proposition } =
+      arbitrated.primary;
     const candidateId =
       `claim:${claim.claimId}:${claim.claimVersion}`;
-    if (seen.has(candidateId)) continue;
-    seen.add(candidateId);
 
     const correctionTrigger =
       claim.authorityClass === "CONFIRMED_CORRECTION"
@@ -121,12 +143,11 @@ export function materializeReferencedClaimCandidates(
       causalThroughOperationSequence:
         input.state.processedPrefixOperationSequence,
       sourceRevisionRefs: [],
-      claimRefs: [
-        `${claim.claimId}:${claim.claimVersion}`,
-      ],
+      claimRefs:
+        arbitrated.supportingClaimRefs,
       semanticScore: 1,
       temporalScore: 1,
-      confidence: claim.confidence ?? 1,
+      confidence: arbitrated.confidence,
       importance: 1,
       explicitReference: false,
       activeEpisode: false,
@@ -135,7 +156,7 @@ export function materializeReferencedClaimCandidates(
           ? "CORRECTION"
           : "POLICY",
       erasureEpoch: input.state.erasureEpoch,
-      validUntil: claim.validUntil,
+      validUntil: arbitrated.validUntil,
       correctionTrigger,
     });
   }
