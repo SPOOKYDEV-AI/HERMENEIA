@@ -17,6 +17,9 @@ import {
   ContextEngine,
 } from "../../context-engine/src/index.js";
 import {
+  ACTIVE_EPISODE_CONTINUITY_GAP_MS,
+} from "../../context-state/src/index.js";
+import {
   ContextPreparationService,
   InMemoryContextPayloadStore,
 } from "../../context-service/src/index.js";
@@ -269,7 +272,10 @@ export function createPostgresTranslationContextRuntime(
               episodeLast <
                 frame.currentOperationSequence &&
               Date.parse(episodeLastActivityAt) <
-                Date.parse(asOf)
+                Date.parse(asOf) &&
+              Date.parse(asOf) -
+                Date.parse(episodeLastActivityAt) <=
+                ACTIVE_EPISODE_CONTINUITY_GAP_MS
             ) {
               const tailRefs = frame.recentMessages
                 .slice(3)
