@@ -363,7 +363,7 @@ test("PostgreSQL context planner loads current sequence/erasure epoch and recent
   });
 
   const currentQuery = connection.queries[1];
-  assert.match(currentQuery.text, /mm\.accepted_at::text AS accepted_at/);
+  assert.match(currentQuery.text, /mr\.created_at::text AS accepted_at/);
   assert.match(currentQuery.text, /c\.erasure_epoch/);
   assert.match(currentQuery.text, /mr\.op_seq/);
   assert.match(currentQuery.text, /JOIN message_revisions mr/);
