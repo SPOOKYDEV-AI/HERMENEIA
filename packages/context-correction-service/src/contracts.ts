@@ -167,6 +167,40 @@ export interface ContextCorrectionStore<Tx> {
     },
   ): Promise<boolean>;
 
+  invalidateSupersededStylePreferenceClaims(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+      subjectUserId: UUID;
+      propositionRef: Record<string, unknown>;
+      invalidatedAt: string;
+    },
+  ): Promise<Array<{
+    claimId: UUID;
+    claimVersion: number;
+  }>>;
+
+  insertExplicitPreferenceClaim(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      claimId: UUID;
+      conversationId: UUID;
+      subjectUserId: UUID;
+      propositionRef: Record<string, unknown>;
+      createdAt: string;
+    },
+  ): Promise<void>;
+
+  bumpConversationPolicyVersion(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+    },
+  ): Promise<number>;
+
   invalidateSupersededCorrectionClaims(
     tx: Tx,
     input: {
