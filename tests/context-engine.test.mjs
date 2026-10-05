@@ -22,6 +22,7 @@ function state(overrides = {}) {
     processedPrefixOperationSequence: 7,
     processingGapOperationSequences: [],
     erasureEpoch: 2,
+    policyVersion: 1,
     activeEpisodeId: "episode-1",
     activeEpisodeVersion: 4,
     updatedAt: "2026-10-04T20:00:00.000Z",
@@ -71,6 +72,8 @@ function input(overrides = {}) {
     currentMessageSequence: 8,
     currentOperationSequence: 8,
     erasureEpoch: 2,
+    policyVersion: 1,
+    tenantPolicyVersion: 1,
     now: "2026-10-04T20:00:00.000Z",
     strategy: "T2_ADAPTIVE_V1",
     state: state(),
@@ -96,6 +99,8 @@ test("T0 emits no prior context and keeps snapshot content-free", () => {
   assert.equal(result.snapshot.recipientUserId, "user-b");
   assert.equal(result.snapshot.targetLanguageTag, "fr-FR");
   assert.equal(result.snapshot.targetProfileVersion, 3);
+  assert.equal(result.snapshot.policyVersion, 1);
+  assert.equal(result.snapshot.tenantPolicyVersion, 1);
   assert.equal(
     JSON.stringify(result.snapshot).includes(
       "TOP SECRET SOURCE BODY",
@@ -788,4 +793,42 @@ test("derived ContextState from a stale erasure epoch is rejected", () => {
       })),
     /does not match authoritative erasureEpoch/,
   );
+});
+
+
+test("derived ContextState from a stale policy version is rejected", () => {
+  const engine = new ContextEngine();
+
+  assert.throws(
+    () =>
+      engine.build(input({
+        policyVersion: 3,
+        state: state({
+          policyVersion: 2,
+        }),
+      })),
+    /does not match authoritative policyVersion/,
+  );
+});
+
+test("context snapshot records the authoritative policy version", () => {
+  const engine = new ContextEngine();
+  const result = engine.build(input({
+    policyVersion: 7,
+    state: state({
+      policyVersion: 7,
+    }),
+  }));
+
+  assert.equal(result.snapshot.policyVersion, 7);
+});
+
+
+test("context snapshot records the authoritative tenant policy version", () => {
+  const engine = new ContextEngine();
+  const result = engine.build(input({
+    tenantPolicyVersion: 9,
+  }));
+
+  assert.equal(result.snapshot.tenantPolicyVersion, 9);
 });

@@ -108,6 +108,8 @@ function prepareInput(overrides = {}) {
     currentMessageSequence: 8,
     currentOperationSequence: 8,
     erasureEpoch: 1,
+    policyVersion: 1,
+    tenantPolicyVersion: 1,
     strategy: "T2_ADAPTIVE_V1",
     state: {
       conversationId: "conversation-1",
@@ -115,6 +117,7 @@ function prepareInput(overrides = {}) {
       processedPrefixOperationSequence: 7,
       processingGapOperationSequences: [],
       erasureEpoch: 1,
+      policyVersion: 1,
       activeEpisodeId: null,
       activeEpisodeVersion: null,
       updatedAt: "2026-10-04T19:59:59.000Z",

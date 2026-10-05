@@ -37,6 +37,8 @@ function frame(overrides = {}) {
     currentSourceAuthorUserId: "user-a",
     currentSourceLanguageTag: "fr-FR",
     erasureEpoch: 2,
+    policyVersion: 1,
+    tenantPolicyVersion: 1,
     recentMessages: [
       {
         messageId: "message-7",
@@ -193,6 +195,7 @@ test("compatible state does not falsely upgrade immediate-only context to T2", a
     processedPrefixOperationSequence: 7,
     processingGapOperationSequences: [],
     erasureEpoch: 2,
+    policyVersion: 1,
     activeEpisodeId: "episode-1",
     activeEpisodeVersion: 3,
     updatedAt: "2026-10-04T19:59:59.000Z",
@@ -216,6 +219,7 @@ test("planner chooses T2 only when compatible state materialises a derived candi
     processedPrefixOperationSequence: 7,
     processingGapOperationSequences: [],
     erasureEpoch: 2,
+    policyVersion: 1,
     activeEpisodeId: "episode-1",
     activeEpisodeVersion: 3,
     updatedAt: "2026-10-04T19:59:59.000Z",
@@ -305,6 +309,7 @@ test("planner excludes the current operation from historical processing gaps", a
       processedPrefixOperationSequence: 6,
       processingGapOperationSequences: [7, 8],
       erasureEpoch: 2,
+      policyVersion: 1,
       activeEpisodeId: null,
       activeEpisodeVersion: null,
       updatedAt: "2026-10-04T19:59:59.000Z",
@@ -389,4 +394,37 @@ test("planner never requires transient content that has expired or failed to loa
 
   assert.equal(result.strategy, "T0");
   assert.deepEqual(result.candidates, []);
+});
+
+
+test("planner rejects derived state from a stale policy version and degrades to T1", async () => {
+  const { planner, transientSources } = fixture({
+    state: {
+      conversationId: "conversation-1",
+      contextVersion: 4,
+      processedPrefixOperationSequence: 7,
+      processingGapOperationSequences: [],
+      erasureEpoch: 2,
+      policyVersion: 1,
+      activeEpisodeId: "episode-1",
+      activeEpisodeVersion: 3,
+      updatedAt: "2026-10-04T19:59:59.000Z",
+    },
+    planningFrame: frame({
+      policyVersion: 2,
+    }),
+    derivedCandidates: {
+      async load() {
+        throw new Error("stale state must not reach derived adapter");
+      },
+    },
+  });
+
+  put(transientSources, "message-7", 1, "recent seven");
+  const result = await planner.load(request());
+
+  assert.equal(result.strategy, "T1");
+  assert.equal(result.state, null);
+  assert.equal(result.policyVersion, 2);
+  assert.equal(result.tenantPolicyVersion, 1);
 });

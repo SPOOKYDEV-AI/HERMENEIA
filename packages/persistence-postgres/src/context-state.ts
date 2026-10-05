@@ -205,6 +205,7 @@ export function toEngineContextState(
     processingGapOperationSequences:
       processingGapRefs(value).map((operation) => operation.opSeq),
     erasureEpoch: value.erasureEpoch,
+    policyVersion: value.policyVersion,
     activeEpisodeId: value.activeEpisode?.episodeId ?? null,
     activeEpisodeVersion:
       value.activeEpisode?.episodeVersion ?? null,

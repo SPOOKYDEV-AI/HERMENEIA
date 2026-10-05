@@ -34,6 +34,7 @@ export interface ConversationContextState {
   processedPrefixOperationSequence: number;
   processingGapOperationSequences: number[];
   erasureEpoch: number;
+  policyVersion: number;
   activeEpisodeId: UUID | null;
   activeEpisodeVersion: number | null;
   terminologyClaimRefs?: UUID[];
@@ -131,6 +132,8 @@ export interface BuildContextInput {
    * the derived ConversationContextState cache is absent.
    */
   erasureEpoch: number;
+  policyVersion: number;
+  tenantPolicyVersion: number;
   now: string;
   strategy: ContextStrategy;
   state: ConversationContextState | null;
@@ -173,6 +176,8 @@ export interface ContextSnapshot {
   processedPrefixOperationSequence: number;
   processingGapOperationSequences: number[];
   erasureEpoch: number;
+  policyVersion: number;
+  tenantPolicyVersion: number;
   tokenEstimate: number;
   recoveryMode: ContextRecoveryMode;
   createdAt: string;
@@ -306,6 +311,8 @@ export class ContextEngine {
       processedPrefixOperationSequence,
       processingGapOperationSequences,
       erasureEpoch,
+      policyVersion: input.policyVersion,
+      tenantPolicyVersion: input.tenantPolicyVersion,
       tokenEstimate,
       recoveryMode,
       createdAt: input.now,
@@ -657,6 +664,22 @@ function validateInput(input: BuildContextInput): void {
       "erasureEpoch must be a non-negative integer",
     );
   }
+  if (
+    !Number.isInteger(input.policyVersion) ||
+    input.policyVersion < 1
+  ) {
+    throw new TypeError(
+      "policyVersion must be a positive integer",
+    );
+  }
+  if (
+    !Number.isInteger(input.tenantPolicyVersion) ||
+    input.tenantPolicyVersion < 1
+  ) {
+    throw new TypeError(
+      "tenantPolicyVersion must be a positive integer",
+    );
+  }
   if (!Number.isFinite(Date.parse(input.now))) {
     throw new TypeError("now must be a valid timestamp");
   }
@@ -707,6 +730,22 @@ function validateInput(input: BuildContextInput): void {
     ) {
       throw new TypeError(
         "ContextState erasureEpoch does not match authoritative erasureEpoch",
+      );
+    }
+
+    if (
+      !Number.isInteger(input.state.policyVersion) ||
+      input.state.policyVersion < 1
+    ) {
+      throw new TypeError(
+        "ContextState policyVersion must be a positive integer",
+      );
+    }
+    if (
+      input.state.policyVersion !== input.policyVersion
+    ) {
+      throw new TypeError(
+        "ContextState policyVersion does not match authoritative policyVersion",
       );
     }
 

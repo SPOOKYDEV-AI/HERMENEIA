@@ -72,6 +72,8 @@ const ids = {
   tenantPolicyClaimId: randomUUID(),
   tenantPolicyCommandId: randomUUID(),
   tenantPolicyClientMessageId: randomUUID(),
+  stalePolicyCommandId: randomUUID(),
+  stalePolicyClientMessageId: randomUUID(),
   staleContextCommandId: randomUUID(),
   staleContextClientMessageId: randomUUID(),
 };
@@ -1739,6 +1741,139 @@ try {
   );
   assert.equal(providerCalls, 4);
 
+  runtimeNow = "2026-10-05T08:00:06.000Z";
+
+  const stalePolicyAccepted =
+    await runtime.sendService.sendMessage(
+      sender,
+      {
+        protocol_version: 1,
+        command_id: ids.stalePolicyCommandId,
+        client_message_id:
+          ids.stalePolicyClientMessageId,
+        conversation_id: ids.conversationId,
+        source: {
+          text: "Le SLA reste important.",
+          language_hint: "fr-FR",
+        },
+        client_authored_at: NOW,
+      },
+    );
+
+  assert.equal(
+    stalePolicyAccepted.status,
+    "ACCEPTED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runFanoutOnce(),
+    "FANOUT_DONE",
+  );
+
+  await withConnection(async (db) => {
+    const snapshots = await db.query(
+      `SELECT policy_version,
+               tenant_policy_version,
+               selected_claim_refs
+         FROM context_snapshots
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND recipient_user_id = $3`,
+      [
+        ids.tenantId,
+        stalePolicyAccepted.message_id,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(snapshots.rowCount, 1);
+    assert.equal(
+      Number(snapshots.rows[0].policy_version),
+      1,
+    );
+    assert.equal(
+      Number(
+        snapshots.rows[0].tenant_policy_version,
+      ),
+      1,
+    );
+    assert.ok(
+      snapshots.rows[0].selected_claim_refs.includes(
+        `${ids.tenantPolicyClaimId}:1`,
+      ),
+    );
+
+    const bumped = await db.query(
+      `UPDATE tenants
+          SET policy_version = policy_version + 1
+        WHERE tenant_id = $1
+      RETURNING policy_version`,
+      [ids.tenantId],
+    );
+    assert.equal(bumped.rowCount, 1);
+    assert.equal(
+      Number(bumped.rows[0].policy_version),
+      2,
+    );
+
+    const conversationPolicy = await db.query(
+      `SELECT policy_version
+         FROM conversations
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(conversationPolicy.rowCount, 1);
+    assert.equal(
+      Number(
+        conversationPolicy.rows[0].policy_version,
+      ),
+      1,
+    );
+  });
+
+  assert.equal(
+    await runtime.translationWorker.runExecuteOnce(),
+    "SUPERSEDED",
+  );
+  assert.equal(providerCalls, 4);
+
+  await withConnection(async (db) => {
+    const execution = await db.query(
+      `SELECT status
+         FROM translation_executions
+        WHERE tenant_id = $1
+          AND source_message_id = $2
+          AND recipient_user_id = $3`,
+      [
+        ids.tenantId,
+        stalePolicyAccepted.message_id,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(execution.rowCount, 1);
+    assert.equal(
+      execution.rows[0].status,
+      "SUPERSEDED",
+    );
+
+    const translated = await db.query(
+      `SELECT COUNT(*)::integer AS count
+         FROM delivery_envelopes
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND rendition_type = 'TRANSLATION'`,
+      [
+        ids.tenantId,
+        stalePolicyAccepted.message_id,
+      ],
+    );
+    assert.equal(
+      Number(translated.rows[0].count),
+      0,
+    );
+  });
+
+  runtimeNow = "2026-10-05T08:00:07.000Z";
+
   const staleContextAccepted =
     await runtime.sendService.sendMessage(
       sender,
@@ -1851,6 +1986,8 @@ try {
     "revocation=claim-revoked " +
     "post-revoke=correction-absent " +
     "tenant-policy=unreferenced-overlay " +
+    "conversation_policy_version=stable " +
+    "tenant_policy_version=stale-context-superseded " +
     "t2=confirmed-correction-context " +
     "hpke=original+translation sync=2 ack=purged " +
     "erasure_epoch=stale-context-superseded\n",

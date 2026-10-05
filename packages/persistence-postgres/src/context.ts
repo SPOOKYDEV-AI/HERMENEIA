@@ -28,6 +28,8 @@ interface ContextSnapshotRow
   processed_prefix_sequence: number;
   processing_gap_refs: unknown;
   erasure_epoch: number;
+  policy_version: number;
+  tenant_policy_version: number;
   token_estimate: number;
   recovery_mode: ContextRecoveryMode;
   created_at: string;
@@ -69,13 +71,15 @@ export class PostgresContextSnapshotRepository {
          processed_prefix_sequence,
          processing_gap_refs,
          erasure_epoch,
+         policy_version,
+         tenant_policy_version,
          token_estimate,
          recovery_mode,
          created_at
        ) VALUES (
          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
          $13::jsonb,$14::jsonb,$15::jsonb,
-         $16,$17::jsonb,$18,$19,$20,$21
+         $16,$17::jsonb,$18,$19,$20,$21,$22,$23
        )
        ON CONFLICT (tenant_id, snapshot_id)
        DO NOTHING`,
@@ -102,6 +106,8 @@ export class PostgresContextSnapshotRepository {
         snapshot.processedPrefixOperationSequence,
         JSON.stringify(snapshot.processingGapOperationSequences),
         snapshot.erasureEpoch,
+        snapshot.policyVersion,
+        snapshot.tenantPolicyVersion,
         snapshot.tokenEstimate,
         snapshot.recoveryMode,
         snapshot.createdAt,
@@ -136,6 +142,8 @@ export class PostgresContextSnapshotRepository {
            processed_prefix_sequence,
            processing_gap_refs,
            erasure_epoch,
+           policy_version,
+           tenant_policy_version,
            token_estimate,
            recovery_mode,
            created_at::text AS created_at
@@ -187,6 +195,8 @@ export class PostgresContextSnapshotRepository {
           "processing_gap_refs",
         ),
       erasureEpoch: Number(row.erasure_epoch),
+      policyVersion: Number(row.policy_version),
+      tenantPolicyVersion: Number(row.tenant_policy_version),
       tokenEstimate: Number(row.token_estimate),
       recoveryMode: row.recovery_mode,
       createdAt: row.created_at,
@@ -202,6 +212,8 @@ export interface PostgresContextPlanningFrame {
   currentSourceAuthorUserId: UUID;
   currentSourceLanguageTag: string | null;
   erasureEpoch: number;
+  policyVersion: number;
+  tenantPolicyVersion: number;
   recentMessages: Array<{
     messageId: UUID;
     sourceRevision: number;
@@ -249,13 +261,17 @@ export class PostgresContextPlanningRepository {
       author_user_id: UUID;
       declared_source_language: string | null;
       erasure_epoch: number;
+      policy_version: number;
+      tenant_policy_version: number;
     }>(
       `SELECT mm.message_seq,
               mr.op_seq,
               mr.created_at::text AS accepted_at,
               mm.author_user_id,
               mr.declared_source_language,
-              c.erasure_epoch
+              c.erasure_epoch,
+               c.policy_version,
+               t.policy_version AS tenant_policy_version
          FROM message_metadata mm
          JOIN message_revisions mr
            ON mr.tenant_id = mm.tenant_id
@@ -266,6 +282,9 @@ export class PostgresContextPlanningRepository {
            ON c.tenant_id = mm.tenant_id
           AND c.conversation_id = mm.conversation_id
           AND c.status = 'ACTIVE'
+         JOIN tenants t
+           ON t.tenant_id = mm.tenant_id
+          AND t.status = 'ACTIVE'
          JOIN conversation_members cm
            ON cm.tenant_id = mm.tenant_id
           AND cm.conversation_id = mm.conversation_id
@@ -337,6 +356,8 @@ export class PostgresContextPlanningRepository {
       currentSourceLanguageTag:
         currentRow.declared_source_language,
       erasureEpoch: Number(currentRow.erasure_epoch),
+      policyVersion: Number(currentRow.policy_version),
+      tenantPolicyVersion: Number(currentRow.tenant_policy_version),
       recentMessages: recent.rows.map((row) => ({
         messageId: row.message_id,
         sourceRevision: Number(row.current_revision),
