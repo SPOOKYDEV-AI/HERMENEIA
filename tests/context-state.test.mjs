@@ -189,6 +189,11 @@ test("edit/delete invalidation patch removes derived claims without replaying ra
           episodeId: "episode:1",
           episodeVersion: 1,
           continuityConfidence: 0.9,
+          continuityStrategy: "heuristic-v1",
+          startedAt: "2026-10-04T18:00:00.000Z",
+          lastActivityAt: "2026-10-04T18:00:00.000Z",
+          sourceLanguageTag: "fr-fr",
+          sourceRevisionRefs: ["message-11:1"],
         },
         terminologyClaimRefs: ["claim:term-1", "claim:term-2"],
         lexicalClaimRefs: ["claim:lex-1"],
@@ -391,6 +396,11 @@ test("authority rebase is monotone and clears derived semantic material", () => 
     episodeId: "episode-old",
     episodeVersion: 3,
     continuityConfidence: 0.8,
+    continuityStrategy: "heuristic-v1",
+    startedAt: "2026-10-04T17:00:00.000Z",
+    lastActivityAt: "2026-10-04T18:00:00.000Z",
+    sourceLanguageTag: "fr-fr",
+    sourceRevisionRefs: ["message-old:1"],
   };
   value.terminologyClaimRefs = ["claim:term-old"];
   value.lexicalClaimRefs = ["claim:lex-old"];
