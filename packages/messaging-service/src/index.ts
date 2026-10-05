@@ -924,6 +924,19 @@ export class PersistentMessagingService<Tx> {
           );
         }
 
+        const nextErasureEpoch =
+          await this.deps.store.bumpConversationErasureEpoch(
+            tx,
+            actor,
+            message.conversationId,
+          );
+        if (nextErasureEpoch === undefined) {
+          throw new DomainError(
+            "NOT_AUTHORIZED",
+            "Conversation is not available to actor",
+          );
+        }
+
         const allocation =
           await this.deps.store.allocateOperationSequence(
             tx,

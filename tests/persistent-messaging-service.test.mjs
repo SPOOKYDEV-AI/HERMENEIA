@@ -1025,6 +1025,7 @@ test("persistent edit creates revision, revokes old envelopes and supersedes old
   const metadata = store.state.messages[0];
   assert.equal(metadata.currentRevision, 2);
   assert.equal(metadata.status, "ACTIVE");
+  assert.equal(store.state.erasureEpoch, 3);
 
   const oldEnvelopes = store.state.envelopes.filter(
     (row) => row.sourceRevision === 1,
@@ -1062,7 +1063,7 @@ test("persistent edit creates revision, revokes old envelopes and supersedes old
     },
     {
       membership_epoch: 7,
-      erasure_epoch: 2,
+      erasure_epoch: 3,
       policy_version: 11,
     },
   );
@@ -1104,6 +1105,7 @@ test("persistent edit retry is idempotent and stale new command is rejected", as
   const first = await service.editMessage(actor, command);
   const retry = await service.editMessage(actor, command);
   assert.deepEqual(retry, first);
+  assert.equal(store.state.erasureEpoch, 3);
 
   await assert.rejects(
     () =>
@@ -1141,6 +1143,7 @@ test("persistent edit rollback removes the new transient revision", async () => 
   );
 
   assert.equal(store.state.messages[0].currentRevision, 1);
+  assert.equal(store.state.erasureEpoch, 2);
   assert.equal(
     fixture.transientSources.get({
       tenantId: actor.tenantId,
@@ -1455,6 +1458,7 @@ test("persistent edit retry remains idempotent across HMAC key rotation", async 
 
   const retry = await rotatedService.editMessage(actor, command);
   assert.deepEqual(retry, first);
+  assert.equal(store.state.erasureEpoch, 3);
   assert.equal(
     store.state.revisions.filter(
       (row) => row.mutationType === "EDITED",
