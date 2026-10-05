@@ -613,8 +613,22 @@ export class ContextEngine {
       input.budget.memoryReserveTokens,
     );
 
+    const immediateWindowIds = new Set(
+      immediateWindow.map(
+        ({ candidate }) =>
+          candidate.candidateId,
+      ),
+    );
+
     selectFrom(
-      scored,
+      scored.filter(
+        ({ candidate }) =>
+          candidate.candidateType !==
+            "IMMEDIATE_MESSAGE" ||
+          immediateWindowIds.has(
+            candidate.candidateId,
+          ),
+      ),
       "ADAPTIVE_UTILITY",
       null,
       null,
