@@ -1115,7 +1115,7 @@ try {
     await runtime.translationWorker.runExecuteOnce(),
     "EXECUTION_DONE",
   );
-  assert.equal(providerCalls, 3);
+  assert.equal(providerCalls, 2);
 
   await withConnection(async (db) => {
     const execution = await db.query(
@@ -1392,7 +1392,7 @@ try {
     await runtime.translationWorker.runExecuteOnce(),
     "SUPERSEDED",
   );
-  assert.equal(providerCalls, 2);
+  assert.equal(providerCalls, 3);
 
   await withConnection(async (db) => {
     const execution = await db.query(
