@@ -20,6 +20,7 @@ on:
       - feat/tenant-policy-overlay-v1
       - feat/context-policy-version-fence-v1
       - feat/tenant-policy-control-plane-v1
+      - feat/typed-style-memory-v1
   workflow_dispatch:
 
 permissions:
