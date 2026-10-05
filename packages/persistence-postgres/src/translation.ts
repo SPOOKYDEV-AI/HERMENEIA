@@ -178,6 +178,7 @@ export class PostgresTranslationRepository {
               recipient_user_id,
               target_language_tag,
               target_profile_version,
+              preferred_register,
               context_snapshot_id,
               strategy_version,
               status,
@@ -193,8 +194,9 @@ export class PostgresTranslationRepository {
           AND recipient_user_id = $5
           AND target_language_tag = $6
           AND target_profile_version = $7
-          AND context_snapshot_id IS NOT DISTINCT FROM $8::uuid
-          AND strategy_version = $9`,
+          AND preferred_register IS NOT DISTINCT FROM $8
+          AND context_snapshot_id IS NOT DISTINCT FROM $9::uuid
+          AND strategy_version = $10`,
       [
         key.tenantId,
         key.conversationId,
@@ -203,6 +205,7 @@ export class PostgresTranslationRepository {
         key.recipientUserId,
         key.targetLanguageTag,
         key.targetProfileVersion,
+        key.preferredRegister,
         key.contextSnapshotId,
         key.strategyVersion,
       ],
@@ -225,6 +228,7 @@ export class PostgresTranslationRepository {
          recipient_user_id,
          target_language_tag,
          target_profile_version,
+         preferred_register,
          context_snapshot_id,
          strategy_version,
          status,
@@ -234,7 +238,7 @@ export class PostgresTranslationRepository {
          superseded_at
        ) VALUES (
          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-         $11,$12,$13,$14,$15
+         $11,$12,$13,$14,$15,$16
        )
        ON CONFLICT DO NOTHING
        RETURNING tenant_id,
@@ -245,6 +249,7 @@ export class PostgresTranslationRepository {
                  recipient_user_id,
                  target_language_tag,
                  target_profile_version,
+                 preferred_register,
                  context_snapshot_id,
                  strategy_version,
                  status,
@@ -261,6 +266,7 @@ export class PostgresTranslationRepository {
         input.recipientUserId,
         input.targetLanguageTag,
         input.targetProfileVersion,
+        input.preferredRegister,
         input.contextSnapshotId,
         input.strategyVersion,
         input.status,
@@ -288,6 +294,7 @@ export class PostgresTranslationRepository {
               recipient_user_id,
               target_language_tag,
               target_profile_version,
+              preferred_register,
               context_snapshot_id,
               strategy_version,
               status,
@@ -319,6 +326,7 @@ export class PostgresTranslationRepository {
               te.recipient_user_id,
               te.target_language_tag,
               te.target_profile_version,
+              te.preferred_register,
               te.context_snapshot_id,
               te.strategy_version,
               te.status,
@@ -392,6 +400,7 @@ export class PostgresTranslationRepository {
               te.recipient_user_id,
               te.target_language_tag,
               te.target_profile_version,
+              te.preferred_register,
               te.context_snapshot_id,
               te.strategy_version,
               te.status,
