@@ -134,7 +134,6 @@ const child = spawn(
       ...process.env,
       HOST: "127.0.0.1",
       PORT: String(port),
-      TRANSLATION_WORKER_MODE: "external",
     },
     stdio: ["ignore", "pipe", "pipe"],
   },
