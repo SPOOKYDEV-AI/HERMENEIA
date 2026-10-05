@@ -58,6 +58,7 @@ const ids = {
   t2ClientMessageId: randomUUID(),
   feedbackCommandId: randomUUID(),
   correctionCommandId: randomUUID(),
+  correctionOverrideCommandId: randomUUID(),
   staleContextCommandId: randomUUID(),
   staleContextClientMessageId: randomUUID(),
 };
@@ -108,7 +109,7 @@ const translationProvider = {
         {
           kind: "trusted_term_meaning",
           surface_form: "CR",
-          meaning: "change request",
+          meaning: "compte rendu",
           source_language_tag: "fr-FR",
         },
       );
@@ -780,7 +781,7 @@ try {
   );
   assert.ok(correction.claim_id);
   assert.equal(correction.claim_version, 1);
-  const correctionClaimId = correction.claim_id;
+  const firstCorrectionClaimId = correction.claim_id;
 
   await withConnection(async (db) => {
     const repair = await db.query(
@@ -823,7 +824,7 @@ try {
         WHERE tenant_id = $1
           AND claim_id = $2
           AND claim_version = 1`,
-      [ids.tenantId, correctionClaimId],
+      [ids.tenantId, firstCorrectionClaimId],
     );
     assert.equal(claim.rowCount, 1);
     assert.equal(
@@ -868,7 +869,7 @@ try {
         WHERE tenant_id = $1
           AND derived_claim_id = $2
           AND derived_claim_version = 1`,
-      [ids.tenantId, correctionClaimId],
+      [ids.tenantId, firstCorrectionClaimId],
     );
     assert.equal(provenance.rowCount, 1);
     assert.equal(
@@ -895,8 +896,130 @@ try {
     );
     assert.ok(
       state.rows[0].correction_claim_refs.includes(
-        correctionClaimId,
+        firstCorrectionClaimId,
       ),
+    );
+  });
+
+  const replacementCorrection =
+    await runtime.correctionService.createCorrection(
+      sender,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.correctionOverrideCommandId,
+        conversation_id: ids.conversationId,
+        target_message_id: accepted.message_id,
+        target_source_revision: 1,
+        kind: "TERMINOLOGY",
+        requested_scope: "CONVERSATION",
+        payload: {
+          schema_version: 1,
+          kind: "TERM_MEANING",
+          surface_form: "CR",
+          meaning: "compte rendu",
+          source_language_tag: "fr-FR",
+        },
+      },
+    );
+
+  assert.equal(
+    replacementCorrection.status,
+    "APPLIED",
+  );
+  assert.ok(replacementCorrection.claim_id);
+  assert.notEqual(
+    replacementCorrection.claim_id,
+    firstCorrectionClaimId,
+  );
+  const correctionClaimId =
+    replacementCorrection.claim_id;
+
+  await withConnection(async (db) => {
+    const oldClaim = await db.query(
+      `SELECT status,
+              valid_until
+         FROM context_claims
+        WHERE tenant_id = $1
+          AND claim_id = $2
+          AND claim_version = 1`,
+      [
+        ids.tenantId,
+        firstCorrectionClaimId,
+      ],
+    );
+    assert.equal(oldClaim.rowCount, 1);
+    assert.equal(
+      oldClaim.rows[0].status,
+      "INVALIDATED",
+    );
+    assert.ok(oldClaim.rows[0].valid_until);
+
+    const replacement = await db.query(
+      `SELECT status,
+              subject_user_id,
+              proposition_ref
+         FROM context_claims
+        WHERE tenant_id = $1
+          AND claim_id = $2
+          AND claim_version = 1`,
+      [ids.tenantId, correctionClaimId],
+    );
+    assert.equal(replacement.rowCount, 1);
+    assert.equal(
+      replacement.rows[0].status,
+      "ACTIVE",
+    );
+    assert.equal(
+      replacement.rows[0].subject_user_id,
+      ids.senderUserId,
+    );
+    assert.deepEqual(
+      replacement.rows[0].proposition_ref,
+      {
+        schema_version: 1,
+        kind: "TERM_MEANING",
+        surface_form: "CR",
+        meaning: "compte rendu",
+        source_language_tag: "fr-FR",
+      },
+    );
+
+    const override = await db.query(
+      `SELECT relation,
+              source_claim_id,
+              source_claim_version
+         FROM provenance_edges
+        WHERE tenant_id = $1
+          AND derived_claim_id = $2
+          AND derived_claim_version = 1
+          AND relation = 'OVERRIDDEN_BY'`,
+      [
+        ids.tenantId,
+        firstCorrectionClaimId,
+      ],
+    );
+    assert.equal(override.rowCount, 1);
+    assert.equal(
+      override.rows[0].source_claim_id,
+      correctionClaimId,
+    );
+    assert.equal(
+      Number(override.rows[0].source_claim_version),
+      1,
+    );
+
+    const state = await db.query(
+      `SELECT correction_claim_refs
+         FROM conversation_context_states
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(state.rowCount, 1);
+    assert.deepEqual(
+      state.rows[0].correction_claim_refs,
+      [correctionClaimId],
     );
   });
 
@@ -1112,6 +1235,7 @@ try {
     "send=accepted fanout=done execute=done " +
     "feedback=repair-only " +
     "correction=speaker-scoped-self-applied " +
+    "supersession=old-invalidated " +
     "t2=confirmed-correction-context " +
     "hpke=original+translation sync=2 ack=purged " +
     "erasure_epoch=stale-context-superseded\n",
