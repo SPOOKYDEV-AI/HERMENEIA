@@ -1,6 +1,6 @@
 # HERMENEIA Context Engine V1
 
-**Status:** Executable T0/T1 plus authoritative claim-backed T2 slice; episode/recovery enrichment pipeline incomplete  
+**Status:** Executable T0/T1 plus claim-, tenant-policy- and active-episode-backed T2 slices; recovery enrichment pipeline incomplete  
 **Version:** 1  
 **Primary goals:** translation quality, low latency, temporal correctness, reproducibility
 
@@ -52,7 +52,7 @@ Explicit revocation without replacement is executable as a separate authority pa
 
 A second conflict fence runs during claim materialisation, before candidate ranking. Claims are grouped by typed semantic key. Approved `POLICY` / `APPROVED_GLOSSARY` evidence is considered first; when no such approved control-plane evidence applies, a matching speaker-scoped correction is more relevant than a generic correction for that speaker. The applicable level must have value consensus. Contradictory values at the same applicable authority/scope level cause that semantic key to be omitted from T2, not scored against each other. Identical claims are collapsed to one provider candidate with all supporting versioned claim refs retained for snapshot provenance.
 
-Semantic episode derivation, typed TONE/style memory, recovery-checkpoint materialisation, dependency-aware invalidation and a production cross-process worker transport remain future work. The current raw-source store is process-local and transient, so `TRANSLATION_WORKER_MODE=external` fails fast rather than pretending a separate process can access plaintext that it does not own.
+Relevant-prior-episode reactivation, typed TONE/style memory, recovery-checkpoint materialisation, dependency-aware invalidation and a production cross-process worker transport remain future work. The current raw-source store is process-local and transient, so `TRANSLATION_WORKER_MODE=external` fails fast rather than pretending a separate process can access plaintext that it does not own.
 
 ## 2. Design principle: understand progressively
 
@@ -204,6 +204,27 @@ Episode classification for a new message produces a decision and evidence:
     UNCERTAIN
 
 UNCERTAIN must be a valid state. The engine should not fabricate certainty when signals conflict.
+
+### Executable `heuristic-v1` episode baseline
+
+The persistent runtime now derives active episode state inside the fenced `context.reduce` worker after translation fanout is terminal. The derivation uses only bounded transient source records and is deliberately fail-soft: missing plaintext, expired transient source or heuristic failure does not block causal prefix advancement and does not fabricate episode state.
+
+Durable `active_episode_state` is a projection, not a transcript. V1 persists only:
+
+```text
+episode_id
+episode_version
+continuity_confidence
+continuity_strategy = heuristic-v1
+started_at
+last_activity_at
+source_language_tag
+source_revision_refs <= 8
+```
+
+It persists no message body, topic keywords or free-form summary. Continuity currently combines explainable lexical overlap, time continuity and source-language continuity. Crossing midnight alone does not create a new episode. When evidence is ambiguous, `UNCERTAIN` leaves the existing episode projection unchanged rather than forcing a boundary.
+
+At translation planning time, active-episode source refs already represented by the bounded recent-message T1 window are excluded. Older episode refs are materialised only if their raw source is still present in the transient source store; expired/missing source is omitted, never reconstructed. This lets T2 contribute coherent context beyond T1 without turning EpisodeState into durable plaintext memory.
 
 ## 8. Continuity features
 
