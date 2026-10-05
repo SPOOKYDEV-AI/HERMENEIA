@@ -86,7 +86,10 @@ export class PostgresContextClaimRepository {
               status
          FROM context_claims
         WHERE tenant_id = $1
-          AND claim_id = ANY($2::uuid[])
+          AND claim_id IN (
+            SELECT value::uuid
+              FROM jsonb_array_elements_text($2::jsonb)
+          )
           AND status = 'ACTIVE'
           AND sensitivity_class = 'NORMAL'
           AND (
@@ -124,7 +127,7 @@ export class PostgresContextClaimRepository {
         ORDER BY claim_id, claim_version DESC`,
       [
         input.tenantId,
-        claimIds,
+        JSON.stringify(claimIds),
         input.conversationId,
         input.now,
       ],
