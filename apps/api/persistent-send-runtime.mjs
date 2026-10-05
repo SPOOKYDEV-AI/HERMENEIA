@@ -17,6 +17,9 @@ import {
   PostgresContextClaimRepository,
 } from "../../.build/packages/persistence-postgres/src/context-claims.js";
 import {
+  PostgresContextCorrectionRepository,
+} from "../../.build/packages/persistence-postgres/src/context-corrections.js";
+import {
   SqlTransactionManager,
 } from "../../.build/packages/persistence/src/index.js";
 import {
@@ -49,6 +52,9 @@ import {
 import {
   createPostgresContextStateWorker,
 } from "../../.build/packages/runtime/src/persistent-context-state-worker.js";
+import {
+  createPostgresContextCorrectionService,
+} from "../../.build/packages/runtime/src/persistent-context-correction.js";
 import {
   InMemoryTransientSourceStore,
 } from "../../.build/packages/transient-source/src/index.js";
@@ -303,6 +309,12 @@ export async function createPersistentSendRuntime({
       );
     const contextClaimRepository =
       new PostgresContextClaimRepository(transactions);
+    const contextCorrectionRepository =
+      new PostgresContextCorrectionRepository(
+        transactions,
+      );
+    const contextStateStrategyVersion =
+      "context-state-v1";
 
     // ConversationState registration is part of durable messaging semantics,
     // not translation-provider availability. In external-worker mode the API
@@ -311,6 +323,7 @@ export async function createPersistentSendRuntime({
     const contextOperationRecorder =
       createPostgresContextOperationRecorder({
         repository: contextStateRepository,
+        strategyVersion: contextStateStrategyVersion,
       });
 
     const transientSources = new InMemoryTransientSourceStore({
@@ -360,6 +373,18 @@ export async function createPersistentSendRuntime({
         outboxRepository,
         outboxService,
         clock,
+      });
+
+    const correctionService =
+      createPostgresContextCorrectionService({
+        messagingRepository: repository,
+        correctionRepository:
+          contextCorrectionRepository,
+        stateRepository: contextStateRepository,
+        ids,
+        clock,
+        strategyVersion:
+          contextStateStrategyVersion,
       });
 
     const translationService =
@@ -521,6 +546,7 @@ export async function createPersistentSendRuntime({
       translationService,
       translationRecoveryService,
       translationWorker,
+      correctionService,
       contextStateWorker,
       contextRuntime,
       readinessService,
@@ -532,6 +558,7 @@ export async function createPersistentSendRuntime({
       contextPlanningRepository,
       contextStateRepository,
       contextClaimRepository,
+      contextCorrectionRepository,
       sessionRepository,
       transientSources,
       sqlPool,
