@@ -10,6 +10,7 @@ import {
   linkConfirmedCorrectionClaim,
   replaceConfirmedCorrectionClaim,
   rebaseContextStateAuthority,
+  unlinkConfirmedCorrectionClaim,
   decideDurableCorrection,
   processingGapRefs,
   registerContextOperation,
@@ -576,4 +577,40 @@ test("correction replacement removes superseded refs and appends the replacement
     next.stateVersion,
     state.stateVersion + 1,
   );
+});
+
+
+test("correction unlink removes a revoked ref and is idempotent when already absent", () => {
+  let state = initial();
+  state.correctionClaimRefs = [
+    "claim-keep",
+    "claim-revoke",
+  ];
+
+  const revoked = unlinkConfirmedCorrectionClaim(
+    state,
+    {
+      claimId: "claim-revoke",
+      now: "2026-10-04T18:31:00.000Z",
+    },
+  );
+
+  assert.deepEqual(
+    revoked.correctionClaimRefs,
+    ["claim-keep"],
+  );
+  assert.equal(
+    revoked.stateVersion,
+    state.stateVersion + 1,
+  );
+
+  const replay = unlinkConfirmedCorrectionClaim(
+    revoked,
+    {
+      claimId: "claim-revoke",
+      now: "2026-10-04T18:32:00.000Z",
+    },
+  );
+  assert.deepEqual(replay, revoked);
+  assert.notEqual(replay, revoked);
 });
