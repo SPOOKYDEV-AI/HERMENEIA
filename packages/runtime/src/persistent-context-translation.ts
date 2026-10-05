@@ -4,6 +4,9 @@ import type {
   PostgresContextPlanningRepository,
   PostgresContextSnapshotRepository,
 } from "../../persistence-postgres/src/context.js";
+import type {
+  PostgresConversationContextStateRepository,
+} from "../../persistence-postgres/src/context-state.js";
 import {
   ContextEngine,
 } from "../../context-engine/src/index.js";
@@ -41,6 +44,7 @@ export interface PersistentContextTranslationDependencies {
   ids: PersistentContextTranslationIds;
   clock: PersistentContextTranslationClock;
   stateSource?: ConversationContextStateSource;
+  stateRepository?: PostgresConversationContextStateRepository;
   plannerConfig?: Omit<
     Partial<TranslationContextPlannerConfig>,
     "budget"
@@ -73,6 +77,22 @@ export function createPostgresTranslationContextRuntime(
       payloadTtlSeconds: deps.payloadTtlSeconds,
     });
 
+  const stateSource: ConversationContextStateSource | undefined =
+    deps.stateSource ??
+    (deps.stateRepository
+      ? {
+          load(input) {
+            return deps.stateRepository!.withTransaction(
+              (tx) =>
+                deps.stateRepository!.loadEngineState(tx, {
+                  tenantId: input.tenantId,
+                  conversationId: input.conversationId,
+                }),
+            );
+          },
+        }
+      : undefined);
+
   const planner = new TranslationContextPlanner({
     metadata: {
       load(input, recentMessageLimit) {
@@ -93,7 +113,7 @@ export function createPostgresTranslationContextRuntime(
       },
     },
     transientSources: deps.transientSources,
-    stateSource: deps.stateSource,
+    stateSource,
     config: deps.plannerConfig,
   });
 
