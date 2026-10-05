@@ -42,6 +42,8 @@ const SOURCE_TEXT = "Bonjour monde 👋";
 const T2_SOURCE_TEXT = "On fait le CR demain.";
 const POST_REVOKE_SOURCE_TEXT =
   "On fait le CR vendredi.";
+const TENANT_POLICY_SOURCE_TEXT =
+  "Le SLA est important.";
 const FEEDBACK_NOTE =
   "private feedback detail that must not persist";
 const TRANSLATED_TEXT = "Hola mundo 👋";
@@ -67,6 +69,9 @@ const ids = {
   reviewedClaimRevokeCommandId: randomUUID(),
   postRevokeCommandId: randomUUID(),
   postRevokeClientMessageId: randomUUID(),
+  tenantPolicyClaimId: randomUUID(),
+  tenantPolicyCommandId: randomUUID(),
+  tenantPolicyClientMessageId: randomUUID(),
   staleContextCommandId: randomUUID(),
   staleContextClientMessageId: randomUUID(),
 };
@@ -133,6 +138,39 @@ const translationProvider = {
               "CORRECTION_MEMORY",
         ),
         false,
+      );
+    } else if (providerCalls === 4) {
+      assert.equal(
+        input.source.text,
+        TENANT_POLICY_SOURCE_TEXT,
+      );
+      assert.equal(
+        input.contextItems.some(
+          (item) =>
+            item.candidateType ===
+              "CORRECTION_MEMORY",
+        ),
+        false,
+      );
+      const policyItem = input.contextItems.find(
+        (item) =>
+          item.candidateType ===
+            "APPROVED_POLICY",
+      );
+      assert.ok(policyItem);
+      assert.equal(
+        policyItem.selectionReason,
+        "CORRECTION_OR_POLICY",
+      );
+      assert.deepEqual(
+        JSON.parse(policyItem.content),
+        {
+          kind: "trusted_term_meaning",
+          surface_form: "SLA",
+          meaning: "service level agreement",
+          source_language_tag: "fr-FR",
+          target_language_tag: TARGET_LANGUAGE,
+        },
       );
     } else {
       assert.fail(
@@ -1550,6 +1588,157 @@ try {
   );
   assert.equal(providerCalls, 3);
 
+  runtimeNow = "2026-10-05T08:00:04.000Z";
+
+  await withConnection(async (db) => {
+    const inserted = await db.query(
+      `INSERT INTO context_claims(
+         tenant_id,
+         claim_id,
+         claim_version,
+         conversation_id,
+         message_id,
+         subject_user_id,
+         claim_type,
+         proposition_ref,
+         modality,
+         authority_class,
+         retention_class,
+         sensitivity_class,
+         confidence,
+         scope_kind,
+         scope_conversation_id,
+         trigger_kind,
+         valid_from,
+         valid_until,
+         status,
+         created_at
+       ) VALUES (
+         $1,$2,1,NULL,NULL,NULL,
+         'TERMINOLOGY',$3::jsonb,
+         'ASSERTION','APPROVED_GLOSSARY',
+         'POLICY_REFERENCE','NORMAL',1,
+         'TENANT',NULL,
+         'APPROVED_GLOSSARY_CHANGE',
+         $4,NULL,'ACTIVE',$4
+       )`,
+      [
+        ids.tenantId,
+        ids.tenantPolicyClaimId,
+        JSON.stringify({
+          schema_version: 1,
+          kind: "TERM_MEANING",
+          surface_form: "SLA",
+          meaning: "service level agreement",
+          source_language_tag: "fr-FR",
+          target_language_tag: TARGET_LANGUAGE,
+        }),
+        runtimeNow,
+      ],
+    );
+    assert.equal(inserted.rowCount, 1);
+
+    const state = await db.query(
+      `SELECT terminology_claim_refs,
+              lexical_claim_refs,
+              correction_claim_refs
+         FROM conversation_context_states
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(state.rowCount, 1);
+    assert.equal(
+      state.rows[0].terminology_claim_refs.includes(
+        ids.tenantPolicyClaimId,
+      ),
+      false,
+    );
+    assert.equal(
+      state.rows[0].lexical_claim_refs.includes(
+        ids.tenantPolicyClaimId,
+      ),
+      false,
+    );
+    assert.equal(
+      state.rows[0].correction_claim_refs.includes(
+        ids.tenantPolicyClaimId,
+      ),
+      false,
+    );
+  });
+
+  runtimeNow = "2026-10-05T08:00:05.000Z";
+
+  const tenantPolicyAccepted =
+    await runtime.sendService.sendMessage(
+      sender,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.tenantPolicyCommandId,
+        client_message_id:
+          ids.tenantPolicyClientMessageId,
+        conversation_id: ids.conversationId,
+        source: {
+          text: TENANT_POLICY_SOURCE_TEXT,
+          language_hint: "fr-FR",
+        },
+        client_authored_at: NOW,
+      },
+    );
+
+  assert.equal(
+    tenantPolicyAccepted.status,
+    "ACCEPTED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runFanoutOnce(),
+    "FANOUT_DONE",
+  );
+
+  await withConnection(async (db) => {
+    const snapshot = await db.query(
+      `SELECT strategy,
+              selected_claim_refs,
+              selected_candidate_ids
+         FROM context_snapshots
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND recipient_user_id = $3`,
+      [
+        ids.tenantId,
+        tenantPolicyAccepted.message_id,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(snapshot.rowCount, 1);
+    assert.equal(
+      snapshot.rows[0].strategy,
+      "T2_ADAPTIVE_V1",
+    );
+    assert.ok(
+      snapshot.rows[0].selected_claim_refs.includes(
+        `${ids.tenantPolicyClaimId}:1`,
+      ),
+    );
+    assert.ok(
+      snapshot.rows[0].selected_candidate_ids.includes(
+        `claim:${ids.tenantPolicyClaimId}:1`,
+      ),
+    );
+  });
+
+  assert.equal(
+    await runtime.contextStateWorker.runOnce(),
+    "REDUCED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runExecuteOnce(),
+    "EXECUTION_DONE",
+  );
+  assert.equal(providerCalls, 4);
+
   const staleContextAccepted =
     await runtime.sendService.sendMessage(
       sender,
@@ -1622,7 +1811,7 @@ try {
     await runtime.translationWorker.runExecuteOnce(),
     "SUPERSEDED",
   );
-  assert.equal(providerCalls, 3);
+  assert.equal(providerCalls, 4);
 
   await withConnection(async (db) => {
     const execution = await db.query(
@@ -1661,6 +1850,7 @@ try {
     "reviewed-claim=revoked " +
     "revocation=claim-revoked " +
     "post-revoke=correction-absent " +
+    "tenant-policy=unreferenced-overlay " +
     "t2=confirmed-correction-context " +
     "hpke=original+translation sync=2 ack=purged " +
     "erasure_epoch=stale-context-superseded\n",
