@@ -5,7 +5,6 @@ import {
 import type { UUID } from "../../domain/src/index.js";
 import type {
   ContextCandidate,
-  ConversationContextState,
   CorrectionTrigger,
 } from "../../context-engine/src/index.js";
 
@@ -50,7 +49,8 @@ export interface MaterializeReferencedClaimsInput {
   currentSourceAuthorUserId: UUID;
   currentSourceLanguageTag: string | null;
   targetLanguageTag: string;
-  state: ConversationContextState;
+  causalThroughOperationSequence: number;
+  erasureEpoch: number;
   now: string;
 }
 
@@ -77,6 +77,25 @@ export function materializeReferencedClaimCandidates(
 ): ContextCandidate[] {
   if (!Number.isFinite(Date.parse(input.now))) {
     throw new TypeError("now must be a valid timestamp");
+  }
+
+  if (
+    !Number.isInteger(
+      input.causalThroughOperationSequence,
+    ) ||
+    input.causalThroughOperationSequence < 0
+  ) {
+    throw new TypeError(
+      "causalThroughOperationSequence must be a non-negative integer",
+    );
+  }
+  if (
+    !Number.isInteger(input.erasureEpoch) ||
+    input.erasureEpoch < 0
+  ) {
+    throw new TypeError(
+      "erasureEpoch must be a non-negative integer",
+    );
   }
 
   const referenced = new Set(input.referencedClaimIds);
@@ -157,7 +176,7 @@ export function materializeReferencedClaimCandidates(
           : "APPROVED_POLICY",
       content: renderProposition(proposition),
       causalThroughOperationSequence:
-        input.state.processedPrefixOperationSequence,
+        input.causalThroughOperationSequence,
       sourceRevisionRefs: [],
       claimRefs:
         arbitrated.supportingClaimRefs,
@@ -171,7 +190,7 @@ export function materializeReferencedClaimCandidates(
         claim.authorityClass === "CONFIRMED_CORRECTION"
           ? "CORRECTION"
           : "POLICY",
-      erasureEpoch: input.state.erasureEpoch,
+      erasureEpoch: input.erasureEpoch,
       validUntil: arbitrated.validUntil,
       correctionTrigger,
     });
