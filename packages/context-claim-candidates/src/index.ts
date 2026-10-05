@@ -44,6 +44,7 @@ export interface MaterializeReferencedClaimsInput {
   referencedClaimIds: UUID[];
   conversationId: UUID;
   currentSourceAuthorUserId: UUID;
+  currentSourceLanguageTag: string | null;
   targetLanguageTag: string;
   state: ConversationContextState;
   now: string;
@@ -76,7 +77,7 @@ export function materializeReferencedClaimCandidates(
 
   const referenced = new Set(input.referencedClaimIds);
   const seen = new Set<string>();
-  const candidates: ContextCandidate[] = [];
+  const prepared: PreparedClaim[] = [];
 
   for (const claim of input.claims) {
     if (!referenced.has(claim.claimId)) continue;
@@ -86,6 +87,15 @@ export function materializeReferencedClaimCandidates(
       claim.propositionRef,
     );
     if (!proposition) continue;
+
+    if (
+      !matchesSourceLanguage(
+        proposition.sourceLanguageTag,
+        input.currentSourceLanguageTag,
+      )
+    ) {
+      continue;
+    }
 
     if (
       proposition.targetLanguageTag &&
@@ -111,37 +121,142 @@ export function materializeReferencedClaimCandidates(
       continue;
     }
 
-    candidates.push({
+    prepared.push({
+      claim,
+      proposition,
       candidateId,
-      candidateType:
-        claim.authorityClass === "CONFIRMED_CORRECTION"
-          ? "CORRECTION_MEMORY"
-          : "APPROVED_POLICY",
-      content: renderProposition(proposition),
-      causalThroughOperationSequence:
-        input.state.processedPrefixOperationSequence,
-      sourceRevisionRefs: [],
-      claimRefs: [
-        `${claim.claimId}:${claim.claimVersion}`,
-      ],
-      semanticScore: 1,
-      temporalScore: 1,
-      confidence: claim.confidence ?? 1,
-      importance: 1,
-      explicitReference: false,
-      activeEpisode: false,
-      privacyScope:
-        claim.authorityClass === "CONFIRMED_CORRECTION"
-          ? "CORRECTION"
-          : "POLICY",
-      erasureEpoch: input.state.erasureEpoch,
-      validUntil: claim.validUntil,
       correctionTrigger,
     });
   }
 
+  const bySemanticKey = new Map<string, PreparedClaim[]>();
+  for (const item of prepared) {
+    const key = semanticApplicabilityKey(item.proposition);
+    const bucket = bySemanticKey.get(key);
+    if (bucket) {
+      bucket.push(item);
+    } else {
+      bySemanticKey.set(key, [item]);
+    }
+  }
+
+  const candidates: ContextCandidate[] = [];
+  for (const key of [...bySemanticKey.keys()].sort()) {
+    const group = bySemanticKey.get(key)!;
+    const values = new Set(
+      group.map((item) =>
+        semanticValueKey(item.proposition),
+      ),
+    );
+
+    // V1 has no implicit authority ladder between an approved policy/glossary
+    // and an otherwise admissible correction. If two active claims that both
+    // apply to the current message disagree on the same semantic key, exclude
+    // that key entirely rather than asking the model to resolve authority.
+    if (values.size !== 1) continue;
+
+    const ordered = [...group].sort((left, right) =>
+      left.candidateId.localeCompare(right.candidateId),
+    );
+    const representative = ordered[0];
+    const claimRefs = ordered
+      .map(
+        (item) =>
+          `${item.claim.claimId}:${item.claim.claimVersion}`,
+      )
+      .sort();
+
+    candidates.push(
+      toContextCandidate(
+        representative,
+        claimRefs,
+        input.state,
+      ),
+    );
+  }
+
   return candidates.sort((left, right) =>
     left.candidateId.localeCompare(right.candidateId),
+  );
+}
+
+interface PreparedClaim {
+  claim: CandidateClaimRecord;
+  proposition: SupportedProposition;
+  candidateId: string;
+  correctionTrigger: CorrectionTrigger | null;
+}
+
+function toContextCandidate(
+  item: PreparedClaim,
+  claimRefs: string[],
+  state: ConversationContextState,
+): ContextCandidate {
+  const claim = item.claim;
+  return {
+    candidateId: item.candidateId,
+    candidateType:
+      claim.authorityClass === "CONFIRMED_CORRECTION"
+        ? "CORRECTION_MEMORY"
+        : "APPROVED_POLICY",
+    content: renderProposition(item.proposition),
+    causalThroughOperationSequence:
+      state.processedPrefixOperationSequence,
+    sourceRevisionRefs: [],
+    claimRefs,
+    semanticScore: 1,
+    temporalScore: 1,
+    confidence: claim.confidence ?? 1,
+    importance: 1,
+    explicitReference: false,
+    activeEpisode: false,
+    privacyScope:
+      claim.authorityClass === "CONFIRMED_CORRECTION"
+        ? "CORRECTION"
+        : "POLICY",
+    erasureEpoch: state.erasureEpoch,
+    validUntil: claim.validUntil,
+    correctionTrigger: item.correctionTrigger,
+  };
+}
+
+function semanticApplicabilityKey(
+  proposition: SupportedProposition,
+): string {
+  return proposition.kind === "TERM_MEANING"
+    ? JSON.stringify([
+        proposition.kind,
+        proposition.surfaceForm,
+      ])
+    : JSON.stringify([
+        proposition.kind,
+        proposition.sourceForm,
+      ]);
+}
+
+function semanticValueKey(
+  proposition: SupportedProposition,
+): string {
+  return proposition.kind === "TERM_MEANING"
+    ? JSON.stringify([
+        proposition.kind,
+        proposition.meaning,
+      ])
+    : JSON.stringify([
+        proposition.kind,
+        proposition.targetForm,
+      ]);
+}
+
+function matchesSourceLanguage(
+  claimLanguageTag: string | null,
+  currentSourceLanguageTag: string | null,
+): boolean {
+  if (!claimLanguageTag) return true;
+  if (!currentSourceLanguageTag) return false;
+  return (
+    normaliseLanguageTag(claimLanguageTag) ===
+    normaliseLanguageTag(currentSourceLanguageTag)
   );
 }
 
