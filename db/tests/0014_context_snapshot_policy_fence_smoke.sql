@@ -1,6 +1,6 @@
 BEGIN;
 
-DO $
+DO $policy_default$
 DECLARE
   sentinel_default text;
 BEGIN
@@ -17,9 +17,9 @@ BEGIN
       'context_snapshots.policy_version must keep fail-closed default 0';
   END IF;
 END
-$;
+$policy_default$;
 
-DO $$
+DO $policy_column$
 BEGIN
   IF NOT EXISTS (
     SELECT 1
@@ -33,6 +33,6 @@ BEGIN
       'context_snapshots.policy_version must exist and be NOT NULL';
   END IF;
 END
-$$;
+$policy_column$;
 
 ROLLBACK;
