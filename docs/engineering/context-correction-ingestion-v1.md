@@ -166,6 +166,50 @@ If ConversationState is absent, revocation does not fabricate one merely to remo
 
 The real PostgreSQL E2E then sends another message from the same speaker and proves the resulting provider request contains no `CORRECTION_MEMORY`.
 
+## Pending repair review
+
+The persistent runtime implements:
+
+```text
+POST /v1/conversations/{conversation_id}/repairs/{repair_event_id}/review
+```
+
+with decisions `APPROVE` or `REJECT`.
+
+Review requires conversation `MODERATOR` authority or tenant `ADMIN/OWNER` authority. The pending repair row is locked `FOR UPDATE` and must still be `NEEDS_CONFIRMATION`.
+
+### Reject
+
+`REJECT` may close any reviewable pending repair, including a vague translation-feedback signal. It creates a reviewer audit event and changes the original repair to `REJECTED`, but creates no ContextClaim.
+
+### Approve
+
+`APPROVE` is intentionally narrower. The pending repair must originate from a durable `context.correction` command receipt whose fingerprint proves:
+
+- protocol/fingerprint version 1;
+- the same conversation;
+- `requested_scope = CONVERSATION`;
+- correction kind `MEANING` or `TERMINOLOGY`;
+- a supported structured `TERM_MEANING` or `PREFERRED_RENDERING` proposition.
+
+The service reconstructs the original command from that fingerprint, runs the normal correction normaliser again, and canonical-compares the resulting proposition with the pending repair's durable structured payload. Any mismatch fails closed.
+
+The reviewer does not submit a replacement meaning during approval. This prevents review from becoming an unaudited semantic-edit endpoint.
+
+Approval creates a **second** `EXPLICIT_CORRECTION` repair event owned by the reviewer. Its structured payload records the source pending repair and original proposer. The approved ContextClaim is a generic conversation correction (`subject_user_id = NULL`) and its `CORRECTED_BY` provenance points to this reviewer event.
+
+The original pending repair moves to `APPLIED`. Thus the audit chain separates:
+
+```text
+proposal actor
+  -> pending repair
+review authority
+  -> explicit approval event
+  -> generic confirmed correction claim
+```
+
+A `translation.feedback` receipt cannot be approved into semantic memory because it has no authorised structured correction proposal. `TONE` and `TENANT` correction proposals also remain non-approvable through this V1 conversation review path.
+
 ## Qualification
 
 The persistent qualification suite exercises:
@@ -185,9 +229,8 @@ The persistent qualification suite exercises:
 
 Still separate work:
 
-- moderation/approval endpoint for `NEEDS_CONFIRMATION` corrections;
 - tenant-wide glossary/policy distribution;
 - typed TONE/style memory;
-- moderation flow that converts `NEEDS_CONFIRMATION` feedback into an explicit structured correction;
+- an explicit workflow for supplying a structured correction in response to vague feedback rather than approving the feedback itself;
 - dependency-aware invalidation beyond explicit correction supersession/revocation;
 - semantic episode derivation and recovery checkpoints.
