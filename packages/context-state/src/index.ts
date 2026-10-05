@@ -193,6 +193,32 @@ export function cloneValidatedContextState(
   return structuredClone(state);
 }
 
+export function unlinkConfirmedCorrectionClaim(
+  state: ConversationContextState,
+  input: {
+    claimId: UUID;
+    now: string;
+  },
+): ConversationContextState {
+  validateState(state);
+  requireOpaqueIdentifier(input.claimId, "claimId");
+  requireTimestamp(input.now, "now");
+
+  if (!state.correctionClaimRefs.includes(input.claimId)) {
+    return structuredClone(state);
+  }
+
+  const next = structuredClone(state);
+  next.correctionClaimRefs =
+    next.correctionClaimRefs.filter(
+      (ref) => ref !== input.claimId,
+    );
+  next.stateVersion += 1;
+  next.updatedAt = input.now;
+  validateState(next);
+  return next;
+}
+
 export function replaceConfirmedCorrectionClaim(
   state: ConversationContextState,
   input: {
