@@ -191,12 +191,18 @@ test("worker runner stop waits for an in-flight cycle before resolving", async (
   assert.equal(runner.running, false);
 });
 
-test("worker runner config supports embedded or external mode only", () => {
+test("worker runner config rejects cross-process mode while source is process-local", () => {
   assert.equal(
-    translationWorkerRunnerConfigFromEnv({
-      TRANSLATION_WORKER_MODE: "external",
-    }).mode,
-    "external",
+    translationWorkerRunnerConfigFromEnv({}).mode,
+    "embedded",
+  );
+
+  assert.throws(
+    () =>
+      translationWorkerRunnerConfigFromEnv({
+        TRANSLATION_WORKER_MODE: "external",
+      }),
+    /external is not supported.*process-local transient state/,
   );
 
   assert.throws(
@@ -204,7 +210,7 @@ test("worker runner config supports embedded or external mode only", () => {
       translationWorkerRunnerConfigFromEnv({
         TRANSLATION_WORKER_MODE: "sometimes",
       }),
-    /must be embedded or external/,
+    /must be embedded/,
   );
 });
 
