@@ -50,6 +50,8 @@ test("PostgreSQL claim loader enforces referenced IDs and admissibility in SQL",
         claim_version: 2,
         conversation_id:
           "22222222-2222-4222-8222-222222222222",
+        subject_user_id:
+          "44444444-4444-4444-8444-444444444444",
         proposition_ref: {
           schema_version: 1,
           kind: "TERM_MEANING",
@@ -96,6 +98,10 @@ test("PostgreSQL claim loader enforces referenced IDs and admissibility in SQL",
   assert.equal(claims.length, 1);
   assert.equal(claims[0].claimVersion, 2);
   assert.equal(claims[0].confidence, 1);
+  assert.equal(
+    claims[0].subjectUserId,
+    "44444444-4444-4444-8444-444444444444",
+  );
   assert.deepEqual(claims[0].propositionRef, {
     schema_version: 1,
     kind: "TERM_MEANING",
@@ -108,6 +114,7 @@ test("PostgreSQL claim loader enforces referenced IDs and admissibility in SQL",
     query.text,
     /jsonb_array_elements_text\(\$2::jsonb\)/,
   );
+  assert.match(query.text, /subject_user_id/);
   assert.match(query.text, /status = 'ACTIVE'/);
   assert.match(query.text, /sensitivity_class = 'NORMAL'/);
   assert.match(query.text, /valid_from IS NULL OR valid_from < \$4/);
