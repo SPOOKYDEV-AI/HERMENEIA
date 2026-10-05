@@ -65,6 +65,7 @@ function fixture({
     messageId: MESSAGE,
     sourceRevision: 1,
   },
+  nextOperationSequence = 1,
 } = {}) {
   const receipts = new Map();
   const events = [];
@@ -122,6 +123,7 @@ function fixture({
             membershipEpoch: 0,
             erasureEpoch: 0,
             policyVersion: 1,
+            nextOperationSequence,
           }
         : undefined;
     },
@@ -450,8 +452,11 @@ test("translation and message targets must resolve to the same source revision",
   );
 });
 
-test("authorised correction can create missing ConversationState without losing authority epochs", async () => {
-  const f = fixture({ state: null });
+test("authorised correction creates missing ConversationState at the existing causal floor", async () => {
+  const f = fixture({
+    state: null,
+    nextOperationSequence: 8,
+  });
 
   const result = await f.service.createCorrection(
     actor,
@@ -462,8 +467,36 @@ test("authorised correction can create missing ConversationState without losing 
   assert.equal(f.state().membershipEpoch, 0);
   assert.equal(f.state().erasureEpoch, 0);
   assert.equal(f.state().policyVersion, 1);
+  assert.equal(
+    f.state().processedPrefixOpSeq,
+    7,
+  );
+  assert.equal(
+    f.state().causalFloorOpSeq,
+    7,
+  );
+  assert.equal(
+    f.state().recoveryMode,
+    "DEGRADED_BASELINE",
+  );
   assert.deepEqual(
     f.state().correctionClaimRefs,
     [result.claim_id],
+  );
+});
+
+test("message-scoped correction requires a concrete target", async () => {
+  const f = fixture();
+
+  await assert.rejects(
+    () =>
+      f.service.createCorrection(
+        actor,
+        command({
+          requested_scope: "MESSAGE",
+        }),
+      ),
+    (error) =>
+      error?.code === "INVALID_COMMAND",
   );
 });
