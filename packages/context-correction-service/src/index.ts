@@ -1,199 +1,42 @@
-import type {
-  ActorContext,
-  UUID,
+import {
+  DomainError,
+  type ActorContext,
+  type UUID,
 } from "../../domain/src/index.js";
-import { DomainError } from "../../domain/src/index.js";
 import type {
   CorrectionCommand,
   CorrectionResult,
-  CorrectionScope,
 } from "../../protocol/src/index.js";
-import type {
-  PersistentCommandClaimResult,
-} from "../../messaging-service/src/index.js";
-import {
-  parseSupportedClaimProposition,
-  storedClaimProposition,
-} from "../../context-claim-candidates/src/index.js";
 import {
   createDegradedContextStateFromFloor,
   createInitialContextState,
   linkConfirmedCorrectionClaim,
   rebaseContextStateAuthority,
-  type ConversationContextState,
 } from "../../context-state/src/index.js";
+import type {
+  CorrectionAuthority,
+  ContextCorrectionDependencies,
+} from "./contracts.js";
+import {
+  correctionRepairKind,
+  decideCorrectionPromotion,
+  normaliseCorrection,
+  validateCorrectionCommand,
+} from "./policy.js";
+import {
+  replayCorrectionCommand,
+} from "./replay.js";
 
-export interface CorrectionAuthority {
-  tenantRole: "MEMBER" | "ADMIN" | "OWNER";
-  conversationRole: "MEMBER" | "MODERATOR";
-  membershipEpoch: number;
-  erasureEpoch: number;
-  policyVersion: number;
-  nextOperationSequence: number;
-}
-
-export interface ContextCorrectionTransactions<Tx> {
-  withTransaction<T>(
-    work: (tx: Tx) => Promise<T>,
-  ): Promise<T>;
-}
-
-export interface ContextCorrectionCommandStore<Tx> {
-  claimCommand(
-    tx: Tx,
-    input: {
-      actor: ActorContext;
-      commandId: UUID;
-      commandType: string;
-      commandFingerprint: string;
-      now: string;
-    },
-  ): Promise<PersistentCommandClaimResult>;
-
-  markCommandSucceeded(
-    tx: Tx,
-    input: {
-      tenantId: UUID;
-      commandId: UUID;
-      actorUserId: UUID;
-      actorDeviceId: UUID;
-      commandType: string;
-      commandFingerprint: string;
-      result: Record<string, unknown>;
-      now: string;
-    },
-  ): Promise<void>;
-}
-
-export interface ContextCorrectionStore<Tx> {
-  loadAuthority(
-    tx: Tx,
-    input: {
-      actor: ActorContext;
-      conversationId: UUID;
-    },
-  ): Promise<CorrectionAuthority | undefined>;
-
-  messageRevisionExists(
-    tx: Tx,
-    input: {
-      tenantId: UUID;
-      conversationId: UUID;
-      messageId: UUID;
-      sourceRevision: number;
-    },
-  ): Promise<boolean>;
-
-  loadVisibleTranslationTarget(
-    tx: Tx,
-    input: {
-      actor: ActorContext;
-      conversationId: UUID;
-      translationId: UUID;
-    },
-  ): Promise<{
-    messageId: UUID;
-    sourceRevision: number;
-  } | undefined>;
-
-  insertRepairEvent(
-    tx: Tx,
-    input: {
-      tenantId: UUID;
-      repairEventId: UUID;
-      conversationId: UUID;
-      actorUserId: UUID;
-      targetTranslationId: UUID | null;
-      targetMessageId: UUID | null;
-      targetSourceRevision: number | null;
-      kind:
-        | "MEANING_CORRECTION"
-        | "TONE_CORRECTION"
-        | "TERMINOLOGY_CORRECTION";
-      status:
-        | "RECORDED"
-        | "NEEDS_CONFIRMATION"
-        | "APPLIED";
-      structuredPayload: Record<string, unknown>;
-      commandId: UUID;
-      createdAt: string;
-    },
-  ): Promise<void>;
-
-  insertConfirmedClaim(
-    tx: Tx,
-    input: {
-      tenantId: UUID;
-      claimId: UUID;
-      conversationId: UUID;
-      messageId: UUID | null;
-      claimType: "MEANING" | "TERMINOLOGY";
-      propositionRef: Record<string, unknown>;
-      scopeKind: "CONVERSATION" | "TENANT";
-      scopeConversationId: UUID | null;
-      createdAt: string;
-    },
-  ): Promise<void>;
-
-  insertRepairProvenance(
-    tx: Tx,
-    input: {
-      tenantId: UUID;
-      provenanceEdgeId: UUID;
-      claimId: UUID;
-      repairEventId: UUID;
-      strategyVersion: string;
-      createdAt: string;
-    },
-  ): Promise<void>;
-}
-
-export interface ContextCorrectionStateStore<Tx> {
-  loadState(
-    tx: Tx,
-    input: {
-      tenantId: UUID;
-      conversationId: UUID;
-      forUpdate?: boolean;
-    },
-  ): Promise<ConversationContextState | undefined>;
-
-  insertState(
-    tx: Tx,
-    state: ConversationContextState,
-  ): Promise<boolean>;
-
-  updateState(
-    tx: Tx,
-    input: {
-      expectedStateVersion: number;
-      state: ConversationContextState;
-    },
-  ): Promise<boolean>;
-}
-
-export interface ContextCorrectionIds {
-  next(prefix: string): UUID;
-}
-
-export interface ContextCorrectionClock {
-  now(): string;
-}
-
-export interface ContextCorrectionDependencies<Tx> {
-  transactions: ContextCorrectionTransactions<Tx>;
-  commands: ContextCorrectionCommandStore<Tx>;
-  corrections: ContextCorrectionStore<Tx>;
-  state: ContextCorrectionStateStore<Tx>;
-  ids: ContextCorrectionIds;
-  clock: ContextCorrectionClock;
-  strategyVersion?: string;
-}
-
-interface NormalisedCorrection {
-  payload: Record<string, unknown>;
-  canBecomeClaim: boolean;
-}
+export type {
+  CorrectionAuthority,
+  ContextCorrectionClock,
+  ContextCorrectionCommandStore,
+  ContextCorrectionDependencies,
+  ContextCorrectionIds,
+  ContextCorrectionStateStore,
+  ContextCorrectionStore,
+  ContextCorrectionTransactions,
+} from "./contracts.js";
 
 export class ContextCorrectionService<Tx> {
   private readonly strategyVersion: string;
@@ -214,7 +57,7 @@ export class ContextCorrectionService<Tx> {
     actor: ActorContext,
     command: CorrectionCommand,
   ): Promise<CorrectionResult> {
-    validateCommand(command);
+    validateCorrectionCommand(command);
     const normalised = normaliseCorrection(command);
     const now = this.deps.clock.now();
     if (!Number.isFinite(Date.parse(now))) {
@@ -250,7 +93,7 @@ export class ContextCorrectionService<Tx> {
           });
 
         if (!commandClaim.claimed) {
-          return replayExisting(
+          return replayCorrectionCommand(
             commandClaim.existing,
             actor,
             commandFingerprint,
@@ -278,12 +121,12 @@ export class ContextCorrectionService<Tx> {
           actor,
           command,
         );
-
-        const promotion = promotionDecision(
-          command,
-          authority,
-          normalised.canBecomeClaim,
-        );
+        const promotion =
+          decideCorrectionPromotion(
+            command,
+            authority,
+            normalised.canBecomeClaim,
+          );
 
         const repairEventId =
           this.deps.ids.next("repair");
@@ -304,7 +147,9 @@ export class ContextCorrectionService<Tx> {
             targetMessageId: target.messageId,
             targetSourceRevision:
               target.sourceRevision,
-            kind: repairKind(command.kind),
+            kind: correctionRepairKind(
+              command.kind,
+            ),
             status: promotion.status,
             structuredPayload:
               normalised.payload,
@@ -314,49 +159,16 @@ export class ContextCorrectionService<Tx> {
         );
 
         if (claimId) {
-          await this.deps.corrections.insertConfirmedClaim(
-            tx,
-            {
-              tenantId: actor.tenantId,
-              claimId,
-              conversationId:
-                command.conversation_id,
-              messageId: target.messageId,
-              claimType:
-                command.kind === "MEANING"
-                  ? "MEANING"
-                  : "TERMINOLOGY",
-              propositionRef:
-                normalised.payload,
-              scopeKind: promotion.scope!,
-              scopeConversationId:
-                promotion.scope === "CONVERSATION"
-                  ? command.conversation_id
-                  : null,
-              createdAt: now,
-            },
-          );
-
-          await this.deps.corrections.insertRepairProvenance(
-            tx,
-            {
-              tenantId: actor.tenantId,
-              provenanceEdgeId:
-                this.deps.ids.next("provenance"),
-              claimId,
-              repairEventId,
-              strategyVersion:
-                this.strategyVersion,
-              createdAt: now,
-            },
-          );
-
-          await this.linkClaimIntoState(
+          await this.persistPromotedClaim(
             tx,
             actor,
-            command.conversation_id,
+            command,
             authority,
+            target.messageId,
             claimId,
+            repairEventId,
+            normalised.payload,
+            promotion.scope!,
             now,
           );
         }
@@ -389,6 +201,64 @@ export class ContextCorrectionService<Tx> {
 
         return result;
       },
+    );
+  }
+
+  private async persistPromotedClaim(
+    tx: Tx,
+    actor: ActorContext,
+    command: CorrectionCommand,
+    authority: CorrectionAuthority,
+    targetMessageId: UUID | null,
+    claimId: UUID,
+    repairEventId: UUID,
+    propositionRef: Record<string, unknown>,
+    scope: "CONVERSATION" | "TENANT",
+    now: string,
+  ): Promise<void> {
+    await this.deps.corrections.insertConfirmedClaim(
+      tx,
+      {
+        tenantId: actor.tenantId,
+        claimId,
+        conversationId:
+          command.conversation_id,
+        messageId: targetMessageId,
+        claimType:
+          command.kind === "MEANING"
+            ? "MEANING"
+            : "TERMINOLOGY",
+        propositionRef,
+        scopeKind: scope,
+        scopeConversationId:
+          scope === "CONVERSATION"
+            ? command.conversation_id
+            : null,
+        createdAt: now,
+      },
+    );
+
+    await this.deps.corrections.insertRepairProvenance(
+      tx,
+      {
+        tenantId: actor.tenantId,
+        provenanceEdgeId:
+          this.deps.ids.next("provenance"),
+        claimId,
+        repairEventId,
+        strategyVersion:
+          this.strategyVersion,
+        createdAt: now,
+      },
+    );
+
+    await this.linkClaimIntoState(
+      tx,
+      actor,
+      command.conversation_id,
+      authority,
+      claimId,
+      now,
     );
   }
 
@@ -514,6 +384,7 @@ export class ContextCorrectionService<Tx> {
                 this.strategyVersion,
               now,
             });
+
       created = linkConfirmedCorrectionClaim(
         created,
         { claimId, now },
@@ -570,333 +441,4 @@ export class ContextCorrectionService<Tx> {
       );
     }
   }
-}
-
-function validateCommand(
-  command: CorrectionCommand,
-): void {
-  if (
-    command.protocol_version !== 1 ||
-    !isUuid(command.command_id) ||
-    !isUuid(command.conversation_id)
-  ) {
-    throw new DomainError(
-      "INVALID_COMMAND",
-      "Invalid correction command identity",
-    );
-  }
-
-  if (
-    !["MEANING", "TONE", "TERMINOLOGY"].includes(
-      command.kind,
-    ) ||
-    !["MESSAGE", "CONVERSATION", "TENANT"].includes(
-      command.requested_scope,
-    )
-  ) {
-    throw new DomainError(
-      "INVALID_COMMAND",
-      "Invalid correction kind or scope",
-    );
-  }
-
-  const hasMessage =
-    command.target_message_id !== undefined &&
-    command.target_message_id !== null;
-  const hasRevision =
-    command.target_source_revision !== undefined &&
-    command.target_source_revision !== null;
-
-  if (hasMessage !== hasRevision) {
-    throw new DomainError(
-      "INVALID_COMMAND",
-      "target_message_id and target_source_revision must be provided together",
-    );
-  }
-  if (
-    hasMessage &&
-    (
-      !isUuid(command.target_message_id!) ||
-      !Number.isInteger(
-        command.target_source_revision,
-      ) ||
-      Number(command.target_source_revision) < 1
-    )
-  ) {
-    throw new DomainError(
-      "INVALID_COMMAND",
-      "Invalid target message revision",
-    );
-  }
-  if (
-    command.target_translation_id !== undefined &&
-    command.target_translation_id !== null &&
-    !isUuid(command.target_translation_id)
-  ) {
-    throw new DomainError(
-      "INVALID_COMMAND",
-      "Invalid target_translation_id",
-    );
-  }
-  if (
-    command.requested_scope === "MESSAGE" &&
-    !hasMessage &&
-    !command.target_translation_id
-  ) {
-    throw new DomainError(
-      "INVALID_COMMAND",
-      "MESSAGE correction requires a message or translation target",
-    );
-  }
-
-  if (
-    !command.payload ||
-    typeof command.payload !== "object" ||
-    Array.isArray(command.payload)
-  ) {
-    throw new DomainError(
-      "INVALID_COMMAND",
-      "Correction payload must be an object",
-    );
-  }
-}
-
-function normaliseCorrection(
-  command: CorrectionCommand,
-): NormalisedCorrection {
-  if (command.kind === "TONE") {
-    const preferred =
-      command.payload.preferred_register;
-    if (
-      command.payload.schema_version !== 1 ||
-      command.payload.kind !== "TONE" ||
-      !["NEUTRAL", "FORMAL", "INFORMAL"].includes(
-        String(preferred),
-      )
-    ) {
-      throw new DomainError(
-        "INVALID_COMMAND",
-        "TONE correction requires schema_version=1, kind=TONE and a supported preferred_register",
-      );
-    }
-
-    return {
-      payload: {
-        schema_version: 1,
-        kind: "TONE",
-        preferred_register: preferred,
-      },
-      canBecomeClaim: false,
-    };
-  }
-
-  const proposition =
-    parseSupportedClaimProposition(
-      command.payload,
-    );
-  if (!proposition) {
-    throw new DomainError(
-      "INVALID_COMMAND",
-      "Correction payload is not a supported structured proposition",
-    );
-  }
-  if (
-    command.kind === "MEANING" &&
-    proposition.kind !== "TERM_MEANING"
-  ) {
-    throw new DomainError(
-      "INVALID_COMMAND",
-      "MEANING correction requires TERM_MEANING payload",
-    );
-  }
-
-  return {
-    payload:
-      storedClaimProposition(proposition),
-    canBecomeClaim: true,
-  };
-}
-
-function promotionDecision(
-  command: CorrectionCommand,
-  authority: CorrectionAuthority,
-  canBecomeClaim: boolean,
-): {
-  apply: boolean;
-  status:
-    | "RECORDED"
-    | "NEEDS_CONFIRMATION"
-    | "APPLIED";
-  scope: "CONVERSATION" | "TENANT" | null;
-} {
-  if (
-    command.requested_scope === "MESSAGE"
-  ) {
-    return {
-      apply: false,
-      status: "RECORDED",
-      scope: null,
-    };
-  }
-
-  if (!canBecomeClaim) {
-    return {
-      apply: false,
-      status: "NEEDS_CONFIRMATION",
-      scope: null,
-    };
-  }
-
-  if (
-    command.requested_scope === "TENANT"
-  ) {
-    // V1 only injects claims explicitly referenced by a conversation's
-    // ConversationState. Until tenant-wide policy/glossary distribution is
-    // implemented, claiming that a tenant correction is APPLIED would be
-    // semantically false even for an ADMIN/OWNER.
-    return {
-      apply: false,
-      status: "NEEDS_CONFIRMATION",
-      scope: null,
-    };
-  }
-
-  const elevated =
-    authority.conversationRole === "MODERATOR" ||
-    authority.tenantRole === "ADMIN" ||
-    authority.tenantRole === "OWNER";
-
-  return elevated
-    ? {
-        apply: true,
-        status: "APPLIED",
-        scope: "CONVERSATION",
-      }
-    : {
-        apply: false,
-        status: "NEEDS_CONFIRMATION",
-        scope: null,
-      };
-}
-
-function repairKind(
-  kind: CorrectionCommand["kind"],
-):
-  | "MEANING_CORRECTION"
-  | "TONE_CORRECTION"
-  | "TERMINOLOGY_CORRECTION" {
-  if (kind === "MEANING") {
-    return "MEANING_CORRECTION";
-  }
-  if (kind === "TONE") {
-    return "TONE_CORRECTION";
-  }
-  return "TERMINOLOGY_CORRECTION";
-}
-
-function replayExisting(
-  existing: {
-    actorUserId: UUID;
-    actorDeviceId: UUID;
-    commandType: string;
-    commandFingerprint: string | null;
-    status: "IN_PROGRESS" | "SUCCEEDED" | "FAILED";
-    result: Record<string, unknown>;
-  },
-  actor: ActorContext,
-  commandFingerprint: string,
-): CorrectionResult {
-  if (
-    existing.actorUserId !== actor.userId ||
-    existing.actorDeviceId !== actor.deviceId
-  ) {
-    throw new DomainError(
-      "NOT_AUTHORIZED",
-      "Command identifier is not available to actor",
-    );
-  }
-  if (
-    existing.commandType !== "context.correction" ||
-    existing.commandFingerprint !==
-      commandFingerprint
-  ) {
-    throw new DomainError(
-      "IDEMPOTENCY_CONFLICT",
-      "command_id was already used for a different operation",
-    );
-  }
-  if (existing.status !== "SUCCEEDED") {
-    throw new Error(
-      "Persistent correction command receipt is not terminal",
-    );
-  }
-
-  return correctionResultFromRecord(
-    existing.result,
-  );
-}
-
-function correctionResultFromRecord(
-  value: Record<string, unknown>,
-): CorrectionResult {
-  const status = value.status;
-  const requestedScope =
-    value.requested_scope;
-  const appliedScope = value.applied_scope;
-
-  if (
-    value.protocol_version !== 1 ||
-    !isUuid(value.repair_event_id) ||
-    !["RECORDED", "NEEDS_CONFIRMATION", "APPLIED"].includes(
-      String(status),
-    ) ||
-    !["MESSAGE", "CONVERSATION", "TENANT"].includes(
-      String(requestedScope),
-    ) ||
-    !(
-      appliedScope === null ||
-      appliedScope === "CONVERSATION" ||
-      appliedScope === "TENANT"
-    ) ||
-    !(
-      value.claim_id === null ||
-      isUuid(value.claim_id)
-    ) ||
-    !(
-      value.claim_version === null ||
-      (
-        Number.isInteger(value.claim_version) &&
-        Number(value.claim_version) >= 1
-      )
-    )
-  ) {
-    throw new Error(
-      "Stored correction result is malformed",
-    );
-  }
-
-  return {
-    protocol_version: 1,
-    repair_event_id:
-      value.repair_event_id as UUID,
-    status:
-      status as CorrectionResult["status"],
-    requested_scope:
-      requestedScope as CorrectionScope,
-    applied_scope:
-      appliedScope as CorrectionResult["applied_scope"],
-    claim_id:
-      value.claim_id as UUID | null,
-    claim_version:
-      value.claim_version as number | null,
-  };
-}
-
-function isUuid(value: unknown): value is UUID {
-  return (
-    typeof value === "string" &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-      value,
-    )
-  );
 }
