@@ -248,7 +248,7 @@ export class PostgresContextPlanningRepository {
     }>(
       `SELECT mm.message_seq,
               mr.op_seq,
-              mm.accepted_at::text AS accepted_at,
+              mr.created_at::text AS accepted_at,
               c.erasure_epoch
          FROM message_metadata mm
          JOIN message_revisions mr
