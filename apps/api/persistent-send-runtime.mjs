@@ -299,11 +299,14 @@ export async function createPersistentSendRuntime({
         transactions,
       );
 
-    const contextOperationRecorder = hasTranslationProvider
-      ? createPostgresContextOperationRecorder({
-          repository: contextStateRepository,
-        })
-      : undefined;
+    // ConversationState registration is part of durable messaging semantics,
+    // not translation-provider availability. In external-worker mode the API
+    // intentionally has no provider loaded, but it must still register every
+    // causal operation so the external ContextState worker can reduce it.
+    const contextOperationRecorder =
+      createPostgresContextOperationRecorder({
+        repository: contextStateRepository,
+      });
 
     const transientSources = new InMemoryTransientSourceStore({
       clock,
@@ -343,14 +346,16 @@ export async function createPersistentSendRuntime({
       leaseSeconds: config.outboxLeaseSeconds,
     });
 
-    const contextStateWorker = hasTranslationProvider
-      ? createPostgresContextStateWorker({
-          stateRepository: contextStateRepository,
-          outboxRepository,
-          outboxService,
-          clock,
-        })
-      : null;
+    // Keep the reducer independently composable from the translation
+    // provider. The HTTP process may leave it idle in external-worker mode,
+    // while an embedded/external worker host can drain the same durable jobs.
+    const contextStateWorker =
+      createPostgresContextStateWorker({
+        stateRepository: contextStateRepository,
+        outboxRepository,
+        outboxService,
+        clock,
+      });
 
     const translationService =
       createPostgresTranslationExecutionService({
