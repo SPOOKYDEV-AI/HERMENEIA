@@ -157,6 +157,27 @@ export class ContextStateWorkerService<Tx> {
           );
         }
 
+        if (
+          operation.kind !== "MESSAGE_DELETED" &&
+          operation.messageId &&
+          operation.sourceRevision !== undefined
+        ) {
+          const fanoutPending =
+            await this.deps.store.isTranslationFanoutPending(
+              tx,
+              {
+                tenantId: lease.tenantId,
+                messageId: operation.messageId,
+                sourceRevision: operation.sourceRevision,
+              },
+            );
+          if (fanoutPending) {
+            throw new RetryableContextStateError(
+              "Context operation is waiting for translation fanout",
+            );
+          }
+        }
+
         const next = applyContextDerivation(state, {
           conversationId: state.conversationId,
           operationId: operation.operationId,
