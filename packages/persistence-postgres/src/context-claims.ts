@@ -47,6 +47,74 @@ export class PostgresContextClaimRepository {
     return this.transactions.withTransaction(work);
   }
 
+  async loadTenantPolicyClaims(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      asOf: string;
+    },
+  ): Promise<CandidateClaimRecord[]> {
+    if (!Number.isFinite(Date.parse(input.asOf))) {
+      throw new TypeError("asOf must be a valid timestamp");
+    }
+
+    const result = await tx.query<ContextClaimRow>(
+      `SELECT DISTINCT ON (claim_id)
+              claim_id,
+              claim_version,
+              conversation_id,
+              subject_user_id,
+              proposition_ref,
+              modality,
+              authority_class,
+              retention_class,
+              sensitivity_class,
+              confidence,
+              scope_kind,
+              scope_conversation_id,
+              trigger_kind,
+              valid_from::text AS valid_from,
+              valid_until::text AS valid_until,
+              status
+         FROM context_claims
+        WHERE tenant_id = $1
+          AND conversation_id IS NULL
+          AND subject_user_id IS NULL
+          AND scope_kind = 'TENANT'
+          AND scope_conversation_id IS NULL
+          AND status = 'ACTIVE'
+          AND sensitivity_class = 'NORMAL'
+          AND retention_class = 'POLICY_REFERENCE'
+          AND modality = 'ASSERTION'
+          AND (valid_from IS NULL OR valid_from < $2)
+          AND (valid_until IS NULL OR valid_until > $2)
+          AND (
+            (
+              authority_class = 'APPROVED_GLOSSARY'
+              AND trigger_kind = 'APPROVED_GLOSSARY_CHANGE'
+            )
+            OR (
+              authority_class = 'POLICY'
+              AND trigger_kind = 'TENANT_POLICY_CHANGE'
+            )
+          )
+        ORDER BY claim_id, claim_version DESC
+        LIMIT 129`,
+      [
+        input.tenantId,
+        input.asOf,
+      ],
+    );
+
+    if (result.rows.length > 128) {
+      throw new Error(
+        "Active tenant policy claim overlay exceeds bounded limit",
+      );
+    }
+
+    return result.rows.map(mapClaimRow);
+  }
+
   async loadReferencedClaims(
     tx: SqlExecutor,
     input: {

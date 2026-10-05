@@ -116,10 +116,6 @@ export function createPostgresTranslationContextRuntime(
                 values.indexOf(value) === index,
             );
 
-            if (referencedClaimIds.length === 0) {
-              return [];
-            }
-
             const asOf = frame.currentMessageAcceptedAt;
             if (!Number.isFinite(Date.parse(asOf))) {
               throw new TypeError(
@@ -127,23 +123,62 @@ export function createPostgresTranslationContextRuntime(
               );
             }
 
-            const claims =
+            const {
+              claims,
+              materializedClaimIds,
+            } =
               await deps.claimRepository!.withTransaction(
-                (tx) =>
-                  deps.claimRepository!.loadReferencedClaims(
-                    tx,
-                    {
-                      tenantId: input.tenantId,
-                      conversationId: input.conversationId,
-                      claimIds: referencedClaimIds,
-                      asOf,
-                    },
-                  ),
+                async (tx) => {
+                  const referencedClaims =
+                    referencedClaimIds.length === 0
+                      ? []
+                      : await deps.claimRepository!.loadReferencedClaims(
+                          tx,
+                          {
+                            tenantId: input.tenantId,
+                            conversationId:
+                              input.conversationId,
+                            claimIds:
+                              referencedClaimIds,
+                            asOf,
+                          },
+                        );
+
+                  const tenantPolicyClaims =
+                    await deps.claimRepository!.loadTenantPolicyClaims(
+                      tx,
+                      {
+                        tenantId: input.tenantId,
+                        asOf,
+                      },
+                    );
+
+                  const materializedClaimIds = [
+                    ...new Set([
+                      ...referencedClaimIds,
+                      ...tenantPolicyClaims.map(
+                        (claim) => claim.claimId,
+                      ),
+                    ]),
+                  ];
+
+                  return {
+                    claims: [
+                      ...referencedClaims,
+                      ...tenantPolicyClaims,
+                    ],
+                    materializedClaimIds,
+                  };
+                },
               );
+
+            if (materializedClaimIds.length === 0) {
+              return [];
+            }
 
             return materializeReferencedClaimCandidates({
               claims,
-              referencedClaimIds,
+              referencedClaimIds: materializedClaimIds,
               conversationId: input.conversationId,
               currentSourceAuthorUserId:
                 frame.currentSourceAuthorUserId,
