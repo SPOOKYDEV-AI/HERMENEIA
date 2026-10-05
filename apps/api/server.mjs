@@ -600,6 +600,51 @@ export function createHermeneiaHttpServer({
         return json(res, 202, result);
       }
 
+      const correctionRevocationMatch = matchPath(
+        requestUrl.pathname,
+        /^\/v1\/conversations\/([^/]+)\/corrections\/([^/]+)\/revoke$/,
+      );
+
+      if (req.method === "POST" && correctionRevocationMatch) {
+        if (
+          !correctionService ||
+          typeof correctionService.revokeCorrection !== "function"
+        ) {
+          throw new HttpError(
+            503,
+            "INTERNAL_ERROR",
+            "Correction revocation service unavailable",
+            true,
+          );
+        }
+
+        const body = await readJson(req);
+        requireProtocolV1(body);
+
+        if (typeof body.command_id !== "string") {
+          throw new HttpError(
+            400,
+            "INVALID_COMMAND",
+            "Invalid correction revocation payload",
+          );
+        }
+
+        const result =
+          await correctionService.revokeCorrection(
+            actor,
+            {
+              protocol_version: 1,
+              command_id: body.command_id,
+              conversation_id:
+                correctionRevocationMatch[0],
+              claim_id:
+                correctionRevocationMatch[1],
+            },
+          );
+
+        return json(res, 202, result);
+      }
+
       const correctionMatch = matchPath(
         requestUrl.pathname,
         /^\/v1\/conversations\/([^/]+)\/corrections$/,
