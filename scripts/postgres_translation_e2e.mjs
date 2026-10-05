@@ -44,6 +44,11 @@ const POST_REVOKE_SOURCE_TEXT =
   "On fait le CR vendredi.";
 const TENANT_POLICY_SOURCE_TEXT =
   "Le SLA est important.";
+const EPISODE_SOURCE_TEXTS = Array.from(
+  { length: 9 },
+  (_, index) =>
+    `Cache Redis bug session diagnostic étape ${index + 1}`,
+);
 const FEEDBACK_NOTE =
   "private feedback detail that must not persist";
 const TRANSLATED_TEXT = "Hola mundo 👋";
@@ -179,6 +184,34 @@ const translationProvider = {
           target_language_tag: TARGET_LANGUAGE,
         },
       );
+    } else if (
+      providerCalls >= 5 &&
+      providerCalls <= 13
+    ) {
+      const episodeIndex = providerCalls - 5;
+      assert.equal(
+        input.source.text,
+        EPISODE_SOURCE_TEXTS[episodeIndex],
+      );
+
+      if (episodeIndex === 8) {
+        const episodeItem = input.contextItems.find(
+          (item) =>
+            item.candidateType ===
+              "ACTIVE_EPISODE",
+        );
+        assert.ok(episodeItem);
+        assert.equal(
+          episodeItem.selectionReason,
+          "ACTIVE_EPISODE",
+        );
+        assert.ok(
+          [
+            EPISODE_SOURCE_TEXTS[0],
+            EPISODE_SOURCE_TEXTS[1],
+          ].includes(episodeItem.content),
+        );
+      }
     } else {
       assert.fail(
         `Unexpected provider call #${providerCalls}`,
@@ -2252,6 +2285,137 @@ try {
     assert.equal(Number(translated.rows[0].count), 0);
   });
 
+  runtimeNow = "2026-10-07T09:00:00.000Z";
+
+  let finalEpisodeMessageId = null;
+  for (
+    let index = 0;
+    index < EPISODE_SOURCE_TEXTS.length;
+    index += 1
+  ) {
+    runtimeNow = new Date(
+      Date.parse("2026-10-07T09:00:00.000Z") +
+        index * 1_000,
+    ).toISOString();
+
+    const episodeAccepted =
+      await runtime.sendService.sendMessage(
+        sender,
+        {
+          protocol_version: 1,
+          command_id: randomUUID(),
+          client_message_id: randomUUID(),
+          conversation_id: ids.conversationId,
+          source: {
+            text: EPISODE_SOURCE_TEXTS[index],
+            language_hint: "fr-FR",
+          },
+          client_authored_at: runtimeNow,
+        },
+      );
+
+    assert.equal(
+      episodeAccepted.status,
+      "ACCEPTED",
+    );
+    assert.equal(
+      await runtime.translationWorker.runFanoutOnce(),
+      "FANOUT_DONE",
+    );
+
+    // The first iteration also drains older context.reduce jobs left by the
+    // intentionally superseded stale-policy/erasure scenarios above.
+    let reducePasses = 0;
+    while (reducePasses < 8) {
+      const reduced =
+        await runtime.contextStateWorker.runOnce();
+      if (reduced === "NO_WORK") break;
+      assert.ok(
+        [
+          "REDUCED",
+          "ALREADY_REDUCED",
+        ].includes(reduced),
+      );
+      reducePasses += 1;
+    }
+    assert.ok(reducePasses < 8);
+
+    assert.equal(
+      await runtime.translationWorker.runExecuteOnce(),
+      "EXECUTION_DONE",
+    );
+    finalEpisodeMessageId =
+      episodeAccepted.message_id;
+  }
+
+  assert.equal(providerCalls, 13);
+  assert.ok(finalEpisodeMessageId);
+
+  await withConnection(async (db) => {
+    const state = await db.query(
+      `SELECT active_episode_state
+         FROM conversation_context_states
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(state.rowCount, 1);
+    const activeEpisode =
+      state.rows[0].active_episode_state;
+    assert.equal(
+      activeEpisode.continuityStrategy,
+      "heuristic-v1",
+    );
+    assert.equal(
+      activeEpisode.episodeVersion,
+      9,
+    );
+    assert.equal(
+      activeEpisode.sourceRevisionRefs.length,
+      8,
+    );
+    assert.equal(
+      JSON.stringify(activeEpisode).includes(
+        "Cache Redis",
+      ),
+      false,
+    );
+
+    const snapshot = await db.query(
+      `SELECT strategy,
+              active_episode_id,
+              selected_candidate_ids,
+              selected_source_revision_refs
+         FROM context_snapshots
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND recipient_user_id = $3`,
+      [
+        ids.tenantId,
+        finalEpisodeMessageId,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(snapshot.rowCount, 1);
+    assert.equal(
+      snapshot.rows[0].strategy,
+      "T2_ADAPTIVE_V1",
+    );
+    assert.equal(
+      snapshot.rows[0].active_episode_id,
+      activeEpisode.episodeId,
+    );
+    assert.ok(
+      snapshot.rows[0].selected_candidate_ids.some(
+        (id) => id.startsWith("episode:"),
+      ),
+    );
+    assert.ok(
+      snapshot.rows[0].selected_source_revision_refs.length >
+        6,
+    );
+  });
+
   process.stdout.write(
     "POSTGRES_TRANSLATION_E2E=PASS " +
     "send=accepted fanout=done execute=done " +
@@ -2268,6 +2432,7 @@ try {
     "conversation_policy_version=stable " +
     "tenant_policy_version=stale-context-superseded " +
     "t2=confirmed-correction-context " +
+    "semantic-episode=active-beyond-t1 " +
     "hpke=original+translation sync=2 ack=purged " +
     "erasure_epoch=stale-context-superseded\n",
   );
