@@ -27,6 +27,11 @@ export interface ActiveEpisodeState {
   episodeId: UUID;
   episodeVersion: number;
   continuityConfidence: number;
+  continuityStrategy: "heuristic-v1";
+  startedAt: string;
+  lastActivityAt: string;
+  sourceLanguageTag: string | null;
+  sourceRevisionRefs: string[];
 }
 
 export interface ConversationStyleState {
@@ -915,7 +920,111 @@ function validateEpisode(
     episode.continuityConfidence,
     "continuityConfidence",
   );
+  if (episode.continuityStrategy !== "heuristic-v1") {
+    throw new ContextStateConflictError(
+      "INVALID_STATE",
+      "Unsupported active episode continuity strategy",
+    );
+  }
+  requireTimestamp(episode.startedAt, "episode.startedAt");
+  requireTimestamp(
+    episode.lastActivityAt,
+    "episode.lastActivityAt",
+  );
+  if (
+    Date.parse(episode.lastActivityAt) <
+    Date.parse(episode.startedAt)
+  ) {
+    throw new ContextStateConflictError(
+      "INVALID_STATE",
+      "Episode lastActivityAt cannot precede startedAt",
+    );
+  }
+
+  if (
+    episode.sourceLanguageTag !== null &&
+    (
+      typeof episode.sourceLanguageTag !== "string" ||
+      episode.sourceLanguageTag.length < 2 ||
+      episode.sourceLanguageTag.length > 35 ||
+      !/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/.test(
+        episode.sourceLanguageTag,
+      )
+    )
+  ) {
+    throw new ContextStateConflictError(
+      "INVALID_STATE",
+      "Episode sourceLanguageTag is invalid",
+    );
+  }
+
+  if (
+    !Array.isArray(episode.sourceRevisionRefs) ||
+    episode.sourceRevisionRefs.length < 1 ||
+    episode.sourceRevisionRefs.length > 8
+  ) {
+    throw new ContextStateConflictError(
+      "INVALID_STATE",
+      "Episode sourceRevisionRefs must contain 1..8 refs",
+    );
+  }
+
+  const uniqueRefs = new Set(
+    episode.sourceRevisionRefs,
+  );
+  if (
+    uniqueRefs.size !==
+    episode.sourceRevisionRefs.length
+  ) {
+    throw new ContextStateConflictError(
+      "INVALID_STATE",
+      "Episode sourceRevisionRefs contain duplicates",
+    );
+  }
+
+  for (const ref of episode.sourceRevisionRefs) {
+    validateEpisodeSourceRevisionRef(ref);
+  }
+
   return structuredClone(episode);
+}
+
+function validateEpisodeSourceRevisionRef(
+  value: string,
+): void {
+  if (
+    typeof value !== "string" ||
+    value.length < 3 ||
+    value.length > 160
+  ) {
+    throw new ContextStateConflictError(
+      "INVALID_STATE",
+      "Episode source revision ref is invalid",
+    );
+  }
+
+  const separator = value.lastIndexOf(":");
+  if (
+    separator < 1 ||
+    separator === value.length - 1
+  ) {
+    throw new ContextStateConflictError(
+      "INVALID_STATE",
+      "Episode source revision ref is malformed",
+    );
+  }
+
+  const messageId = value.slice(0, separator);
+  const revision = Number(value.slice(separator + 1));
+  requireOpaqueIdentifier(
+    messageId,
+    "episode.sourceRevisionRef.messageId",
+  );
+  requireSafeInteger(
+    revision,
+    "episode.sourceRevisionRef.revision",
+    1,
+  );
 }
 
 function validateStyleState(
