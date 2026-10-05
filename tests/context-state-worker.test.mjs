@@ -21,6 +21,7 @@ class FakeContextWorkerStore {
     this.state = clone(state);
     this.jobs = clone(jobs);
     this.forceStaleComplete = false;
+    this.pendingFanouts = new Set();
   }
 
   async withTransaction(work) {
@@ -54,6 +55,12 @@ class FakeContextWorkerStore {
     }
     this.state = clone(input.state);
     return true;
+  }
+
+  async isTranslationFanoutPending(_tx, input) {
+    return this.pendingFanouts.has(
+      `${input.tenantId}:${input.messageId}:${input.sourceRevision}`,
+    );
   }
 
   async leaseNextJob(_tx, input) {
@@ -247,6 +254,56 @@ test("out-of-order context job is retried until its causal predecessor closes th
   assert.equal(await worker.runOnce(), "REDUCED");
   assert.equal(store.state.processedPrefixOpSeq, 2);
   assert.deepEqual(store.state.pendingOperations, []);
+});
+
+test("created or edited operation waits until translation fanout is terminal", async () => {
+  const { worker, store, setNow } = fixture(
+    stateWithOperations([1]),
+    [job(1)],
+  );
+  store.pendingFanouts.add(
+    "tenant-1:message-1:1",
+  );
+
+  assert.equal(
+    await worker.runOnce(),
+    "RETRY_SCHEDULED",
+  );
+  assert.equal(store.state.processedPrefixOpSeq, 0);
+
+  store.pendingFanouts.clear();
+  setNow("2026-10-05T09:01:02.000Z");
+
+  assert.equal(await worker.runOnce(), "REDUCED");
+  assert.equal(store.state.processedPrefixOpSeq, 1);
+});
+
+test("delete operation does not wait for translation fanout", async () => {
+  let state = createInitialContextState({
+    tenantId: "tenant-1",
+    conversationId: "conversation-1",
+    membershipEpoch: 0,
+    erasureEpoch: 1,
+    policyVersion: 1,
+    strategyVersion: "context-state-v1",
+    now: "2026-10-05T09:00:00.000Z",
+  });
+  state = registerContextOperation(state, {
+    opSeq: 1,
+    operationId: "op-1",
+    kind: "MESSAGE_DELETED",
+    messageId: "message-1",
+    sourceRevision: 2,
+    registeredAt: "2026-10-05T09:00:01.000Z",
+  });
+
+  const { worker, store } = fixture(state, [job(1)]);
+  store.pendingFanouts.add(
+    "tenant-1:message-1:2",
+  );
+
+  assert.equal(await worker.runOnce(), "REDUCED");
+  assert.equal(store.state.processedPrefixOpSeq, 1);
 });
 
 test("already reduced context job completes idempotently without mutating state version", async () => {
