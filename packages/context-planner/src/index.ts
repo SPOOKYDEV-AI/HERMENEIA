@@ -29,6 +29,7 @@ export interface ContextPlanningFrame {
   currentSourceLanguageTag: string | null;
   erasureEpoch: number;
   policyVersion: number;
+  tenantPolicyVersion: number;
   recentMessages: RecentContextMessageRef[];
 }
 
@@ -200,6 +201,7 @@ export class TranslationContextPlanner
       currentOperationSequence: frame.currentOperationSequence,
       erasureEpoch: frame.erasureEpoch,
       policyVersion: frame.policyVersion,
+      tenantPolicyVersion: frame.tenantPolicyVersion,
       strategy,
       state,
       candidates,
