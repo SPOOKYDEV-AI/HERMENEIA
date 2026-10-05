@@ -6,6 +6,7 @@ import type {
 import type {
   CorrectionResult,
   CorrectionRevocationResult,
+  CorrectionReviewResult,
   CorrectionScope,
 } from "../../protocol/src/index.js";
 import {
@@ -173,5 +174,89 @@ export function replayCorrectionRevocationCommand(
     claim_id: value.claim_id,
     claim_version: Number(value.claim_version),
     status: "REVOKED",
+  };
+}
+
+
+export function replayCorrectionReviewCommand(
+  existing: {
+    actorUserId: UUID;
+    actorDeviceId: UUID;
+    commandType: string;
+    commandFingerprint: string | null;
+    status: "IN_PROGRESS" | "SUCCEEDED" | "FAILED";
+    result: Record<string, unknown>;
+  },
+  actor: ActorContext,
+  commandFingerprint: string,
+): CorrectionReviewResult {
+  if (
+    existing.actorUserId !== actor.userId ||
+    existing.actorDeviceId !== actor.deviceId
+  ) {
+    throw new DomainError(
+      "NOT_AUTHORIZED",
+      "Command identifier is not available to actor",
+    );
+  }
+
+  if (
+    existing.commandType !==
+      "context.correction.review" ||
+    existing.commandFingerprint !==
+      commandFingerprint
+  ) {
+    throw new DomainError(
+      "IDEMPOTENCY_CONFLICT",
+      "command_id was already used for a different operation",
+    );
+  }
+
+  if (existing.status !== "SUCCEEDED") {
+    throw new Error(
+      "Persistent correction review command receipt is not terminal",
+    );
+  }
+
+  const value = existing.result;
+  const status = String(value.status);
+  if (
+    value.protocol_version !== 1 ||
+    !isUuid(value.repair_event_id) ||
+    !isUuid(value.review_event_id) ||
+    !["APPLIED", "REJECTED"].includes(status) ||
+    (
+      value.claim_id !== null &&
+      !isUuid(value.claim_id)
+    ) ||
+    (
+      value.claim_version !== null &&
+      (
+        !Number.isInteger(value.claim_version) ||
+        Number(value.claim_version) < 1
+      )
+    ) ||
+    (
+      (value.claim_id === null) !==
+      (value.claim_version === null)
+    )
+  ) {
+    throw new Error(
+      "Stored correction review result is malformed",
+    );
+  }
+
+  return {
+    protocol_version: 1,
+    repair_event_id: value.repair_event_id,
+    review_event_id: value.review_event_id,
+    status:
+      status as CorrectionReviewResult["status"],
+    claim_id:
+      value.claim_id as UUID | null,
+    claim_version:
+      value.claim_version === null
+        ? null
+        : Number(value.claim_version),
   };
 }
