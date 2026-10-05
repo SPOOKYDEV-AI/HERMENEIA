@@ -186,6 +186,7 @@ export function createHermeneiaHttpServer({
   deliveryService = null,
   translationRecoveryService = null,
   correctionService = null,
+  tenantPolicyService = null,
   translationFeedbackService = null,
   deviceService = null,
   readinessService = null,
@@ -227,6 +228,18 @@ export function createHermeneiaHttpServer({
       "correctionService.createCorrection is required",
     );
   }
+  if (
+    tenantPolicyService !== null &&
+    (
+      typeof tenantPolicyService.upsertPolicy !== "function" ||
+      typeof tenantPolicyService.revokePolicy !== "function"
+    )
+  ) {
+    throw new TypeError(
+      "tenantPolicyService upsert/revoke methods are required",
+    );
+  }
+
   if (
     translationFeedbackService !== null &&
     typeof translationFeedbackService.createFeedback !== "function"
@@ -547,6 +560,96 @@ export function createHermeneiaHttpServer({
         });
 
         return json(res, 200, result);
+      }
+
+      if (
+        req.method === "POST" &&
+        requestUrl.pathname ===
+          "/v1/tenant/context-policies"
+      ) {
+        if (!tenantPolicyService) {
+          throw new HttpError(
+            503,
+            "INTERNAL_ERROR",
+            "Tenant context policy service unavailable",
+            true,
+          );
+        }
+
+        const body = await readJson(req);
+        requireProtocolV1(body);
+
+        if (
+          typeof body.command_id !== "string" ||
+          typeof body.kind !== "string" ||
+          !body.proposition ||
+          typeof body.proposition !== "object" ||
+          Array.isArray(body.proposition)
+        ) {
+          throw new HttpError(
+            400,
+            "INVALID_COMMAND",
+            "Invalid tenant context policy payload",
+          );
+        }
+
+        return json(
+          res,
+          201,
+          await tenantPolicyService.upsertPolicy(
+            actor,
+            {
+              protocol_version: 1,
+              command_id: body.command_id,
+              kind: body.kind,
+              proposition: body.proposition,
+            },
+          ),
+        );
+      }
+
+      const tenantPolicyRevokeMatch = matchPath(
+        requestUrl.pathname,
+        /^\/v1\/tenant\/context-policies\/([^/]+)\/revoke$/,
+      );
+
+      if (
+        req.method === "POST" &&
+        tenantPolicyRevokeMatch
+      ) {
+        if (!tenantPolicyService) {
+          throw new HttpError(
+            503,
+            "INTERNAL_ERROR",
+            "Tenant context policy service unavailable",
+            true,
+          );
+        }
+
+        const body = await readJson(req);
+        requireProtocolV1(body);
+
+        if (typeof body.command_id !== "string") {
+          throw new HttpError(
+            400,
+            "INVALID_COMMAND",
+            "Invalid tenant context policy revocation payload",
+          );
+        }
+
+        return json(
+          res,
+          200,
+          await tenantPolicyService.revokePolicy(
+            actor,
+            {
+              protocol_version: 1,
+              command_id: body.command_id,
+              claim_id:
+                tenantPolicyRevokeMatch[0],
+            },
+          ),
+        );
       }
 
       const translationFeedbackMatch = matchPath(
