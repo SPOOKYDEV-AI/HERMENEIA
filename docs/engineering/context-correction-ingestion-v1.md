@@ -38,8 +38,11 @@ A failure rolls the transaction back. A retry with the same command and fingerpr
 | CONVERSATION + MEMBER correcting another speaker or no anchored source | `NEEDS_CONFIRMATION` |
 | CONVERSATION + MODERATOR | `APPLIED`; generic conversation claim when not a self-correction |
 | CONVERSATION + tenant ADMIN/OWNER | `APPLIED`; generic conversation claim when not a self-correction |
-| TENANT | `NEEDS_CONFIRMATION` until tenant-wide distribution exists |
-| TONE | `NEEDS_CONFIRMATION` until typed style-memory semantics exist |
+| TENANT semantic correction | `NEEDS_CONFIRMATION`; tenant-wide semantic authority uses the separate ADMIN/OWNER policy control-plane |
+| TONE + MESSAGE | `RECORDED`; repair-only |
+| TONE + CONVERSATION, actor-owned | `APPLIED` to speaker-scoped ConversationState style projection; no ContextClaim |
+| TONE + CONVERSATION targeting another speaker | `NEEDS_CONFIRMATION` |
+| TONE + TENANT | `NEEDS_CONFIRMATION`; no tenant style policy exists in this V1 |
 
 Every submitter must still be an active tenant member, active conversation member and active device.
 
@@ -99,6 +102,24 @@ explicit correction
 ```
 
 The OpenAI adapter treats the resulting context as untrusted translation data, never executable provider instructions.
+
+## Explicit conversation tone
+
+`TONE` corrections use a separate non-claim path because conversational register is a working translation preference, not semantic truth and not a durable personal profile.
+
+Supported V1 payload:
+
+```json
+{
+  "schema_version": 1,
+  "kind": "TONE",
+  "preferred_register": "NEUTRAL | FORMAL | INFORMAL | DEFAULT"
+}
+```
+
+For `CONVERSATION` scope, an active member may set only their own speaker profile. `DEFAULT` removes that profile. A target anchored to another speaker cannot be used to set that speaker's style, even by a moderator/admin. The repair event remains durable for audit, but no ContextClaim is created.
+
+The working projection lives in bounded `ConversationState.styleState`, keyed by speaker, and is cleared by existing authority/epoch rebases. Planning materialises only the profile whose speaker equals the current source revision author, strictly after the profile update timestamp and before optional expiry. Provider context contains only the structured register value and never the speaker identifier.
 
 ## Supersession
 
@@ -216,7 +237,7 @@ The persistent qualification suite exercises:
 
 - command idempotency and command-id collision;
 - role-gated promotion;
-- MESSAGE/TENANT/TONE fail-safe behaviour;
+- MESSAGE/TENANT semantic fail-safe behaviour and speaker-safe TONE application/reset;
 - target visibility and target-consistency checks;
 - missing-state recovery at the existing causal floor;
 - bounded/deduplicated correction refs;
@@ -229,8 +250,8 @@ The persistent qualification suite exercises:
 
 Still separate work:
 
-- tenant-wide glossary/policy distribution;
-- typed TONE/style memory;
+- tenant-wide style policy semantics;
+- per-recipient-direction style profiles beyond the speaker-only V1;
 - an explicit workflow for supplying a structured correction in response to vague feedback rather than approving the feedback itself;
 - dependency-aware invalidation beyond explicit correction supersession/revocation;
 - semantic episode derivation and recovery checkpoints.
