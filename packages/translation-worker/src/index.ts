@@ -664,7 +664,6 @@ export class TranslationWorkerService<Tx> {
         const nextAttemptAt = this.nextRetryAt(
           lease.attemptCount,
           now,
-          minimumDelaySeconds,
         );
         const scheduled = await this.deps.store.scheduleRetry(
           tx,
@@ -910,6 +909,7 @@ export class TranslationWorkerService<Tx> {
         const nextAttemptAt = this.nextRetryAt(
           lease.attemptCount,
           now,
+          minimumDelaySeconds,
         );
 
         const scheduled = await this.deps.store.scheduleRetry(
