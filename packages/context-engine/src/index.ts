@@ -722,6 +722,22 @@ function validateInput(input: BuildContextInput): void {
       );
     }
 
+    if (
+      !Number.isInteger(input.state.policyVersion) ||
+      input.state.policyVersion < 1
+    ) {
+      throw new TypeError(
+        "ContextState policyVersion must be a positive integer",
+      );
+    }
+    if (
+      input.state.policyVersion !== input.policyVersion
+    ) {
+      throw new TypeError(
+        "ContextState policyVersion does not match authoritative policyVersion",
+      );
+    }
+
     for (const gap of input.state.processingGapOperationSequences) {
       if (
         !Number.isInteger(gap) ||
