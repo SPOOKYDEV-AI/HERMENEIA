@@ -187,6 +187,101 @@ BEGIN
   END;
 END $$;
 
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO context_claims(
+      tenant_id,
+      claim_id,
+      claim_version,
+      conversation_id,
+      claim_type,
+      proposition_ref,
+      modality,
+      authority_class,
+      retention_class,
+      sensitivity_class,
+      confidence,
+      scope_kind,
+      scope_conversation_id,
+      status,
+      created_at
+    )
+    VALUES (
+      '10000000-0000-0000-0000-000000000011',
+      '83000000-0000-0000-0000-000000000098',
+      1,
+      NULL,
+      'TERMINOLOGY',
+      '{"surface_form":"CR","corrected_meaning":"change request"}'::jsonb,
+      'ASSERTION',
+      'INFERRED',
+      'EPHEMERAL',
+      'NORMAL',
+      0.5,
+      'CONVERSATION',
+      '30000000-0000-0000-0000-000000000011',
+      'ACTIVE',
+      now()
+    );
+
+    RAISE EXCEPTION 'expected conversation-scoped claim without conversation_id to fail';
+  EXCEPTION
+    WHEN check_violation THEN
+      NULL;
+  END;
+END $$;
+
+INSERT INTO users(user_id, status)
+VALUES ('00000000-0000-0000-0000-000000000099','ACTIVE');
+
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO context_claims(
+      tenant_id,
+      claim_id,
+      claim_version,
+      conversation_id,
+      subject_user_id,
+      claim_type,
+      proposition_ref,
+      modality,
+      authority_class,
+      retention_class,
+      sensitivity_class,
+      confidence,
+      scope_kind,
+      scope_conversation_id,
+      status,
+      created_at
+    )
+    VALUES (
+      '10000000-0000-0000-0000-000000000011',
+      '83000000-0000-0000-0000-000000000097',
+      1,
+      '30000000-0000-0000-0000-000000000011',
+      '00000000-0000-0000-0000-000000000099',
+      'PREFERENCE',
+      '{"preference_ref":"pref:1"}'::jsonb,
+      'ASSERTION',
+      'EXPLICIT_PREFERENCE',
+      'EPHEMERAL',
+      'NORMAL',
+      1,
+      'CONVERSATION',
+      '30000000-0000-0000-0000-000000000011',
+      'ACTIVE',
+      now()
+    );
+
+    RAISE EXCEPTION 'expected subject_user_id outside tenant to fail';
+  EXCEPTION
+    WHEN foreign_key_violation THEN
+      NULL;
+  END;
+END $$;
+
 INSERT INTO context_claims(
   tenant_id,
   claim_id,
