@@ -37,6 +37,7 @@ for (const [name, value] of requiredEnv) {
 }
 
 const NOW = "2026-10-05T08:00:00.000Z";
+let runtimeNow = NOW;
 const SOURCE_TEXT = "Bonjour monde 👋";
 const T2_SOURCE_TEXT = "On fait le CR demain.";
 const TRANSLATED_TEXT = "Hola mundo 👋";
@@ -346,7 +347,7 @@ try {
       createHpkeP256TranslationEnvelopeProtector(),
     clock: {
       now() {
-        return NOW;
+        return runtimeNow;
       },
     },
   });
@@ -793,6 +794,11 @@ try {
       ),
     );
   });
+
+  // A correction created after a message was already accepted must not
+  // influence that message. Advance the server clock before accepting the
+  // next message so the claim is strictly causal to this new translation.
+  runtimeNow = "2026-10-05T08:00:01.000Z";
 
   const t2Accepted = await runtime.sendService.sendMessage(
     sender,
