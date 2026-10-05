@@ -48,6 +48,7 @@ export interface MaterializeReferencedClaimsInput {
   referencedClaimIds: UUID[];
   conversationId: UUID;
   currentSourceAuthorUserId: UUID;
+  currentSourceLanguageTag: string | null;
   targetLanguageTag: string;
   state: ConversationContextState;
   now: string;
@@ -90,6 +91,21 @@ export function materializeReferencedClaimCandidates(
       claim.propositionRef,
     );
     if (!proposition) continue;
+
+    if (
+      proposition.sourceLanguageTag &&
+      (
+        !input.currentSourceLanguageTag ||
+        normaliseLanguageTag(
+          proposition.sourceLanguageTag,
+        ) !==
+          normaliseLanguageTag(
+            input.currentSourceLanguageTag,
+          )
+      )
+    ) {
+      continue;
+    }
 
     if (
       proposition.targetLanguageTag &&
