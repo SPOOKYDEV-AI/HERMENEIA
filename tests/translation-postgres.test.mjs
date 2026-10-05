@@ -293,7 +293,7 @@ test("fanout plan resolves locale override and membership version without source
   );
 });
 
-test("publish lock verifies source, target profile and context erasure frontier", async () => {
+test("publish lock verifies source, target profile, erasure and policy frontiers", async () => {
   const connection = new ScriptedConnection([
     { rows: [row()], rowCount: 1 },
   ]);
@@ -321,6 +321,10 @@ test("publish lock verifies source, target profile and context erasure frontier"
   assert.match(
     sql.text,
     /cs\.erasure_epoch = c\.erasure_epoch/,
+  );
+  assert.match(
+    sql.text,
+    /cs\.policy_version = c\.policy_version/,
   );
   assert.match(sql.text, /FOR UPDATE OF te, mm, cm, c/);
 });
