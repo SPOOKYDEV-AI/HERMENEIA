@@ -430,6 +430,114 @@ export class PostgresContextCorrectionRepository {
     return result.rowCount === 1;
   }
 
+  async invalidateSupersededStylePreferenceClaims(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+      subjectUserId: UUID;
+      invalidatedAt: string;
+    },
+  ): Promise<Array<{
+    claimId: UUID;
+    claimVersion: number;
+  }>> {
+    const result = await tx.query<{
+      claim_id: UUID;
+      claim_version: number;
+    }>(
+      `UPDATE context_claims
+          SET status = 'INVALIDATED',
+              valid_until = CASE
+                WHEN valid_from IS NULL OR valid_from < $4
+                  THEN $4
+                ELSE valid_from + interval '1 microsecond'
+              END
+        WHERE tenant_id = $1
+          AND conversation_id = $2
+          AND scope_kind = 'CONVERSATION'
+          AND scope_conversation_id = $2
+          AND subject_user_id = $3
+          AND status = 'ACTIVE'
+          AND authority_class = 'EXPLICIT_PREFERENCE'
+          AND retention_class = 'PREFERENCE_DURABLE'
+          AND modality = 'ASSERTION'
+          AND trigger_kind = 'EXPLICIT_PREFERENCE_CHANGE'
+          AND proposition_ref ->> 'kind' = 'STYLE_PREFERENCE'
+      RETURNING claim_id, claim_version`,
+      [
+        input.tenantId,
+        input.conversationId,
+        input.subjectUserId,
+        input.invalidatedAt,
+      ],
+    );
+
+    return result.rows.map((row) => ({
+      claimId: row.claim_id,
+      claimVersion: Number(row.claim_version),
+    }));
+  }
+
+  async insertExplicitStylePreferenceClaim(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      claimId: UUID;
+      conversationId: UUID;
+      messageId: UUID | null;
+      subjectUserId: UUID;
+      propositionRef: Record<string, unknown>;
+      createdAt: string;
+    },
+  ): Promise<void> {
+    const result = await tx.query(
+      `INSERT INTO context_claims(
+         tenant_id,
+         claim_id,
+         claim_version,
+         conversation_id,
+         message_id,
+         subject_user_id,
+         claim_type,
+         proposition_ref,
+         modality,
+         authority_class,
+         retention_class,
+         sensitivity_class,
+         confidence,
+         scope_kind,
+         scope_conversation_id,
+         trigger_kind,
+         valid_from,
+         valid_until,
+         status,
+         created_at
+       ) VALUES (
+         $1,$2,1,$3,$4,$5,'STYLE_PREFERENCE',$6::jsonb,
+         'ASSERTION','EXPLICIT_PREFERENCE',
+         'PREFERENCE_DURABLE','NORMAL',1,
+         'CONVERSATION',$3,'EXPLICIT_PREFERENCE_CHANGE',
+         $7,NULL,'ACTIVE',$7
+       )`,
+      [
+        input.tenantId,
+        input.claimId,
+        input.conversationId,
+        input.messageId,
+        input.subjectUserId,
+        JSON.stringify(input.propositionRef),
+        input.createdAt,
+      ],
+    );
+
+    if (result.rowCount !== 1) {
+      throw new Error(
+        "Explicit style preference claim was not inserted",
+      );
+    }
+  }
+
   async invalidateSupersededCorrectionClaims(
     tx: SqlExecutor,
     input: {
