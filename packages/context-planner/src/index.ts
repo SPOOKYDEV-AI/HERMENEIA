@@ -148,8 +148,17 @@ export class TranslationContextPlanner
         : this.config.fallbackCurrentMessageTokens,
     );
 
+    // A compatible ConversationState is necessary for T2, but not
+    // sufficient. Until a state/recovery/correction adapter materialises at
+    // least one derived candidate, selecting T2 would only relabel the same
+    // recent-message window and overstate adaptive-context behaviour.
+    const hasDerivedCandidate = candidates.some(
+      (candidate) =>
+        candidate.candidateType !== "IMMEDIATE_MESSAGE",
+    );
+
     const strategy =
-      state !== null
+      state !== null && hasDerivedCandidate
         ? "T2_ADAPTIVE_V1"
         : candidates.length > 0
           ? "T1"
