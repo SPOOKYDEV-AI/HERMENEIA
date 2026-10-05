@@ -12,7 +12,8 @@ import type {
 export type CandidateClaimAuthority =
   | "POLICY"
   | "APPROVED_GLOSSARY"
-  | "CONFIRMED_CORRECTION";
+  | "CONFIRMED_CORRECTION"
+  | "EXPLICIT_PREFERENCE";
 
 export type CandidateClaimRetention =
   | "CORRECTIVE_DURABLE"
@@ -70,6 +71,11 @@ export type SupportedProposition =
       targetForm: string;
       sourceLanguageTag: string | null;
       targetLanguageTag: string;
+    }
+  | {
+      schemaVersion: 1;
+      kind: "TONE_PREFERENCE";
+      preferredRegister: "NEUTRAL" | "FORMAL" | "INFORMAL";
     };
 
 export function materializeReferencedClaimCandidates(
@@ -154,7 +160,9 @@ export function materializeReferencedClaimCandidates(
       candidateType:
         claim.authorityClass === "CONFIRMED_CORRECTION"
           ? "CORRECTION_MEMORY"
-          : "APPROVED_POLICY",
+          : claim.authorityClass === "EXPLICIT_PREFERENCE"
+            ? "STYLE_MEMORY"
+            : "APPROVED_POLICY",
       content: renderProposition(proposition),
       causalThroughOperationSequence:
         input.state.processedPrefixOperationSequence,
@@ -170,7 +178,9 @@ export function materializeReferencedClaimCandidates(
       privacyScope:
         claim.authorityClass === "CONFIRMED_CORRECTION"
           ? "CORRECTION"
-          : "POLICY",
+          : claim.authorityClass === "EXPLICIT_PREFERENCE"
+            ? "STYLE"
+            : "POLICY",
       erasureEpoch: input.state.erasureEpoch,
       validUntil: arbitrated.validUntil,
       correctionTrigger,
@@ -252,6 +262,17 @@ function isAdmissibleClaim(
     );
   }
 
+  if (claim.authorityClass === "EXPLICIT_PREFERENCE") {
+    return (
+      claim.subjectUserId !== null &&
+      claim.scopeKind === "CONVERSATION" &&
+      claim.scopeConversationId === input.conversationId &&
+      claim.retentionClass === "POLICY_REFERENCE" &&
+      claim.modality === "ASSERTION" &&
+      claim.triggerKind === "EXPLICIT_UI_CORRECTION"
+    );
+  }
+
   return (
     claim.authorityClass === "POLICY" &&
     claim.retentionClass === "POLICY_REFERENCE" &&
@@ -317,12 +338,36 @@ export function parseSupportedClaimProposition(
     };
   }
 
+  if (value.kind === "TONE_PREFERENCE") {
+    const preferredRegister = value.preferred_register;
+    if (
+      preferredRegister !== "NEUTRAL" &&
+      preferredRegister !== "FORMAL" &&
+      preferredRegister !== "INFORMAL"
+    ) {
+      return null;
+    }
+    return {
+      schemaVersion: 1,
+      kind: "TONE_PREFERENCE",
+      preferredRegister,
+    };
+  }
+
   return null;
 }
 
 export function storedClaimProposition(
   proposition: SupportedProposition,
 ): Record<string, unknown> {
+  if (proposition.kind === "TONE_PREFERENCE") {
+    return {
+      schema_version: 1,
+      kind: proposition.kind,
+      preferred_register: proposition.preferredRegister,
+    };
+  }
+
   if (proposition.kind === "TERM_MEANING") {
     return {
       schema_version: 1,
@@ -353,6 +398,13 @@ export function storedClaimProposition(
 function renderProposition(
   proposition: SupportedProposition,
 ): string {
+  if (proposition.kind === "TONE_PREFERENCE") {
+    return JSON.stringify({
+      kind: "trusted_tone_preference",
+      preferred_register: proposition.preferredRegister,
+    });
+  }
+
   if (proposition.kind === "TERM_MEANING") {
     return JSON.stringify({
       kind: "trusted_term_meaning",
