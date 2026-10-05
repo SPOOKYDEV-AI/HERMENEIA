@@ -73,6 +73,12 @@ export interface ContextStateWorkerDependencies<Tx> {
   outbox: PersistentOutboxService<Tx>;
   clock: ContextStateWorkerClock;
   episodeDeriver?: ContextStateEpisodeDeriver<Tx>;
+  checkpointWriter?: {
+    capture(
+      state: ConversationContextState,
+      now: string,
+    ): Promise<unknown>;
+  };
   retryBaseSeconds?: number;
   maxAttempts?: number;
 }
@@ -131,9 +137,14 @@ export class ContextStateWorkerService<Tx> {
     }
 
     try {
-      return await this.deps.store.withTransaction<
-        ContextStateWorkerResult
-      >(async (tx) => {
+      let checkpointState:
+        | ConversationContextState
+        | undefined;
+
+      const result =
+        await this.deps.store.withTransaction<
+          ContextStateWorkerResult
+        >(async (tx) => {
         const state = await this.deps.store.loadState(tx, {
           tenantId: lease.tenantId,
           conversationId: payload.conversationId,
@@ -147,6 +158,8 @@ export class ContextStateWorkerService<Tx> {
         }
 
         if (state.processedPrefixOpSeq >= payload.opSeq) {
+          checkpointState =
+            structuredClone(state);
           await this.completeOrThrow(tx, lease);
           return "ALREADY_REDUCED";
         }
@@ -255,9 +268,32 @@ export class ContextStateWorkerService<Tx> {
           );
         }
 
+        checkpointState =
+          structuredClone(next);
         await this.completeOrThrow(tx, lease);
         return "REDUCED";
       });
+
+      if (
+        checkpointState &&
+        this.deps.checkpointWriter &&
+        (
+          result === "REDUCED" ||
+          result === "ALREADY_REDUCED"
+        )
+      ) {
+        try {
+          await this.deps.checkpointWriter.capture(
+            checkpointState,
+            this.now(),
+          );
+        } catch {
+          // Recovery checkpoints are best-effort derived state. They must
+          // never roll back or retry an otherwise successful context reduce.
+        }
+      }
+
+      return result;
     } catch (error) {
       if (error instanceof StaleLeaseError) {
         return "STALE_LEASE";
