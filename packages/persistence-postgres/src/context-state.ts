@@ -209,6 +209,16 @@ export function toEngineContextState(
     activeEpisodeId: value.activeEpisode?.episodeId ?? null,
     activeEpisodeVersion:
       value.activeEpisode?.episodeVersion ?? null,
+    activeEpisodeContinuityConfidence:
+      value.activeEpisode?.continuityConfidence ?? null,
+    activeEpisodeStartOperationSequence:
+      value.activeEpisode?.startOperationSequence ?? null,
+    activeEpisodeLastOperationSequence:
+      value.activeEpisode?.lastOperationSequence ?? null,
+    activeEpisodeStartedAt:
+      value.activeEpisode?.startedAt ?? null,
+    activeEpisodeLastActivityAt:
+      value.activeEpisode?.lastActivityAt ?? null,
     terminologyClaimRefs: [...value.terminologyClaimRefs],
     lexicalClaimRefs: [...value.lexicalClaimRefs],
     correctionClaimRefs: [...value.correctionClaimRefs],
