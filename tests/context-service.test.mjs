@@ -109,6 +109,7 @@ function prepareInput(overrides = {}) {
     currentOperationSequence: 8,
     erasureEpoch: 1,
     policyVersion: 1,
+    tenantPolicyVersion: 1,
     strategy: "T2_ADAPTIVE_V1",
     state: {
       conversationId: "conversation-1",
