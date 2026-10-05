@@ -40,6 +40,8 @@ const NOW = "2026-10-05T08:00:00.000Z";
 let runtimeNow = NOW;
 const SOURCE_TEXT = "Bonjour monde 👋";
 const T2_SOURCE_TEXT = "On fait le CR demain.";
+const POST_REVOKE_SOURCE_TEXT =
+  "On fait le CR vendredi.";
 const FEEDBACK_NOTE =
   "private feedback detail that must not persist";
 const TRANSLATED_TEXT = "Hola mundo 👋";
@@ -59,6 +61,9 @@ const ids = {
   feedbackCommandId: randomUUID(),
   correctionCommandId: randomUUID(),
   correctionOverrideCommandId: randomUUID(),
+  correctionRevokeCommandId: randomUUID(),
+  postRevokeCommandId: randomUUID(),
+  postRevokeClientMessageId: randomUUID(),
   staleContextCommandId: randomUUID(),
   staleContextClientMessageId: randomUUID(),
 };
@@ -112,6 +117,19 @@ const translationProvider = {
           meaning: "compte rendu",
           source_language_tag: "fr-FR",
         },
+      );
+    } else if (providerCalls === 3) {
+      assert.equal(
+        input.source.text,
+        POST_REVOKE_SOURCE_TEXT,
+      );
+      assert.equal(
+        input.contextItems.some(
+          (item) =>
+            item.candidateType ===
+              "CORRECTION_MEMORY",
+        ),
+        false,
       );
     } else {
       assert.fail(
@@ -1097,7 +1115,7 @@ try {
     await runtime.translationWorker.runExecuteOnce(),
     "EXECUTION_DONE",
   );
-  assert.equal(providerCalls, 2);
+  assert.equal(providerCalls, 3);
 
   await withConnection(async (db) => {
     const execution = await db.query(
@@ -1128,6 +1146,179 @@ try {
       2,
     );
   });
+
+  runtimeNow = "2026-10-05T08:00:02.000Z";
+
+  const revocation =
+    await runtime.correctionService.revokeCorrection(
+      sender,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.correctionRevokeCommandId,
+        conversation_id: ids.conversationId,
+        claim_id: correctionClaimId,
+      },
+    );
+
+  assert.equal(revocation.status, "REVOKED");
+  assert.equal(
+    revocation.claim_id,
+    correctionClaimId,
+  );
+  assert.equal(revocation.claim_version, 1);
+
+  await withConnection(async (db) => {
+    const claim = await db.query(
+      `SELECT status,
+              valid_until
+         FROM context_claims
+        WHERE tenant_id = $1
+          AND claim_id = $2
+          AND claim_version = 1`,
+      [ids.tenantId, correctionClaimId],
+    );
+    assert.equal(claim.rowCount, 1);
+    assert.equal(
+      claim.rows[0].status,
+      "REVOKED",
+    );
+    assert.ok(claim.rows[0].valid_until);
+
+    const invalidation = await db.query(
+      `SELECT relation,
+              source_repair_event_id
+         FROM provenance_edges
+        WHERE tenant_id = $1
+          AND derived_claim_id = $2
+          AND derived_claim_version = 1
+          AND relation = 'INVALIDATED_BY'`,
+      [ids.tenantId, correctionClaimId],
+    );
+    assert.equal(invalidation.rowCount, 1);
+    assert.equal(
+      invalidation.rows[0].source_repair_event_id,
+      revocation.repair_event_id,
+    );
+
+    const repair = await db.query(
+      `SELECT kind,
+              status,
+              structured_payload
+         FROM translation_repair_events
+        WHERE tenant_id = $1
+          AND repair_event_id = $2`,
+      [
+        ids.tenantId,
+        revocation.repair_event_id,
+      ],
+    );
+    assert.equal(repair.rowCount, 1);
+    assert.equal(
+      repair.rows[0].kind,
+      "EXPLICIT_CORRECTION",
+    );
+    assert.equal(
+      repair.rows[0].status,
+      "APPLIED",
+    );
+    assert.deepEqual(
+      repair.rows[0].structured_payload,
+      {
+        schema_version: 1,
+        action: "REVOKE_CORRECTION",
+        claim_id: correctionClaimId,
+        claim_version: 1,
+      },
+    );
+
+    const state = await db.query(
+      `SELECT correction_claim_refs
+         FROM conversation_context_states
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(state.rowCount, 1);
+    assert.deepEqual(
+      state.rows[0].correction_claim_refs,
+      [],
+    );
+  });
+
+  runtimeNow = "2026-10-05T08:00:03.000Z";
+
+  const postRevokeAccepted =
+    await runtime.sendService.sendMessage(
+      sender,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.postRevokeCommandId,
+        client_message_id:
+          ids.postRevokeClientMessageId,
+        conversation_id: ids.conversationId,
+        source: {
+          text: POST_REVOKE_SOURCE_TEXT,
+          language_hint: "fr-FR",
+        },
+        client_authored_at: NOW,
+      },
+    );
+
+  assert.equal(
+    postRevokeAccepted.status,
+    "ACCEPTED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runFanoutOnce(),
+    "FANOUT_DONE",
+  );
+
+  await withConnection(async (db) => {
+    const snapshot = await db.query(
+      `SELECT strategy,
+              selected_claim_refs,
+              selected_candidate_ids
+         FROM context_snapshots
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND recipient_user_id = $3`,
+      [
+        ids.tenantId,
+        postRevokeAccepted.message_id,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(snapshot.rowCount, 1);
+    assert.equal(
+      snapshot.rows[0].strategy,
+      "T1",
+    );
+    assert.deepEqual(
+      snapshot.rows[0].selected_claim_refs,
+      [],
+    );
+    assert.equal(
+      snapshot.rows[0].selected_candidate_ids.some(
+        (id) =>
+          id.startsWith(
+            `claim:${correctionClaimId}:`,
+          ),
+      ),
+      false,
+    );
+  });
+
+  assert.equal(
+    await runtime.contextStateWorker.runOnce(),
+    "REDUCED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runExecuteOnce(),
+    "EXECUTION_DONE",
+  );
+  assert.equal(providerCalls, 3);
 
   const staleContextAccepted =
     await runtime.sendService.sendMessage(
@@ -1236,6 +1427,8 @@ try {
     "feedback=repair-only " +
     "correction=speaker-scoped-self-applied " +
     "supersession=old-invalidated " +
+    "revocation=claim-revoked " +
+    "post-revoke=correction-absent " +
     "t2=confirmed-correction-context " +
     "hpke=original+translation sync=2 ack=purged " +
     "erasure_epoch=stale-context-superseded\n",
