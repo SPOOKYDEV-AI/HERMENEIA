@@ -72,6 +72,7 @@ const ids = {
   postRevokeCommandId: randomUUID(),
   postRevokeClientMessageId: randomUUID(),
   tenantPolicyMutationCommandId: randomUUID(),
+  tenantPolicyUpdateCommandId: randomUUID(),
   tenantPolicyRevokeCommandId: randomUUID(),
   tenantPolicyCommandId: randomUUID(),
   tenantPolicyClientMessageId: randomUUID(),
@@ -915,6 +916,57 @@ try {
       1,
     );
 
+    const supersededClaim = await db.query(
+      `SELECT status,
+              proposition_ref
+         FROM context_claims
+        WHERE tenant_id = $1
+          AND claim_id = $2
+          AND claim_version = 1`,
+      [
+        ids.tenantId,
+        supersededTenantPolicyClaimId,
+      ],
+    );
+    assert.equal(
+      supersededClaim.rowCount,
+      1,
+    );
+    assert.equal(
+      supersededClaim.rows[0].status,
+      "INVALIDATED",
+    );
+    assert.equal(
+      supersededClaim.rows[0].proposition_ref.meaning,
+      "service level accord",
+    );
+
+    const overrideProvenance =
+      await db.query(
+        `SELECT relation,
+                derived_claim_id,
+                source_claim_id
+           FROM provenance_edges
+          WHERE tenant_id = $1
+            AND derived_claim_id = $2
+            AND derived_claim_version = 1
+            AND source_claim_id = $3
+            AND source_claim_version = 1`,
+        [
+          ids.tenantId,
+          supersededTenantPolicyClaimId,
+          tenantPolicyClaimId,
+        ],
+      );
+    assert.equal(
+      overrideProvenance.rowCount,
+      1,
+    );
+    assert.equal(
+      overrideProvenance.rows[0].relation,
+      "OVERRIDDEN_BY",
+    );
+
     const claim = await db.query(
       `SELECT authority_class,
               retention_class,
@@ -1646,7 +1698,7 @@ try {
           schema_version: 1,
           kind: "TERM_MEANING",
           surface_form: "SLA",
-          meaning: "service level agreement",
+          meaning: "service level accord",
           source_language_tag: "fr-FR",
           target_language_tag: TARGET_LANGUAGE,
         },
@@ -1673,8 +1725,60 @@ try {
     tenantPolicyCreated.superseded_claims,
     [],
   );
-  const tenantPolicyClaimId =
+  const supersededTenantPolicyClaimId =
     tenantPolicyCreated.claim_id;
+
+  runtimeNow = "2026-10-05T08:00:05.200Z";
+
+  const tenantPolicyUpdated =
+    await runtime.tenantPolicyService.upsertPolicy(
+      tenantAdmin,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.tenantPolicyUpdateCommandId,
+        kind: "GLOSSARY",
+        proposition: {
+          schema_version: 1,
+          kind: "TERM_MEANING",
+          surface_form: "SLA",
+          meaning: "service level agreement",
+          source_language_tag: "fr-FR",
+          target_language_tag: TARGET_LANGUAGE,
+        },
+      },
+    );
+
+  assert.equal(
+    tenantPolicyUpdated.status,
+    "ACTIVE",
+  );
+  assert.equal(
+    tenantPolicyUpdated.kind,
+    "GLOSSARY",
+  );
+  assert.equal(
+    tenantPolicyUpdated.claim_version,
+    1,
+  );
+  assert.equal(
+    tenantPolicyUpdated.tenant_policy_version,
+    3,
+  );
+  assert.deepEqual(
+    tenantPolicyUpdated.superseded_claims,
+    [{
+      claim_id:
+        supersededTenantPolicyClaimId,
+      claim_version: 1,
+    }],
+  );
+  const tenantPolicyClaimId =
+    tenantPolicyUpdated.claim_id;
+  assert.notEqual(
+    tenantPolicyClaimId,
+    supersededTenantPolicyClaimId,
+  );
 
   await withConnection(async (db) => {
     const adminConversationMembership =
@@ -1907,7 +2011,7 @@ try {
       Number(
         snapshots.rows[0].tenant_policy_version,
       ),
-      2,
+      3,
     );
     assert.ok(
       snapshots.rows[0].selected_claim_refs.includes(
@@ -1956,7 +2060,7 @@ try {
   );
   assert.equal(
     tenantPolicyRevoked.tenant_policy_version,
-    3,
+    4,
   );
 
   await withConnection(async (db) => {
@@ -2158,6 +2262,7 @@ try {
     "revocation=claim-revoked " +
     "post-revoke=correction-absent " +
     "tenant-policy=control-plane-created " +
+    "tenant-policy-update=old-invalidated " +
     "tenant-policy-revoked=control-plane " +
     "conversation_policy_version=stable " +
     "tenant_policy_version=stale-context-superseded " +
