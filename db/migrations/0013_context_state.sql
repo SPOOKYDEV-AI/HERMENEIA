@@ -150,6 +150,8 @@ CREATE TABLE translation_repair_events (
     REFERENCES conversations(tenant_id, conversation_id),
   FOREIGN KEY (tenant_id, conversation_id, actor_user_id)
     REFERENCES conversation_members(tenant_id, conversation_id, user_id),
+  FOREIGN KEY (tenant_id, target_translation_id)
+    REFERENCES translation_executions(tenant_id, translation_id),
   FOREIGN KEY (tenant_id, target_message_id, target_source_revision)
     REFERENCES message_revisions(tenant_id, message_id, revision),
   CHECK (
@@ -229,8 +231,10 @@ CREATE TABLE context_claims (
     REFERENCES conversations(tenant_id, conversation_id),
   FOREIGN KEY (tenant_id, scope_conversation_id)
     REFERENCES conversations(tenant_id, conversation_id),
-  FOREIGN KEY (subject_user_id)
-    REFERENCES users(user_id),
+  FOREIGN KEY (tenant_id, conversation_id, message_id)
+    REFERENCES message_metadata(tenant_id, conversation_id, message_id),
+  FOREIGN KEY (tenant_id, subject_user_id)
+    REFERENCES tenant_memberships(tenant_id, user_id),
   CHECK (jsonb_typeof(proposition_ref) = 'object'),
   CHECK (octet_length(proposition_ref::text) <= 8192),
   CHECK (NOT hermeneia_context_jsonb_has_forbidden_key(proposition_ref)),
@@ -239,9 +243,14 @@ CREATE TABLE context_claims (
     OR
     (
       scope_kind = 'CONVERSATION'
+      AND conversation_id IS NOT NULL
       AND scope_conversation_id IS NOT NULL
       AND conversation_id = scope_conversation_id
     )
+  ),
+  CHECK (
+    message_id IS NULL
+    OR conversation_id IS NOT NULL
   ),
   CHECK (
     valid_until IS NULL
