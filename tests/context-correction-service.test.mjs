@@ -345,43 +345,37 @@ test("tone correction is retained for confirmation until style-memory semantics 
   );
 });
 
-test("tenant correction requires tenant admin or owner before promotion", async () => {
-  const member = fixture({
-    conversationRole: "MODERATOR",
-    tenantRole: "MEMBER",
-  });
-  const pending =
-    await member.service.createCorrection(
-      actor,
-      command({
-        requested_scope: "TENANT",
-      }),
-    );
-  assert.equal(
-    pending.status,
-    "NEEDS_CONFIRMATION",
-  );
+test("tenant correction remains pending until tenant-wide claim distribution exists", async () => {
+  for (const tenantRole of [
+    "MEMBER",
+    "ADMIN",
+    "OWNER",
+  ]) {
+    const f = fixture({
+      conversationRole: "MODERATOR",
+      tenantRole,
+    });
 
-  const admin = fixture({
-    conversationRole: "MEMBER",
-    tenantRole: "ADMIN",
-  });
-  const applied =
-    await admin.service.createCorrection(
-      actor,
-      command({
-        requested_scope: "TENANT",
-      }),
+    const result =
+      await f.service.createCorrection(
+        actor,
+        command({
+          requested_scope: "TENANT",
+        }),
+      );
+
+    assert.equal(
+      result.status,
+      "NEEDS_CONFIRMATION",
     );
-  assert.equal(applied.status, "APPLIED");
-  assert.equal(
-    applied.applied_scope,
-    "TENANT",
-  );
-  assert.equal(
-    admin.claims[0].scopeConversationId,
-    null,
-  );
+    assert.equal(
+      result.applied_scope,
+      null,
+    );
+    assert.equal(result.claim_id, null);
+    assert.equal(f.claims.length, 0);
+    assert.equal(f.provenance.length, 0);
+  }
 });
 
 test("correction command replay is idempotent and does not duplicate repair or claim state", async () => {
