@@ -293,7 +293,7 @@ test("fanout plan resolves locale override and membership version without source
   );
 });
 
-test("publish lock verifies source, target profile, erasure and policy frontiers", async () => {
+test("publish lock verifies source, target profile, erasure, conversation policy and tenant policy frontiers", async () => {
   const connection = new ScriptedConnection([
     { rows: [row()], rowCount: 1 },
   ]);
@@ -326,7 +326,12 @@ test("publish lock verifies source, target profile, erasure and policy frontiers
     sql.text,
     /cs\.policy_version = c\.policy_version/,
   );
-  assert.match(sql.text, /FOR UPDATE OF te, mm, cm, c/);
+  assert.match(
+    sql.text,
+    /cs\.tenant_policy_version = t\.policy_version/,
+  );
+  assert.match(sql.text, /JOIN tenants t/);
+  assert.match(sql.text, /FOR UPDATE OF te, mm, cm, c, t/);
 });
 
 test("translation publish device query locks active devices with public material", async () => {
