@@ -31,12 +31,13 @@ A failure rolls the transaction back. A retry with the same command and fingerpr
 
 ## Authority and scope
 
-| Requested scope | Current V1 result |
+| Requested scope / authority | Current V1 result |
 | --- | --- |
 | MESSAGE | `RECORDED`; no shared durable T2 claim |
-| CONVERSATION + MODERATOR | `APPLIED` for supported structured correction |
-| CONVERSATION + tenant ADMIN/OWNER | `APPLIED` for supported structured correction |
-| CONVERSATION + ordinary MEMBER | `NEEDS_CONFIRMATION` |
+| CONVERSATION + MEMBER correcting their own source revision | `APPLIED`; claim gets `subject_user_id = actor` |
+| CONVERSATION + MEMBER correcting another speaker or no anchored source | `NEEDS_CONFIRMATION` |
+| CONVERSATION + MODERATOR | `APPLIED`; generic conversation claim when not a self-correction |
+| CONVERSATION + tenant ADMIN/OWNER | `APPLIED`; generic conversation claim when not a self-correction |
 | TENANT | `NEEDS_CONFIRMATION` until tenant-wide distribution exists |
 | TONE | `NEEDS_CONFIRMATION` until typed style-memory semantics exist |
 
@@ -74,6 +75,8 @@ claim.valid_from < source_revision.created_at
 ```
 
 A claim created at the same instant or later is excluded from that translation. This also handles edited revisions correctly because each revision has its own causal timestamp.
+
+Speaker-scoped correction claims add a second independent fence. `subject_user_id` must either be NULL (generic authorised policy/correction) or exactly equal the current source revision's author. The planning query obtains that author from `message_metadata.author_user_id`; the T2 materializer fails closed on a subject mismatch. A user's self-correction can therefore improve their own future wording without silently redefining another participant's language.
 
 ConversationState keeps only the newest 128 correction claim references in its working set. Historical claims and provenance remain durable in PostgreSQL.
 
