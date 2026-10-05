@@ -25,6 +25,7 @@ export interface TranslationContextCandidateSet {
   currentMessageSequence: number;
   currentOperationSequence: number;
   erasureEpoch: number;
+  policyVersion: number;
   strategy: ContextStrategy;
   state: ConversationContextState | null;
   candidates: ContextCandidate[];
@@ -69,6 +70,7 @@ export class TranslationContextService<Tx> {
       currentMessageSequence: loaded.currentMessageSequence,
       currentOperationSequence: loaded.currentOperationSequence,
       erasureEpoch: loaded.erasureEpoch,
+      policyVersion: loaded.policyVersion,
       strategy: loaded.strategy,
       state: loaded.state,
       candidates: loaded.candidates,
