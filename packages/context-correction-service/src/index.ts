@@ -649,6 +649,99 @@ export class ContextCorrectionService<Tx> {
     scope: "CONVERSATION" | "TENANT",
     now: string,
   ): Promise<void> {
+    if (command.kind === "TONE") {
+      if (
+        scope !== "CONVERSATION" ||
+        subjectUserId === null
+      ) {
+        throw new Error(
+          "Explicit style preference requires conversation scope and a subject user",
+        );
+      }
+
+      const superseded =
+        await this.deps.corrections.invalidateSupersededStylePreferenceClaims(
+          tx,
+          {
+            tenantId: actor.tenantId,
+            conversationId:
+              command.conversation_id,
+            subjectUserId,
+            propositionRef,
+            invalidatedAt: now,
+          },
+        );
+
+      await this.deps.corrections.insertExplicitPreferenceClaim(
+        tx,
+        {
+          tenantId: actor.tenantId,
+          claimId,
+          conversationId:
+            command.conversation_id,
+          subjectUserId,
+          propositionRef,
+          createdAt: now,
+        },
+      );
+
+      await this.deps.corrections.insertRepairProvenance(
+        tx,
+        {
+          tenantId: actor.tenantId,
+          provenanceEdgeId:
+            this.deps.ids.next("provenance"),
+          claimId,
+          repairEventId,
+          strategyVersion:
+            this.strategyVersion,
+          createdAt: now,
+        },
+      );
+
+      for (const previous of superseded) {
+        await this.deps.corrections.insertClaimOverrideProvenance(
+          tx,
+          {
+            tenantId: actor.tenantId,
+            provenanceEdgeId:
+              this.deps.ids.next("provenance"),
+            overriddenClaimId:
+              previous.claimId,
+            overriddenClaimVersion:
+              previous.claimVersion,
+            replacementClaimId: claimId,
+            replacementClaimVersion: 1,
+            strategyVersion:
+              this.strategyVersion,
+            createdAt: now,
+          },
+        );
+      }
+
+      const policyVersion =
+        await this.deps.corrections.bumpConversationPolicyVersion(
+          tx,
+          {
+            tenantId: actor.tenantId,
+            conversationId:
+              command.conversation_id,
+          },
+        );
+
+      await this.rebaseStateForPreference(
+        tx,
+        actor,
+        command.conversation_id,
+        {
+          ...authority,
+          policyVersion,
+        },
+        now,
+      );
+      return;
+    }
+
     const superseded =
       await this.deps.corrections.invalidateSupersededCorrectionClaims(
         tx,
@@ -870,6 +963,104 @@ export class ContextCorrectionService<Tx> {
     if (!updated) {
       throw new Error(
         "ConversationState changed despite correction revocation row lock",
+      );
+    }
+  }
+
+  private async rebaseStateForPreference(
+    tx: Tx,
+    actor: ActorContext,
+    conversationId: UUID,
+    authority: CorrectionAuthority,
+    now: string,
+  ): Promise<void> {
+    const existing = await this.deps.state.loadState(
+      tx,
+      {
+        tenantId: actor.tenantId,
+        conversationId,
+        forUpdate: true,
+      },
+    );
+
+    if (!existing) {
+      const created =
+        authority.nextOperationSequence <= 1
+          ? createInitialContextState({
+              tenantId: actor.tenantId,
+              conversationId,
+              membershipEpoch:
+                authority.membershipEpoch,
+              erasureEpoch:
+                authority.erasureEpoch,
+              policyVersion:
+                authority.policyVersion,
+              strategyVersion:
+                this.strategyVersion,
+              now,
+            })
+          : createDegradedContextStateFromFloor({
+              tenantId: actor.tenantId,
+              conversationId,
+              causalFloorOpSeq:
+                authority.nextOperationSequence - 1,
+              membershipEpoch:
+                authority.membershipEpoch,
+              erasureEpoch:
+                authority.erasureEpoch,
+              policyVersion:
+                authority.policyVersion,
+              strategyVersion:
+                this.strategyVersion,
+              now,
+            });
+
+      const inserted =
+        await this.deps.state.insertState(
+          tx,
+          created,
+        );
+      if (!inserted) {
+        throw new Error(
+          "ConversationState appeared concurrently during style preference update",
+        );
+      }
+      return;
+    }
+
+    const expectedStateVersion =
+      existing.stateVersion;
+    const next = rebaseContextStateAuthority(
+      existing,
+      {
+        membershipEpoch:
+          authority.membershipEpoch,
+        erasureEpoch:
+          authority.erasureEpoch,
+        policyVersion:
+          authority.policyVersion,
+        now,
+      },
+    );
+
+    if (
+      next.stateVersion ===
+      expectedStateVersion
+    ) {
+      return;
+    }
+
+    const updated =
+      await this.deps.state.updateState(
+        tx,
+        {
+          expectedStateVersion,
+          state: next,
+        },
+      );
+    if (!updated) {
+      throw new Error(
+        "ConversationState changed despite style preference authority lock",
       );
     }
   }
