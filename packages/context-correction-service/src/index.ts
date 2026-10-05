@@ -154,8 +154,9 @@ export class ContextCorrectionService<Tx> {
           toneStyle?.status ??
           claimPromotion!.status;
         const appliedScope =
-          toneStyle?.scope ??
-          claimPromotion!.scope;
+          toneStyle
+            ? toneStyle.scope
+            : claimPromotion!.scope;
 
         const repairEventId =
           this.deps.ids.next("repair");
