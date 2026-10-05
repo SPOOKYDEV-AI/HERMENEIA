@@ -95,6 +95,7 @@ export function restoreContextStateFromCheckpoint(
     tenantId: UUID;
     conversationId: UUID;
     requiredProcessedPrefixOpSeq: number;
+    strategyVersion: string;
     now: string;
   },
 ): ConversationContextState | null {
@@ -108,6 +109,8 @@ export function restoreContextStateFromCheckpoint(
       input.conversationId ||
     checkpoint.processedPrefixOpSeq !==
       input.requiredProcessedPrefixOpSeq ||
+    checkpoint.contextStrategyVersion !==
+      input.strategyVersion ||
     Date.parse(checkpoint.expiresAt) <=
       Date.parse(input.now) ||
     !Number.isSafeInteger(
