@@ -393,6 +393,7 @@ export async function createPersistentSendRuntime({
         outboxRepository,
         outboxService,
         clock,
+        transientSources,
       });
 
     const correctionService =
