@@ -95,8 +95,13 @@ function durableRow(overrides = {}) {
     entity_handles: ["entity:project"],
     unresolved_reference_handles: [],
     style_state: {
-      formality: "MEDIUM",
-      confidence: 0.7,
+      profiles: [{
+        speakerUserId: "speaker-a",
+        preferredRegister: "NEUTRAL",
+        sourceRepairEventId: "repair-style-1",
+        confidence: 1,
+        updatedAt: "2026-10-05T08:59:00.000Z",
+      }],
     },
     pragmatic_state: {
       stance: "NEUTRAL",
@@ -153,6 +158,13 @@ test("PostgreSQL ConversationState load validates durable JSON and maps operatio
     terminologyClaimRefs: ["claim:term-1"],
     lexicalClaimRefs: [],
     correctionClaimRefs: ["claim:correction-1"],
+    styleProfiles: [{
+      speakerUserId: "speaker-a",
+      preferredRegister: "NEUTRAL",
+      sourceRepairEventId: "repair-style-1",
+      confidence: 1,
+      updatedAt: "2026-10-05T08:59:00.000Z",
+    }],
     updatedAt: "2026-10-05 09:00:00+00",
   });
 
