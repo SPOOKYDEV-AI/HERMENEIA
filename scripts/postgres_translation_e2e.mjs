@@ -111,6 +111,7 @@ const tenantAdminKeys = await generateHpkeP256DeviceKeyPair();
 const codec = createHpkeP256EnvelopeCodec();
 
 let providerCalls = 0;
+let episodeProviderObservation = null;
 const translationProvider = {
   providerId: "ci-deterministic",
   modelId: "ci-translation-v1",
@@ -266,69 +267,12 @@ const translationProvider = {
         );
       }
     } else if (providerCalls === 13) {
-      assert.equal(
-        input.source.text,
-        EPISODE_SOURCE_TEXTS[6],
-      );
-
-      const episodeItem =
-        input.contextItems.find(
-          (item) =>
-            item.candidateType ===
-              "ACTIVE_EPISODE",
-        );
-      assert.ok(episodeItem);
-      assert.equal(
-        episodeItem.selectionReason,
-        "ACTIVE_EPISODE",
-      );
-
-      const episode =
-        JSON.parse(episodeItem.content);
-      assert.equal(
-        episode.kind,
-        "trusted_active_episode_tail",
-      );
-      assert.equal(
-        episode.episode_version,
-        6,
-      );
-      assert.ok(
-        episode.continuity_confidence >= 0.6 &&
-        episode.continuity_confidence <= 1,
-      );
-      assert.deepEqual(
-        episode.messages,
-        EPISODE_SOURCE_TEXTS
-          .slice(0, 3)
-          .map((source_text) => ({
-            source_text,
-          })),
-      );
-
-      const immediateContents =
-        input.contextItems
-          .filter(
-            (item) =>
-              item.candidateType ===
-                "IMMEDIATE_MESSAGE",
-          )
-          .map((item) => item.content);
-
-      for (const oldText of EPISODE_SOURCE_TEXTS.slice(0, 3)) {
-        assert.equal(
-          immediateContents.includes(oldText),
-          false,
-          "episode-tail source must not be duplicated into nominal immediate window",
-        );
-      }
-      for (const recentText of EPISODE_SOURCE_TEXTS.slice(3, 6)) {
-        assert.equal(
-          immediateContents.includes(recentText),
-          true,
-          "three most recent prior messages remain immediate context",
-        );
-      }
+      episodeProviderObservation = {
+        sourceText: input.source.text,
+        contextItems: structuredClone(
+          input.contextItems,
+        ),
+      };
     } else {
       assert.fail(
         `Unexpected provider call #${providerCalls}`,
@@ -2531,6 +2475,69 @@ try {
     "EXECUTION_DONE",
   );
   assert.equal(providerCalls, 13);
+
+  assert.ok(episodeProviderObservation);
+  assert.equal(
+    episodeProviderObservation.sourceText,
+    EPISODE_SOURCE_TEXTS[6],
+  );
+
+  const observedEpisode =
+    episodeProviderObservation.contextItems.find(
+      (item) =>
+        item.candidateType ===
+          "ACTIVE_EPISODE",
+    );
+  assert.ok(observedEpisode);
+  assert.equal(
+    observedEpisode.selectionReason,
+    "ACTIVE_EPISODE",
+  );
+
+  const episodePayload =
+    JSON.parse(observedEpisode.content);
+  assert.equal(
+    episodePayload.kind,
+    "trusted_active_episode_tail",
+  );
+  assert.equal(
+    episodePayload.episode_version,
+    6,
+  );
+  assert.ok(
+    episodePayload.continuity_confidence >= 0.6 &&
+    episodePayload.continuity_confidence <= 1,
+  );
+  assert.deepEqual(
+    episodePayload.messages,
+    EPISODE_SOURCE_TEXTS
+      .slice(0, 3)
+      .map((source_text) => ({
+        source_text,
+      })),
+  );
+
+  const observedImmediate =
+    episodeProviderObservation.contextItems
+      .filter(
+        (item) =>
+          item.candidateType ===
+            "IMMEDIATE_MESSAGE",
+      )
+      .map((item) => item.content);
+
+  for (const oldText of EPISODE_SOURCE_TEXTS.slice(0, 3)) {
+    assert.equal(
+      observedImmediate.includes(oldText),
+      false,
+    );
+  }
+  for (const recentText of EPISODE_SOURCE_TEXTS.slice(3, 6)) {
+    assert.equal(
+      observedImmediate.includes(recentText),
+      true,
+    );
+  }
 
   runtimeNow = "2026-10-05T09:00:10.000Z";
 
