@@ -350,6 +350,28 @@ export interface PersistentEnvelopeProtector {
   }): string | Promise<string>;
 }
 
+export interface PersistentContextOperationRecorder<Tx> {
+  register(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+      operationId: UUID;
+      kind:
+        | "MESSAGE_CREATED"
+        | "MESSAGE_EDITED"
+        | "MESSAGE_DELETED";
+      messageId: UUID;
+      sourceRevision: number;
+      opSeq: number;
+      membershipEpoch: number;
+      erasureEpoch: number;
+      policyVersion: number;
+      registeredAt: string;
+    },
+  ): Promise<void>;
+}
+
 export interface PersistentMessagingServiceDependencies<Tx> {
   store: PersistentMessagingStore<Tx>;
   ids: PersistentMessagingIdFactory;
@@ -357,6 +379,7 @@ export interface PersistentMessagingServiceDependencies<Tx> {
   fingerprinter: PersistentSourceFingerprinter;
   envelopeProtector: PersistentEnvelopeProtector;
   transientSources?: TransientSourceStore;
+  contextOperations?: PersistentContextOperationRecorder<Tx>;
   envelopeTtlSeconds?: number;
   transientSourceTtlSeconds?: number;
 }
@@ -690,6 +713,20 @@ export class PersistentMessagingService<Tx> {
           createdAt: now,
         });
 
+        await this.registerContextOperation(tx, {
+          tenantId: actor.tenantId,
+          conversationId: command.conversation_id,
+          operationId: command.command_id,
+          kind: "MESSAGE_CREATED",
+          messageId: proposedMessageId,
+          sourceRevision,
+          opSeq: allocation.opSeq,
+          membershipEpoch: allocation.membershipEpoch,
+          erasureEpoch: allocation.erasureEpoch,
+          policyVersion: allocation.policyVersion,
+          registeredAt: now,
+        });
+
         const expiresAt = addSeconds(
           now,
           this.envelopeTtlSeconds,
@@ -949,6 +986,11 @@ export class PersistentMessagingService<Tx> {
             "Conversation is not available to actor",
           );
         }
+        if (allocation.erasureEpoch !== nextErasureEpoch) {
+          throw new Error(
+            "Conversation erasure epoch changed during edit allocation",
+          );
+        }
 
         const targets =
           await this.deps.store.listMessageEditDeliveryTargets(
@@ -993,6 +1035,20 @@ export class PersistentMessagingService<Tx> {
           sourceHash: sourceFingerprint,
           sourceLanguage: command.source.language_hint ?? null,
           createdAt: now,
+        });
+
+        await this.registerContextOperation(tx, {
+          tenantId: actor.tenantId,
+          conversationId: message.conversationId,
+          operationId: command.command_id,
+          kind: "MESSAGE_EDITED",
+          messageId: command.message_id,
+          sourceRevision: newRevision,
+          opSeq: allocation.opSeq,
+          membershipEpoch: allocation.membershipEpoch,
+          erasureEpoch: allocation.erasureEpoch,
+          policyVersion: allocation.policyVersion,
+          registeredAt: now,
         });
 
         await this.deps.store.updateMessageRevisionPointer(tx, {
@@ -1247,22 +1303,6 @@ export class PersistentMessagingService<Tx> {
         );
       }
 
-      const allocation =
-        await this.deps.store.allocateOperationSequence(
-          tx,
-          actor,
-          message.conversationId,
-        );
-      if (!allocation) {
-        throw new DomainError(
-          "NOT_AUTHORIZED",
-          "Conversation is not available to actor",
-        );
-      }
-
-      const previousRevision = message.currentRevision;
-      const newRevision = previousRevision + 1;
-
       const nextErasureEpoch =
         await this.deps.store.bumpConversationErasureEpoch(
           tx,
@@ -1275,6 +1315,27 @@ export class PersistentMessagingService<Tx> {
           "Conversation is not available to actor",
         );
       }
+
+      const allocation =
+        await this.deps.store.allocateOperationSequence(
+          tx,
+          actor,
+          message.conversationId,
+        );
+      if (!allocation) {
+        throw new DomainError(
+          "NOT_AUTHORIZED",
+          "Conversation is not available to actor",
+        );
+      }
+      if (allocation.erasureEpoch !== nextErasureEpoch) {
+        throw new Error(
+          "Conversation erasure epoch changed during delete allocation",
+        );
+      }
+
+      const previousRevision = message.currentRevision;
+      const newRevision = previousRevision + 1;
 
       previousTransientKey = {
         tenantId: actor.tenantId,
@@ -1293,6 +1354,20 @@ export class PersistentMessagingService<Tx> {
         sourceHash: null,
         sourceLanguage: null,
         createdAt: now,
+      });
+
+      await this.registerContextOperation(tx, {
+        tenantId: actor.tenantId,
+        conversationId: message.conversationId,
+        operationId: command.command_id,
+        kind: "MESSAGE_DELETED",
+        messageId: command.message_id,
+        sourceRevision: newRevision,
+        opSeq: allocation.opSeq,
+        membershipEpoch: allocation.membershipEpoch,
+        erasureEpoch: allocation.erasureEpoch,
+        policyVersion: allocation.policyVersion,
+        registeredAt: now,
       });
 
       await this.deps.store.updateMessageRevisionPointer(tx, {
@@ -1391,6 +1466,33 @@ export class PersistentMessagingService<Tx> {
       }
     }
     return result;
+  }
+
+  private async registerContextOperation(
+    tx: Tx,
+    input: Parameters<
+      NonNullable<
+        PersistentMessagingServiceDependencies<Tx>["contextOperations"]
+      >["register"]
+    >[1],
+  ): Promise<void> {
+    if (!this.deps.contextOperations) return;
+
+    await this.deps.contextOperations.register(tx, input);
+    await this.deps.store.insertOutboxJob(tx, {
+      jobId: this.deps.ids.next("job"),
+      tenantId: input.tenantId,
+      jobType: "context.reduce",
+      businessKey:
+        `${input.conversationId}:${input.opSeq}`,
+      payloadRef: {
+        conversation_id: input.conversationId,
+        operation_id: input.operationId,
+        op_seq: input.opSeq,
+      },
+      priority: 20,
+      availableAt: input.registeredAt,
+    });
   }
 
   private async bestEffortBufferSource(
