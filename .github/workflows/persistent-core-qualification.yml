@@ -10,6 +10,7 @@ on:
       - feat/conversation-state-runtime-v1
       - feat/context-derived-claims-v1
       - feat/context-correction-ingestion-v1
+      - feat/translation-feedback-v1
   workflow_dispatch:
 
 permissions:
