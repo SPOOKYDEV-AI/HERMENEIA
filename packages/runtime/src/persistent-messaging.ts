@@ -7,6 +7,7 @@ import {
   type PersistentMessagingClock,
   type PersistentMessagingIdFactory,
   type PersistentSourceFingerprinter,
+  type PersistentContextOperationRecorder,
 } from "../../messaging-service/src/index.js";
 
 export interface PostgresMessagingApplicationDependencies {
@@ -16,6 +17,7 @@ export interface PostgresMessagingApplicationDependencies {
   fingerprinter: PersistentSourceFingerprinter;
   envelopeProtector: PersistentEnvelopeProtector;
   transientSources?: TransientSourceStore;
+  contextOperations?: PersistentContextOperationRecorder<SqlExecutor>;
   envelopeTtlSeconds?: number;
   transientSourceTtlSeconds?: number;
 }
@@ -30,6 +32,7 @@ export function createPostgresMessagingService(
     fingerprinter: deps.fingerprinter,
     envelopeProtector: deps.envelopeProtector,
     transientSources: deps.transientSources,
+    contextOperations: deps.contextOperations,
     envelopeTtlSeconds: deps.envelopeTtlSeconds,
     transientSourceTtlSeconds: deps.transientSourceTtlSeconds,
   });
