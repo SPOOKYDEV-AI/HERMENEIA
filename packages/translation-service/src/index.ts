@@ -29,6 +29,11 @@ export type ProviderExecutionStatus =
   | "RATE_LIMITED"
   | "CANCELLED_LOGICALLY";
 
+export type TranslationPreferredRegister =
+  | "NEUTRAL"
+  | "FORMAL"
+  | "INFORMAL";
+
 export interface TranslationLogicalKey {
   tenantId: UUID;
   conversationId: UUID;
@@ -37,6 +42,7 @@ export interface TranslationLogicalKey {
   recipientUserId: UUID;
   targetLanguageTag: string;
   targetProfileVersion: number;
+  preferredRegister: TranslationPreferredRegister | null;
   contextSnapshotId: UUID | null;
   strategyVersion: string;
 }
@@ -45,6 +51,7 @@ export interface TranslationFanoutTarget {
   recipientUserId: UUID;
   targetLanguageTag: string;
   targetProfileVersion: number;
+  preferredRegister: TranslationPreferredRegister | null;
 }
 
 export interface TranslationFanoutPlan {
@@ -351,6 +358,16 @@ function validateLogicalKey(key: TranslationLogicalKey): void {
   ) {
     throw new TypeError(
       "targetProfileVersion must be a positive integer",
+    );
+  }
+  if (
+    key.preferredRegister !== null &&
+    !["NEUTRAL", "FORMAL", "INFORMAL"].includes(
+      key.preferredRegister,
+    )
+  ) {
+    throw new TypeError(
+      "preferredRegister must be a supported explicit register",
     );
   }
 }
