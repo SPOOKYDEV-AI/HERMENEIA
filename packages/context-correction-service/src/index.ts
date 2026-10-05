@@ -6,12 +6,15 @@ import {
 import type {
   CorrectionCommand,
   CorrectionResult,
+  CorrectionRevocationCommand,
+  CorrectionRevocationResult,
 } from "../../protocol/src/index.js";
 import {
   createDegradedContextStateFromFloor,
   createInitialContextState,
   replaceConfirmedCorrectionClaim,
   rebaseContextStateAuthority,
+  unlinkConfirmedCorrectionClaim,
 } from "../../context-state/src/index.js";
 import type {
   CorrectionAuthority,
@@ -22,9 +25,11 @@ import {
   decideCorrectionPromotion,
   normaliseCorrection,
   validateCorrectionCommand,
+  isUuid,
 } from "./policy.js";
 import {
   replayCorrectionCommand,
+  replayCorrectionRevocationCommand,
 } from "./replay.js";
 
 export type {
@@ -195,6 +200,207 @@ export class ContextCorrectionService<Tx> {
             actorUserId: actor.userId,
             actorDeviceId: actor.deviceId,
             commandType: "context.correction",
+            commandFingerprint,
+            result:
+              result as unknown as Record<string, unknown>,
+            now,
+          },
+        );
+
+        return result;
+      },
+    );
+  }
+
+  async revokeCorrection(
+    actor: ActorContext,
+    command: CorrectionRevocationCommand,
+  ): Promise<CorrectionRevocationResult> {
+    if (
+      command.protocol_version !== 1 ||
+      !isUuid(command.command_id) ||
+      !isUuid(command.conversation_id) ||
+      !isUuid(command.claim_id)
+    ) {
+      throw new DomainError(
+        "INVALID_COMMAND",
+        "Invalid correction revocation identity",
+      );
+    }
+
+    const now = this.deps.clock.now();
+    if (!Number.isFinite(Date.parse(now))) {
+      throw new TypeError(
+        "Correction revocation clock returned an invalid timestamp",
+      );
+    }
+
+    const commandFingerprint = JSON.stringify({
+      v: 1,
+      type: "context.correction.revoke",
+      conversation_id: command.conversation_id,
+      claim_id: command.claim_id,
+    });
+
+    return this.deps.transactions.withTransaction(
+      async (tx) => {
+        const commandClaim =
+          await this.deps.commands.claimCommand(tx, {
+            actor,
+            commandId: command.command_id,
+            commandType:
+              "context.correction.revoke",
+            commandFingerprint,
+            now,
+          });
+
+        if (!commandClaim.claimed) {
+          return replayCorrectionRevocationCommand(
+            commandClaim.existing,
+            actor,
+            commandFingerprint,
+          );
+        }
+
+        const authority =
+          await this.deps.corrections.loadAuthority(
+            tx,
+            {
+              actor,
+              conversationId:
+                command.conversation_id,
+            },
+          );
+        if (!authority) {
+          throw new DomainError(
+            "NOT_AUTHORIZED",
+            "Conversation is not available to actor",
+          );
+        }
+
+        const claim =
+          await this.deps.corrections.loadRevocableCorrectionClaim(
+            tx,
+            {
+              tenantId: actor.tenantId,
+              conversationId:
+                command.conversation_id,
+              claimId: command.claim_id,
+            },
+          );
+
+        if (!claim) {
+          throw new DomainError(
+            "NOT_AUTHORIZED",
+            "Correction claim is not available for revocation",
+          );
+        }
+
+        const actorCanRevoke =
+          claim.subjectUserId !== null
+            ? claim.subjectUserId === actor.userId
+            : (
+                authority.conversationRole ===
+                  "MODERATOR" ||
+                authority.tenantRole === "ADMIN" ||
+                authority.tenantRole === "OWNER"
+              );
+
+        if (!actorCanRevoke) {
+          throw new DomainError(
+            "NOT_AUTHORIZED",
+            "Correction claim is not available for revocation",
+          );
+        }
+
+        const repairEventId =
+          this.deps.ids.next("repair");
+
+        await this.deps.corrections.insertRepairEvent(
+          tx,
+          {
+            tenantId: actor.tenantId,
+            repairEventId,
+            conversationId:
+              command.conversation_id,
+            actorUserId: actor.userId,
+            targetTranslationId: null,
+            targetMessageId: null,
+            targetSourceRevision: null,
+            kind: "EXPLICIT_CORRECTION",
+            status: "APPLIED",
+            structuredPayload: {
+              schema_version: 1,
+              action: "REVOKE_CORRECTION",
+              claim_id: claim.claimId,
+              claim_version:
+                claim.claimVersion,
+            },
+            commandId: command.command_id,
+            createdAt: now,
+          },
+        );
+
+        const revoked =
+          await this.deps.corrections.revokeCorrectionClaim(
+            tx,
+            {
+              tenantId: actor.tenantId,
+              claimId: claim.claimId,
+              claimVersion:
+                claim.claimVersion,
+              revokedAt: now,
+            },
+          );
+        if (!revoked) {
+          throw new Error(
+            "Correction claim changed despite revocation row lock",
+          );
+        }
+
+        await this.deps.corrections.insertClaimInvalidationProvenance(
+          tx,
+          {
+            tenantId: actor.tenantId,
+            provenanceEdgeId:
+              this.deps.ids.next("provenance"),
+            claimId: claim.claimId,
+            claimVersion:
+              claim.claimVersion,
+            repairEventId,
+            strategyVersion:
+              this.strategyVersion,
+            createdAt: now,
+          },
+        );
+
+        await this.unlinkClaimFromState(
+          tx,
+          actor,
+          command.conversation_id,
+          authority,
+          claim.claimId,
+          now,
+        );
+
+        const result: CorrectionRevocationResult = {
+          protocol_version: 1,
+          repair_event_id: repairEventId,
+          claim_id: claim.claimId,
+          claim_version:
+            claim.claimVersion,
+          status: "REVOKED",
+        };
+
+        await this.deps.commands.markCommandSucceeded(
+          tx,
+          {
+            tenantId: actor.tenantId,
+            commandId: command.command_id,
+            actorUserId: actor.userId,
+            actorDeviceId: actor.deviceId,
+            commandType:
+              "context.correction.revoke",
             commandFingerprint,
             result:
               result as unknown as Record<string, unknown>,
@@ -384,6 +590,65 @@ export class ContextCorrectionService<Tx> {
       sourceRevision,
       authorUserId,
     };
+  }
+
+  private async unlinkClaimFromState(
+    tx: Tx,
+    actor: ActorContext,
+    conversationId: UUID,
+    authority: CorrectionAuthority,
+    claimId: UUID,
+    now: string,
+  ): Promise<void> {
+    const existing = await this.deps.state.loadState(
+      tx,
+      {
+        tenantId: actor.tenantId,
+        conversationId,
+        forUpdate: true,
+      },
+    );
+    if (!existing) return;
+
+    const expectedStateVersion =
+      existing.stateVersion;
+    let next = rebaseContextStateAuthority(
+      existing,
+      {
+        membershipEpoch:
+          authority.membershipEpoch,
+        erasureEpoch:
+          authority.erasureEpoch,
+        policyVersion:
+          authority.policyVersion,
+        now,
+      },
+    );
+    next = unlinkConfirmedCorrectionClaim(
+      next,
+      { claimId, now },
+    );
+
+    if (
+      next.stateVersion ===
+      expectedStateVersion
+    ) {
+      return;
+    }
+
+    const updated =
+      await this.deps.state.updateState(
+        tx,
+        {
+          expectedStateVersion,
+          state: next,
+        },
+      );
+    if (!updated) {
+      throw new Error(
+        "ConversationState changed despite correction revocation row lock",
+      );
+    }
   }
 
   private async linkClaimIntoState(
