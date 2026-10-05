@@ -161,6 +161,21 @@ export interface CorrectionCommand {
   payload: Record<string, unknown>;
 }
 
+export interface CorrectionRevocationCommand {
+  protocol_version: 1;
+  command_id: UUID;
+  conversation_id: UUID;
+  claim_id: UUID;
+}
+
+export interface CorrectionRevocationResult {
+  protocol_version: 1;
+  repair_event_id: UUID;
+  claim_id: UUID;
+  claim_version: number;
+  status: "REVOKED";
+}
+
 export interface CorrectionResult {
   protocol_version: 1;
   repair_event_id: UUID;
