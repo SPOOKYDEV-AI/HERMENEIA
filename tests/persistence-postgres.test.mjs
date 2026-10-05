@@ -449,10 +449,12 @@ test("inbox event replay is filtered by authenticated tenant and device", async 
   assert.equal(rows[0].envelopeStatus, "PENDING");
   const sql = connection.queries[1];
   assert.match(sql.text, /de\.status AS envelope_status/);
+  assert.match(sql.text, /THEN replace\(/);
   assert.match(
     sql.text,
-    /replace\([\s\S]*encode\(de\.protected_payload,'base64'\)[\s\S]*E'\\\\n'[\s\S]*''[\s\S]*\)/,
+    /encode\(de\.protected_payload,'base64'\)/,
   );
+  assert.equal(sql.text.includes("E'\\n'"), true);
   assert.match(sql.text, /die\.tenant_id = \$1/);
   assert.match(sql.text, /die\.device_id = \$2/);
   assert.deepEqual(sql.params, [
