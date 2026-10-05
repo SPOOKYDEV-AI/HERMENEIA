@@ -12,16 +12,19 @@ import type {
 export type CandidateClaimAuthority =
   | "POLICY"
   | "APPROVED_GLOSSARY"
+  | "EXPLICIT_PREFERENCE"
   | "CONFIRMED_CORRECTION";
 
 export type CandidateClaimRetention =
   | "CORRECTIVE_DURABLE"
+  | "PREFERENCE_DURABLE"
   | "POLICY_REFERENCE";
 
 export type CandidateClaimTrigger =
   | "EXPLICIT_UI_CORRECTION"
   | "EXPLICIT_TEXTUAL_CORRECTION"
   | "APPROVED_GLOSSARY_CHANGE"
+  | "EXPLICIT_PREFERENCE_CHANGE"
   | "TENANT_POLICY_CHANGE";
 
 export interface CandidateClaimRecord {
@@ -70,6 +73,16 @@ export type SupportedProposition =
       targetForm: string;
       sourceLanguageTag: string | null;
       targetLanguageTag: string;
+    }
+  | {
+      schemaVersion: 1;
+      kind: "STYLE_PREFERENCE";
+      preferredRegister:
+        | "NEUTRAL"
+        | "FORMAL"
+        | "INFORMAL";
+      sourceLanguageTag: null;
+      targetLanguageTag: null;
     };
 
 export function materializeReferencedClaimCandidates(
@@ -154,7 +167,9 @@ export function materializeReferencedClaimCandidates(
       candidateType:
         claim.authorityClass === "CONFIRMED_CORRECTION"
           ? "CORRECTION_MEMORY"
-          : "APPROVED_POLICY",
+          : claim.authorityClass === "EXPLICIT_PREFERENCE"
+            ? "USER_PREFERENCE"
+            : "APPROVED_POLICY",
       content: renderProposition(proposition),
       causalThroughOperationSequence:
         input.state.processedPrefixOperationSequence,
@@ -170,7 +185,9 @@ export function materializeReferencedClaimCandidates(
       privacyScope:
         claim.authorityClass === "CONFIRMED_CORRECTION"
           ? "CORRECTION"
-          : "POLICY",
+          : claim.authorityClass === "EXPLICIT_PREFERENCE"
+            ? "PREFERENCE"
+            : "POLICY",
       erasureEpoch: input.state.erasureEpoch,
       validUntil: arbitrated.validUntil,
       correctionTrigger,
@@ -241,6 +258,16 @@ function isAdmissibleClaim(
       claim.modality === "CORRECTION" &&
       (claim.triggerKind === "EXPLICIT_UI_CORRECTION" ||
         claim.triggerKind === "EXPLICIT_TEXTUAL_CORRECTION")
+    );
+  }
+
+  if (claim.authorityClass === "EXPLICIT_PREFERENCE") {
+    return (
+      claim.retentionClass === "PREFERENCE_DURABLE" &&
+      claim.modality === "ASSERTION" &&
+      claim.subjectUserId !== null &&
+      claim.scopeKind === "CONVERSATION" &&
+      claim.triggerKind === "EXPLICIT_PREFERENCE_CHANGE"
     );
   }
 
@@ -317,6 +344,33 @@ export function parseSupportedClaimProposition(
     };
   }
 
+  if (value.kind === "STYLE_PREFERENCE") {
+    const preferredRegister =
+      typeof value.preferred_register === "string"
+        ? value.preferred_register
+        : null;
+    if (
+      !preferredRegister ||
+      !["NEUTRAL", "FORMAL", "INFORMAL"].includes(
+        preferredRegister,
+      )
+    ) {
+      return null;
+    }
+
+    return {
+      schemaVersion: 1,
+      kind: "STYLE_PREFERENCE",
+      preferredRegister:
+        preferredRegister as
+          | "NEUTRAL"
+          | "FORMAL"
+          | "INFORMAL",
+      sourceLanguageTag: null,
+      targetLanguageTag: null,
+    };
+  }
+
   return null;
 }
 
@@ -335,6 +389,15 @@ export function storedClaimProposition(
       ...(proposition.targetLanguageTag
         ? { target_language_tag: proposition.targetLanguageTag }
         : {}),
+    };
+  }
+
+  if (proposition.kind === "STYLE_PREFERENCE") {
+    return {
+      schema_version: 1,
+      kind: proposition.kind,
+      preferred_register:
+        proposition.preferredRegister,
     };
   }
 
@@ -370,6 +433,14 @@ function renderProposition(
               proposition.targetLanguageTag,
           }
         : {}),
+    });
+  }
+
+  if (proposition.kind === "STYLE_PREFERENCE") {
+    return JSON.stringify({
+      kind: "trusted_style_preference",
+      preferred_register:
+        proposition.preferredRegister,
     });
   }
 
