@@ -146,29 +146,18 @@ function resolveConsensus(
 function semanticKey(
   proposition: SupportedProposition,
 ): string {
-  if (proposition.kind === "TERM_MEANING") {
-    return JSON.stringify([
-      proposition.kind,
-      proposition.surfaceForm,
-      normaliseLanguageTag(
-        proposition.sourceLanguageTag,
-      ),
-      normaliseLanguageTag(
-        proposition.targetLanguageTag,
-      ),
-    ]);
-  }
-
-  return JSON.stringify([
-    proposition.kind,
-    proposition.sourceForm,
-    normaliseLanguageTag(
-      proposition.sourceLanguageTag,
-    ),
-    normaliseLanguageTag(
-      proposition.targetLanguageTag,
-    ),
-  ]);
+  // Language applicability is resolved before arbitration. At this point a
+  // generic claim and a language-specific claim may both apply to the same
+  // current message, so qualifiers must not split them into separate keys.
+  return proposition.kind === "TERM_MEANING"
+    ? JSON.stringify([
+        proposition.kind,
+        proposition.surfaceForm,
+      ])
+    : JSON.stringify([
+        proposition.kind,
+        proposition.sourceForm,
+      ]);
 }
 
 function propositionValueKey(
@@ -213,8 +202,3 @@ function earliestFiniteValidity(
   return finite[0] ?? null;
 }
 
-function normaliseLanguageTag(
-  value: string | null,
-): string {
-  return value?.trim().toLowerCase() ?? "";
-}
