@@ -15,13 +15,15 @@ export type ContextCandidateType =
   | "ACTIVE_EPISODE"
   | "RECOVERY_CHECKPOINT"
   | "CORRECTION_MEMORY"
-  | "APPROVED_POLICY";
+  | "APPROVED_POLICY"
+  | "EXPLICIT_PREFERENCE";
 
 export type ContextPrivacyScope =
   | "TRANSIENT"
   | "CHECKPOINT"
   | "CORRECTION"
-  | "POLICY";
+  | "POLICY"
+  | "PREFERENCE";
 
 export type CorrectionTrigger =
   | "EXPLICIT_UI"
@@ -154,6 +156,7 @@ export interface SelectedContextItem {
     | "IMMEDIATE_CONTEXT"
     | "ACTIVE_EPISODE"
     | "CORRECTION_OR_POLICY"
+    | "EXPLICIT_PREFERENCE"
     | "RECOVERY_CHECKPOINT"
     | "ADAPTIVE_UTILITY";
 }
@@ -548,6 +551,17 @@ export class ContextEngine {
             "APPROVED_POLICY",
       ),
       "CORRECTION_OR_POLICY",
+      "memory",
+      input.budget.memoryReserveTokens,
+    );
+
+    selectFrom(
+      scored.filter(
+        ({ candidate }) =>
+          candidate.candidateType ===
+          "EXPLICIT_PREFERENCE",
+      ),
+      "EXPLICIT_PREFERENCE",
       "memory",
       input.budget.memoryReserveTokens,
     );
