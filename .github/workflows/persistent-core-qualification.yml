@@ -19,6 +19,7 @@ on:
       - feat/correction-review-v1
       - feat/tenant-policy-overlay-v1
       - feat/context-policy-version-fence-v1
+      - feat/tenant-policy-cold-overlay-v1
   workflow_dispatch:
 
 permissions:
