@@ -14,6 +14,7 @@ on:
       - feat/speaker-scoped-corrections-v1
       - feat/correction-supersession-v1
       - feat/context-claim-arbitration-v1
+      - feat/context-claim-language-fence-v1
   workflow_dispatch:
 
 permissions:
