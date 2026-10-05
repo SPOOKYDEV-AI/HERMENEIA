@@ -16,12 +16,14 @@ import type {
 export interface RecentContextMessageRef {
   messageId: UUID;
   sourceRevision: number;
-  sequence: number;
+  messageSequence: number;
+  operationSequence: number;
   acceptedAt: string;
 }
 
 export interface ContextPlanningFrame {
-  currentSequence: number;
+  currentMessageSequence: number;
+  currentOperationSequence: number;
   erasureEpoch: number;
   recentMessages: RecentContextMessageRef[];
 }
@@ -128,7 +130,7 @@ export class TranslationContextPlanner
           ? toImmediateCandidate(
               ref,
               source.source.text,
-              frame.currentSequence,
+              frame.currentMessageSequence,
               frame.erasureEpoch,
             )
           : null;
@@ -154,7 +156,8 @@ export class TranslationContextPlanner
           : "T0";
 
     return {
-      currentSequence: frame.currentSequence,
+      currentMessageSequence: frame.currentMessageSequence,
+      currentOperationSequence: frame.currentOperationSequence,
       erasureEpoch: frame.erasureEpoch,
       strategy,
       state,
@@ -182,12 +185,12 @@ export class TranslationContextPlanner
 function toImmediateCandidate(
   ref: RecentContextMessageRef,
   content: string,
-  currentSequence: number,
+  currentMessageSequence: number,
   erasureEpoch: number,
 ): ContextCandidate {
   const distance = Math.max(
     1,
-    currentSequence - ref.sequence,
+    currentMessageSequence - ref.messageSequence,
   );
 
   return {
@@ -195,8 +198,8 @@ function toImmediateCandidate(
       `message:${ref.messageId}:${ref.sourceRevision}`,
     candidateType: "IMMEDIATE_MESSAGE",
     content,
-    sourceSequence: ref.sequence,
-    causalThroughSequence: ref.sequence,
+    sourceMessageSequence: ref.messageSequence,
+    causalThroughOperationSequence: ref.operationSequence,
     sourceRevisionRefs: [
       `${ref.messageId}:${ref.sourceRevision}`,
     ],
