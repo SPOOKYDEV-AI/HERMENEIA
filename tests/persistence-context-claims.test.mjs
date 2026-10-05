@@ -104,7 +104,10 @@ test("PostgreSQL claim loader enforces referenced IDs and admissibility in SQL",
   });
 
   const query = connection.queries[1];
-  assert.match(query.text, /claim_id = ANY\(\$2::uuid\[\]\)/);
+  assert.match(
+    query.text,
+    /jsonb_array_elements_text\(\$2::jsonb\)/,
+  );
   assert.match(query.text, /status = 'ACTIVE'/);
   assert.match(query.text, /sensitivity_class = 'NORMAL'/);
   assert.match(query.text, /scope_conversation_id = \$3/);
