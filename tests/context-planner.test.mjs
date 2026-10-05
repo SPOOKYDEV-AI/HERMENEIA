@@ -31,25 +31,29 @@ function request(overrides = {}) {
 
 function frame(overrides = {}) {
   return {
-    currentSequence: 8,
+    currentMessageSequence: 8,
+    currentOperationSequence: 8,
     erasureEpoch: 2,
     recentMessages: [
       {
         messageId: "message-7",
         sourceRevision: 1,
-        sequence: 7,
+        messageSequence: 7,
+        operationSequence: 7,
         acceptedAt: "2026-10-04T19:59:58.000Z",
       },
       {
         messageId: "message-6",
         sourceRevision: 2,
-        sequence: 6,
+        messageSequence: 6,
+        operationSequence: 6,
         acceptedAt: "2026-10-04T19:59:55.000Z",
       },
       {
         messageId: "message-5",
         sourceRevision: 1,
-        sequence: 5,
+        messageSequence: 5,
+        operationSequence: 5,
         acceptedAt: "2026-10-04T19:59:50.000Z",
       },
     ],
@@ -116,7 +120,8 @@ test("planner chooses T1 from exact recent transient sources without durable sta
 
   assert.equal(result.strategy, "T1");
   assert.equal(result.state, null);
-  assert.equal(result.currentSequence, 8);
+  assert.equal(result.currentMessageSequence, 8);
+  assert.equal(result.currentOperationSequence, 8);
   assert.equal(result.erasureEpoch, 2);
   assert.deepEqual(
     result.candidates.map((candidate) => candidate.candidateId),
@@ -134,6 +139,37 @@ test("planner chooses T1 from exact recent transient sources without durable sta
   assert.equal(result.budget.currentMessageTokens, 4);
 });
 
+test("planner preserves edited prior-message operation sequence separately from message order", async () => {
+  const { planner, transientSources } = fixture({
+    planningFrame: frame({
+      currentMessageSequence: 8,
+      currentOperationSequence: 10,
+      recentMessages: [
+        {
+          messageId: "message-7",
+          sourceRevision: 2,
+          messageSequence: 7,
+          operationSequence: 9,
+          acceptedAt: "2026-10-04T19:59:58.000Z",
+        },
+      ],
+    }),
+  });
+
+  put(transientSources, "message-7", 2, "edited seven");
+
+  const result = await planner.load(request());
+
+  assert.equal(result.currentMessageSequence, 8);
+  assert.equal(result.currentOperationSequence, 10);
+  assert.equal(result.candidates.length, 1);
+  assert.equal(result.candidates[0].sourceMessageSequence, 7);
+  assert.equal(
+    result.candidates[0].causalThroughOperationSequence,
+    9,
+  );
+});
+
 test("planner chooses T0 when no recent transient source survives", async () => {
   const { planner } = fixture();
 
@@ -149,8 +185,8 @@ test("planner chooses T2 only with compatible derived ContextState", async () =>
   const compatibleState = {
     conversationId: "conversation-1",
     contextVersion: 4,
-    processedPrefixSequence: 7,
-    processingGaps: [],
+    processedPrefixOperationSequence: 7,
+    processingGapOperationSequences: [],
     erasureEpoch: 2,
     activeEpisodeId: "episode-1",
     activeEpisodeVersion: 3,
@@ -173,8 +209,8 @@ test("planner rejects stale derived state by degrading to T1 instead of fabricat
     state: {
       conversationId: "conversation-1",
       contextVersion: 9,
-      processedPrefixSequence: 7,
-      processingGaps: [],
+      processedPrefixOperationSequence: 7,
+      processingGapOperationSequences: [],
       erasureEpoch: 1,
       activeEpisodeId: null,
       activeEpisodeVersion: null,
