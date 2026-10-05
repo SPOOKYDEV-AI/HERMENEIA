@@ -46,6 +46,21 @@ export function createPostgresContextStateWorker(
       >[1],
     ) => deps.stateRepository.updateState(tx, input),
 
+    isTranslationFanoutPending: (
+      tx: SqlExecutor,
+      input: {
+        tenantId: string;
+        messageId: string;
+        sourceRevision: number;
+      },
+    ) =>
+      deps.outboxRepository.isJobPending(tx, {
+        tenantId: input.tenantId,
+        jobType: "translation.request",
+        businessKey:
+          `${input.messageId}:${input.sourceRevision}`,
+      }),
+
     completeJob: (
       tx: SqlExecutor,
       input: Parameters<
