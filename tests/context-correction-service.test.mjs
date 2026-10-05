@@ -24,6 +24,10 @@ const TRANSLATION =
   "10000000-0000-4000-8000-000000000007";
 const OTHER_USER =
   "10000000-0000-4000-8000-000000000008";
+const CLAIM =
+  "10000000-0000-4000-8000-000000000009";
+const OTHER_CLAIM =
+  "10000000-0000-4000-8000-000000000010";
 const NOW = "2026-10-05T11:00:00.000Z";
 
 const actor = {
@@ -71,12 +75,19 @@ function fixture({
   messageAuthorUserId = OTHER_USER,
   nextOperationSequence = 1,
   supersededClaims = [],
+  revocableClaim = {
+    claimId: CLAIM,
+    claimVersion: 1,
+    subjectUserId: USER,
+  },
 } = {}) {
   const receipts = new Map();
   const events = [];
   const claims = [];
   const provenance = [];
   const overrideProvenance = [];
+  const invalidationProvenance = [];
+  const revocations = [];
   let currentState = state
     ? structuredClone(state)
     : undefined;
@@ -158,6 +169,23 @@ function fixture({
       events.push(structuredClone(input));
     },
 
+    async loadRevocableCorrectionClaim(
+      _tx,
+      input,
+    ) {
+      return (
+        revocableClaim &&
+        input.claimId === revocableClaim.claimId
+      )
+        ? structuredClone(revocableClaim)
+        : undefined;
+    },
+
+    async revokeCorrectionClaim(_tx, input) {
+      revocations.push(structuredClone(input));
+      return true;
+    },
+
     async invalidateSupersededCorrectionClaims() {
       return structuredClone(
         supersededClaims,
@@ -173,6 +201,15 @@ function fixture({
       input,
     ) {
       overrideProvenance.push(
+        structuredClone(input),
+      );
+    },
+
+    async insertClaimInvalidationProvenance(
+      _tx,
+      input,
+    ) {
+      invalidationProvenance.push(
         structuredClone(input),
       );
     },
@@ -237,6 +274,8 @@ function fixture({
     claims,
     provenance,
     overrideProvenance,
+    invalidationProvenance,
+    revocations,
     state: () =>
       currentState
         ? structuredClone(currentState)
@@ -647,4 +686,239 @@ test("new self-correction supersedes prior same-key claim and replaces its Conve
     f.state().correctionClaimRefs,
     [result.claim_id],
   );
+});
+
+
+function revokeCommand(overrides = {}) {
+  return {
+    protocol_version: 1,
+    command_id:
+      "11000000-0000-4000-8000-000000000001",
+    conversation_id: CONVERSATION,
+    claim_id: CLAIM,
+    ...overrides,
+  };
+}
+
+test("member can revoke their own speaker-scoped correction and remove it from working state", async () => {
+  const existingState = createInitialContextState({
+    tenantId: TENANT,
+    conversationId: CONVERSATION,
+    membershipEpoch: 0,
+    erasureEpoch: 0,
+    policyVersion: 1,
+    strategyVersion: "context-state-v1",
+    now: NOW,
+  });
+  existingState.correctionClaimRefs = [CLAIM];
+
+  const f = fixture({
+    conversationRole: "MEMBER",
+    state: existingState,
+    revocableClaim: {
+      claimId: CLAIM,
+      claimVersion: 2,
+      subjectUserId: USER,
+    },
+  });
+
+  const result = await f.service.revokeCorrection(
+    actor,
+    revokeCommand(),
+  );
+
+  assert.deepEqual(result, {
+    protocol_version: 1,
+    repair_event_id: result.repair_event_id,
+    claim_id: CLAIM,
+    claim_version: 2,
+    status: "REVOKED",
+  });
+  assert.equal(f.events.length, 1);
+  assert.equal(
+    f.events[0].kind,
+    "EXPLICIT_CORRECTION",
+  );
+  assert.equal(f.events[0].status, "APPLIED");
+  assert.deepEqual(
+    f.events[0].structuredPayload,
+    {
+      schema_version: 1,
+      action: "REVOKE_CORRECTION",
+      claim_id: CLAIM,
+      claim_version: 2,
+    },
+  );
+  assert.equal(f.revocations.length, 1);
+  assert.equal(
+    f.revocations[0].claimId,
+    CLAIM,
+  );
+  assert.equal(
+    f.invalidationProvenance.length,
+    1,
+  );
+  assert.equal(
+    f.invalidationProvenance[0].repairEventId,
+    result.repair_event_id,
+  );
+  assert.deepEqual(
+    f.state().correctionClaimRefs,
+    [],
+  );
+});
+
+test("moderator or tenant owner cannot revoke another speaker's explicit meaning correction", async () => {
+  const f = fixture({
+    tenantRole: "OWNER",
+    conversationRole: "MODERATOR",
+    revocableClaim: {
+      claimId: CLAIM,
+      claimVersion: 1,
+      subjectUserId: OTHER_USER,
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      f.service.revokeCorrection(
+        actor,
+        revokeCommand(),
+      ),
+    (error) =>
+      error?.code === "NOT_AUTHORIZED",
+  );
+
+  assert.equal(f.revocations.length, 0);
+  assert.equal(f.events.length, 0);
+});
+
+test("ordinary member cannot revoke a generic correction", async () => {
+  const f = fixture({
+    tenantRole: "MEMBER",
+    conversationRole: "MEMBER",
+    revocableClaim: {
+      claimId: CLAIM,
+      claimVersion: 1,
+      subjectUserId: null,
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      f.service.revokeCorrection(
+        actor,
+        revokeCommand(),
+      ),
+    (error) =>
+      error?.code === "NOT_AUTHORIZED",
+  );
+  assert.equal(f.revocations.length, 0);
+});
+
+test("moderator can revoke a generic correction", async () => {
+  const existingState = createInitialContextState({
+    tenantId: TENANT,
+    conversationId: CONVERSATION,
+    membershipEpoch: 0,
+    erasureEpoch: 0,
+    policyVersion: 1,
+    strategyVersion: "context-state-v1",
+    now: NOW,
+  });
+  existingState.correctionClaimRefs = [CLAIM];
+
+  const f = fixture({
+    tenantRole: "MEMBER",
+    conversationRole: "MODERATOR",
+    state: existingState,
+    revocableClaim: {
+      claimId: CLAIM,
+      claimVersion: 1,
+      subjectUserId: null,
+    },
+  });
+
+  const result = await f.service.revokeCorrection(
+    actor,
+    revokeCommand(),
+  );
+
+  assert.equal(result.status, "REVOKED");
+  assert.equal(f.revocations.length, 1);
+  assert.deepEqual(
+    f.state().correctionClaimRefs,
+    [],
+  );
+});
+
+test("tenant admin can revoke a generic correction without moderator role", async () => {
+  const f = fixture({
+    tenantRole: "ADMIN",
+    conversationRole: "MEMBER",
+    revocableClaim: {
+      claimId: CLAIM,
+      claimVersion: 1,
+      subjectUserId: null,
+    },
+  });
+
+  const result = await f.service.revokeCorrection(
+    actor,
+    revokeCommand(),
+  );
+  assert.equal(result.status, "REVOKED");
+});
+
+test("correction revocation replay is idempotent and command-id reuse is fenced", async () => {
+  const f = fixture();
+
+  const first = await f.service.revokeCorrection(
+    actor,
+    revokeCommand(),
+  );
+  const replay = await f.service.revokeCorrection(
+    actor,
+    revokeCommand(),
+  );
+
+  assert.deepEqual(replay, first);
+  assert.equal(f.events.length, 1);
+  assert.equal(f.revocations.length, 1);
+  assert.equal(
+    f.invalidationProvenance.length,
+    1,
+  );
+
+  await assert.rejects(
+    () =>
+      f.service.revokeCorrection(
+        actor,
+        revokeCommand({
+          claim_id: OTHER_CLAIM,
+        }),
+      ),
+    (error) =>
+      error?.code ===
+      "IDEMPOTENCY_CONFLICT",
+  );
+});
+
+test("inactive or unavailable correction claim fails closed without revealing its state", async () => {
+  const f = fixture({
+    revocableClaim: null,
+  });
+
+  await assert.rejects(
+    () =>
+      f.service.revokeCorrection(
+        actor,
+        revokeCommand(),
+      ),
+    (error) =>
+      error?.code === "NOT_AUTHORIZED",
+  );
+
+  assert.equal(f.events.length, 0);
+  assert.equal(f.revocations.length, 0);
 });

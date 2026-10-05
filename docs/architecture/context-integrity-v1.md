@@ -221,6 +221,8 @@ HERMENEIA should:
 9. apply the corrected meaning to future translations;
 10. optionally offer retranslation of affected prior messages without overwriting originals.
 
+If a correction itself is later withdrawn without replacement, HERMENEIA must preserve the historical claim and provenance rather than delete them. The claim becomes `REVOKED`, receives bounded temporal validity, gets an `INVALIDATED_BY` edge to the explicit revocation repair event, and is removed from working ConversationState. Authority follows the claim subject: only the subject may revoke their speaker-scoped intended meaning, while generic correction revocation requires an authorised moderator/admin role.
+
 ## 11. Message edit workflow
 
 In the executable T0/T1 runtime, a successful edit advances the conversation `erasure_epoch` transactionally before the replacement revision is published. This is the current coarse-grained invalidation frontier: any previously prepared ContextSnapshot from the older epoch becomes ineligible for translation publication.

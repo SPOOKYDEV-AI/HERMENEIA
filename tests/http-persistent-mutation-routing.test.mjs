@@ -308,3 +308,72 @@ test("HTTP translation feedback is routed to the injected persistent feedback se
     },
   }]);
 });
+
+
+test("HTTP correction revocation is routed to the persistent correction service", async (t) => {
+  const calls = [];
+  const correctionService = {
+    async createCorrection() {
+      throw new Error("unused");
+    },
+    async revokeCorrection(
+      receivedActor,
+      command,
+    ) {
+      calls.push({
+        actor: receivedActor,
+        command,
+      });
+      return {
+        protocol_version: 1,
+        repair_event_id:
+          "repair-revoke-1",
+        claim_id: "claim-1",
+        claim_version: 2,
+        status: "REVOKED",
+      };
+    },
+  };
+
+  const server = createHermeneiaHttpServer({
+    core: coreThatMustNotMutate(),
+    correctionService,
+    authenticate() {
+      return actor;
+    },
+  });
+  t.after(() => server.close());
+
+  const base = await listen(server);
+  const response = await fetch(
+    `${base}/v1/conversations/conversation-1/corrections/claim-1/revoke`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        protocol_version: 1,
+        command_id: "revoke-command-1",
+      }),
+    },
+  );
+
+  assert.equal(response.status, 202);
+  assert.deepEqual(await response.json(), {
+    protocol_version: 1,
+    repair_event_id: "repair-revoke-1",
+    claim_id: "claim-1",
+    claim_version: 2,
+    status: "REVOKED",
+  });
+  assert.deepEqual(calls, [{
+    actor,
+    command: {
+      protocol_version: 1,
+      command_id: "revoke-command-1",
+      conversation_id: "conversation-1",
+      claim_id: "claim-1",
+    },
+  }]);
+});

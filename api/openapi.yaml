@@ -218,6 +218,34 @@ paths:
           $ref: '#/components/responses/Conflict'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /v1/conversations/{conversation_id}/corrections/{claim_id}/revoke:
+    post:
+      tags: [Translation]
+      operationId: revokeCorrection
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+        - name: claim_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CorrectionRevocationRequest'
+      responses:
+        '202':
+          description: Active correction memory revoked without deleting its audit history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CorrectionRevocationResult'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /v1/translations/{translation_id}/source:
     post:
       tags: [Translation]
@@ -675,6 +703,41 @@ components:
             - type: integer
               minimum: 1
             - type: 'null'
+    CorrectionRevocationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - command_id
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+    CorrectionRevocationResult:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - repair_event_id
+        - claim_id
+        - claim_version
+        - status
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        repair_event_id:
+          $ref: '#/components/schemas/Uuid'
+        claim_id:
+          $ref: '#/components/schemas/Uuid'
+        claim_version:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [REVOKED]
     SourceResupplyRequest:
       type: object
       additionalProperties: false

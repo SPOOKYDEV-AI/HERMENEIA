@@ -5,6 +5,7 @@ import type {
 } from "../../domain/src/index.js";
 import type {
   CorrectionResult,
+  CorrectionRevocationResult,
   CorrectionScope,
 } from "../../protocol/src/index.js";
 import {
@@ -108,5 +109,69 @@ function correctionResultFromRecord(
       value.claim_id as UUID | null,
     claim_version:
       value.claim_version as number | null,
+  };
+}
+
+
+export function replayCorrectionRevocationCommand(
+  existing: {
+    actorUserId: UUID;
+    actorDeviceId: UUID;
+    commandType: string;
+    commandFingerprint: string | null;
+    status: "IN_PROGRESS" | "SUCCEEDED" | "FAILED";
+    result: Record<string, unknown>;
+  },
+  actor: ActorContext,
+  commandFingerprint: string,
+): CorrectionRevocationResult {
+  if (
+    existing.actorUserId !== actor.userId ||
+    existing.actorDeviceId !== actor.deviceId
+  ) {
+    throw new DomainError(
+      "NOT_AUTHORIZED",
+      "Command identifier is not available to actor",
+    );
+  }
+
+  if (
+    existing.commandType !==
+      "context.correction.revoke" ||
+    existing.commandFingerprint !==
+      commandFingerprint
+  ) {
+    throw new DomainError(
+      "IDEMPOTENCY_CONFLICT",
+      "command_id was already used for a different operation",
+    );
+  }
+
+  if (existing.status !== "SUCCEEDED") {
+    throw new Error(
+      "Persistent correction revocation command receipt is not terminal",
+    );
+  }
+
+  const value = existing.result;
+  if (
+    value.protocol_version !== 1 ||
+    !isUuid(value.repair_event_id) ||
+    !isUuid(value.claim_id) ||
+    !Number.isInteger(value.claim_version) ||
+    Number(value.claim_version) < 1 ||
+    value.status !== "REVOKED"
+  ) {
+    throw new Error(
+      "Stored correction revocation result is malformed",
+    );
+  }
+
+  return {
+    protocol_version: 1,
+    repair_event_id: value.repair_event_id,
+    claim_id: value.claim_id,
+    claim_version: Number(value.claim_version),
+    status: "REVOKED",
   };
 }

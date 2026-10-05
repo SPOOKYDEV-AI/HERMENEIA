@@ -98,6 +98,7 @@ export interface ContextCorrectionStore<Tx> {
       targetMessageId: UUID | null;
       targetSourceRevision: number | null;
       kind:
+        | "EXPLICIT_CORRECTION"
         | "MEANING_CORRECTION"
         | "TONE_CORRECTION"
         | "TERMINOLOGY_CORRECTION";
@@ -110,6 +111,29 @@ export interface ContextCorrectionStore<Tx> {
       createdAt: string;
     },
   ): Promise<void>;
+
+  loadRevocableCorrectionClaim(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+      claimId: UUID;
+    },
+  ): Promise<{
+    claimId: UUID;
+    claimVersion: number;
+    subjectUserId: UUID | null;
+  } | undefined>;
+
+  revokeCorrectionClaim(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      claimId: UUID;
+      claimVersion: number;
+      revokedAt: string;
+    },
+  ): Promise<boolean>;
 
   invalidateSupersededCorrectionClaims(
     tx: Tx,
@@ -150,6 +174,19 @@ export interface ContextCorrectionStore<Tx> {
       overriddenClaimVersion: number;
       replacementClaimId: UUID;
       replacementClaimVersion: number;
+      strategyVersion: string;
+      createdAt: string;
+    },
+  ): Promise<void>;
+
+  insertClaimInvalidationProvenance(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      provenanceEdgeId: UUID;
+      claimId: UUID;
+      claimVersion: number;
+      repairEventId: UUID;
       strategyVersion: string;
       createdAt: string;
     },

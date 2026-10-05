@@ -439,3 +439,197 @@ test("PostgreSQL override provenance points from old claim to replacement claim"
     "2026-10-05T12:00:00.000Z",
   ]);
 });
+
+
+test("PostgreSQL revocation target locks only active durable confirmed correction memory", async () => {
+  const { repository, connection } =
+    repositoryWith([{
+      rows: [{
+        claim_id: "claim-1",
+        claim_version: 3,
+        subject_user_id: "user-1",
+      }],
+      rowCount: 1,
+    }]);
+
+  const claim =
+    await repository.withTransaction((tx) =>
+      repository.loadRevocableCorrectionClaim(
+        tx,
+        {
+          tenantId: "tenant-1",
+          conversationId:
+            "conversation-1",
+          claimId: "claim-1",
+        },
+      ),
+    );
+
+  assert.deepEqual(claim, {
+    claimId: "claim-1",
+    claimVersion: 3,
+    subjectUserId: "user-1",
+  });
+
+  const query = connection.queries[1];
+  assert.match(
+    query.text,
+    /status = 'ACTIVE'/,
+  );
+  assert.match(
+    query.text,
+    /authority_class = 'CONFIRMED_CORRECTION'/,
+  );
+  assert.match(
+    query.text,
+    /retention_class = 'CORRECTIVE_DURABLE'/,
+  );
+  assert.match(
+    query.text,
+    /modality = 'CORRECTION'/,
+  );
+  assert.match(query.text, /FOR UPDATE/);
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "conversation-1",
+    "claim-1",
+  ]);
+});
+
+test("PostgreSQL correction revocation preserves history by marking claim REVOKED", async () => {
+  const { repository, connection } =
+    repositoryWith([{
+      rows: [],
+      rowCount: 1,
+    }]);
+
+  const revoked =
+    await repository.withTransaction((tx) =>
+      repository.revokeCorrectionClaim(
+        tx,
+        {
+          tenantId: "tenant-1",
+          claimId: "claim-1",
+          claimVersion: 2,
+          revokedAt:
+            "2026-10-05T13:00:00.000Z",
+        },
+      ),
+    );
+
+  assert.equal(revoked, true);
+  const query = connection.queries[1];
+  assert.match(
+    query.text,
+    /status = 'REVOKED'/,
+  );
+  assert.match(
+    query.text,
+    /valid_until = CASE/,
+  );
+  assert.match(
+    query.text,
+    /status = 'ACTIVE'/,
+  );
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "claim-1",
+    2,
+    "2026-10-05T13:00:00.000Z",
+  ]);
+});
+
+test("PostgreSQL correction revocation provenance records INVALIDATED_BY repair event", async () => {
+  const { repository, connection } =
+    repositoryWith([{
+      rows: [],
+      rowCount: 1,
+    }]);
+
+  await repository.withTransaction((tx) =>
+    repository.insertClaimInvalidationProvenance(
+      tx,
+      {
+        tenantId: "tenant-1",
+        provenanceEdgeId:
+          "provenance-revoke-1",
+        claimId: "claim-1",
+        claimVersion: 2,
+        repairEventId: "repair-revoke-1",
+        strategyVersion:
+          "context-state-v1",
+        createdAt:
+          "2026-10-05T13:00:00.000Z",
+      },
+    ),
+  );
+
+  const query = connection.queries[1];
+  assert.match(
+    query.text,
+    /'INVALIDATED_BY'/,
+  );
+  assert.match(
+    query.text,
+    /source_repair_event_id/,
+  );
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "provenance-revoke-1",
+    "claim-1",
+    2,
+    "repair-revoke-1",
+    "context-state-v1",
+    "2026-10-05T13:00:00.000Z",
+  ]);
+});
+
+test("PostgreSQL repair persistence accepts explicit correction revocation audit events", async () => {
+  const { repository, connection } =
+    repositoryWith([{
+      rows: [],
+      rowCount: 1,
+    }]);
+
+  await repository.withTransaction((tx) =>
+    repository.insertRepairEvent(
+      tx,
+      {
+        tenantId: "tenant-1",
+        repairEventId: "repair-revoke-1",
+        conversationId:
+          "conversation-1",
+        actorUserId: "user-1",
+        targetTranslationId: null,
+        targetMessageId: null,
+        targetSourceRevision: null,
+        kind: "EXPLICIT_CORRECTION",
+        status: "APPLIED",
+        structuredPayload: {
+          schema_version: 1,
+          action: "REVOKE_CORRECTION",
+          claim_id: "claim-1",
+          claim_version: 2,
+        },
+        commandId: "command-revoke-1",
+        createdAt:
+          "2026-10-05T13:00:00.000Z",
+      },
+    ),
+  );
+
+  const query = connection.queries[1];
+  assert.equal(
+    query.params[7],
+    "EXPLICIT_CORRECTION",
+  );
+  assert.deepEqual(
+    JSON.parse(query.params[9]),
+    {
+      schema_version: 1,
+      action: "REVOKE_CORRECTION",
+      claim_id: "claim-1",
+      claim_version: 2,
+    },
+  );
+});

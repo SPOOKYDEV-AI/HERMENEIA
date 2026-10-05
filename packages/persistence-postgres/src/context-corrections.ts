@@ -190,6 +190,7 @@ export class PostgresContextCorrectionRepository {
       targetMessageId: UUID | null;
       targetSourceRevision: number | null;
       kind:
+        | "EXPLICIT_CORRECTION"
         | "MEANING_CORRECTION"
         | "TONE_CORRECTION"
         | "TERMINOLOGY_CORRECTION";
@@ -237,6 +238,90 @@ export class PostgresContextCorrectionRepository {
     if (result.rowCount !== 1) {
       throw new Error("Correction repair event was not inserted");
     }
+  }
+
+  async loadRevocableCorrectionClaim(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+      claimId: UUID;
+    },
+  ): Promise<{
+    claimId: UUID;
+    claimVersion: number;
+    subjectUserId: UUID | null;
+  } | undefined> {
+    const result = await tx.query<{
+      claim_id: UUID;
+      claim_version: number;
+      subject_user_id: UUID | null;
+    }>(
+      `SELECT claim_id,
+              claim_version,
+              subject_user_id
+         FROM context_claims
+        WHERE tenant_id = $1
+          AND conversation_id = $2
+          AND claim_id = $3
+          AND scope_kind = 'CONVERSATION'
+          AND scope_conversation_id = $2
+          AND status = 'ACTIVE'
+          AND authority_class = 'CONFIRMED_CORRECTION'
+          AND retention_class = 'CORRECTIVE_DURABLE'
+          AND modality = 'CORRECTION'
+        ORDER BY claim_version DESC
+        LIMIT 1
+        FOR UPDATE`,
+      [
+        input.tenantId,
+        input.conversationId,
+        input.claimId,
+      ],
+    );
+
+    const row = result.rows[0];
+    return row
+      ? {
+          claimId: row.claim_id,
+          claimVersion: Number(row.claim_version),
+          subjectUserId: row.subject_user_id,
+        }
+      : undefined;
+  }
+
+  async revokeCorrectionClaim(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      claimId: UUID;
+      claimVersion: number;
+      revokedAt: string;
+    },
+  ): Promise<boolean> {
+    const result = await tx.query(
+      `UPDATE context_claims
+          SET status = 'REVOKED',
+              valid_until = CASE
+                WHEN valid_from IS NULL OR valid_from < $4
+                  THEN $4
+                ELSE valid_from + interval '1 microsecond'
+              END
+        WHERE tenant_id = $1
+          AND claim_id = $2
+          AND claim_version = $3
+          AND status = 'ACTIVE'
+          AND authority_class = 'CONFIRMED_CORRECTION'
+          AND retention_class = 'CORRECTIVE_DURABLE'
+          AND modality = 'CORRECTION'`,
+      [
+        input.tenantId,
+        input.claimId,
+        input.claimVersion,
+        input.revokedAt,
+      ],
+    );
+    return result.rowCount === 1;
   }
 
   async invalidateSupersededCorrectionClaims(
@@ -439,6 +524,48 @@ export class PostgresContextCorrectionRepository {
     if (result.rowCount !== 1) {
       throw new Error(
         "Correction override provenance edge was not inserted",
+      );
+    }
+  }
+
+  async insertClaimInvalidationProvenance(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      provenanceEdgeId: UUID;
+      claimId: UUID;
+      claimVersion: number;
+      repairEventId: UUID;
+      strategyVersion: string;
+      createdAt: string;
+    },
+  ): Promise<void> {
+    const result = await tx.query(
+      `INSERT INTO provenance_edges(
+         tenant_id,
+         provenance_edge_id,
+         derived_claim_id,
+         derived_claim_version,
+         relation,
+         source_repair_event_id,
+         strategy_version,
+         created_at
+       ) VALUES (
+         $1,$2,$3,$4,'INVALIDATED_BY',$5,$6,$7
+       )`,
+      [
+        input.tenantId,
+        input.provenanceEdgeId,
+        input.claimId,
+        input.claimVersion,
+        input.repairEventId,
+        input.strategyVersion,
+        input.createdAt,
+      ],
+    );
+    if (result.rowCount !== 1) {
+      throw new Error(
+        "Correction invalidation provenance edge was not inserted",
       );
     }
   }
