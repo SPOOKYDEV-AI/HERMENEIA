@@ -1,22 +1,23 @@
 BEGIN;
 
-DO $$
+DO $
 DECLARE
-  legacy_default text;
+  sentinel_default text;
 BEGIN
   SELECT column_default
-    INTO legacy_default
+    INTO sentinel_default
     FROM information_schema.columns
    WHERE table_schema = 'public'
      AND table_name = 'context_snapshots'
      AND column_name = 'policy_version';
 
-  IF legacy_default IS NOT NULL THEN
+  IF sentinel_default IS NULL
+     OR sentinel_default NOT LIKE '%0%' THEN
     RAISE EXCEPTION
-      'context_snapshots.policy_version must not retain a default';
+      'context_snapshots.policy_version must keep fail-closed default 0';
   END IF;
 END
-$$;
+$;
 
 DO $$
 BEGIN
