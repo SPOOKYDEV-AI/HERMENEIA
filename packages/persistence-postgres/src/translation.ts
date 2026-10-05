@@ -321,6 +321,9 @@ export class PostgresTranslationRepository {
            ON c.tenant_id = te.tenant_id
           AND c.conversation_id = te.conversation_id
           AND c.status = 'ACTIVE'
+         JOIN tenants t
+           ON t.tenant_id = te.tenant_id
+          AND t.status = 'ACTIVE'
          JOIN conversation_members cm
            ON cm.tenant_id = te.tenant_id
           AND cm.conversation_id = te.conversation_id
@@ -343,9 +346,10 @@ export class PostgresTranslationRepository {
                  AND cs.snapshot_id = te.context_snapshot_id
                  AND cs.erasure_epoch = c.erasure_epoch
                   AND cs.policy_version = c.policy_version
+                  AND cs.tenant_policy_version = t.policy_version
             )
           )
-        FOR UPDATE OF te, mm, cm, c`,
+        FOR UPDATE OF te, mm, cm, c, t`,
       [tenantId, translationId],
     );
     const row = first(result);
