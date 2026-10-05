@@ -117,3 +117,35 @@ export interface TranslationRecoveryResult {
   translation_id: UUID;
   status: "PENDING" | "SOURCE_REQUIRED" | "READY" | "FAILED" | "SUPERSEDED";
 }
+
+export type CorrectionKind =
+  | "MEANING"
+  | "TONE"
+  | "TERMINOLOGY";
+
+export type CorrectionScope =
+  | "MESSAGE"
+  | "CONVERSATION"
+  | "TENANT";
+
+export interface CorrectionCommand {
+  protocol_version: 1;
+  command_id: UUID;
+  conversation_id: UUID;
+  target_message_id?: UUID | null;
+  target_source_revision?: number | null;
+  target_translation_id?: UUID | null;
+  kind: CorrectionKind;
+  requested_scope: CorrectionScope;
+  payload: Record<string, unknown>;
+}
+
+export interface CorrectionResult {
+  protocol_version: 1;
+  repair_event_id: UUID;
+  status: "RECORDED" | "NEEDS_CONFIRMATION" | "APPLIED";
+  requested_scope: CorrectionScope;
+  applied_scope: "CONVERSATION" | "TENANT" | null;
+  claim_id: UUID | null;
+  claim_version: number | null;
+}
