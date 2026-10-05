@@ -17,6 +17,7 @@ on:
       - feat/context-claim-language-fence-v1
       - feat/correction-revocation-v1
       - feat/correction-review-v1
+      - feat/tenant-policy-overlay-v1
   workflow_dispatch:
 
 permissions:
