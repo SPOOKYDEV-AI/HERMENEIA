@@ -231,6 +231,17 @@ test("context reducer advances the durable operation prefix and completes the fe
   assert.equal(store.state.processedPrefixOpSeq, 1);
   assert.deepEqual(store.state.pendingOperations, []);
   assert.equal(store.jobs[0].status, "DONE");
+  assert.deepEqual(store.state.activeEpisode, {
+    episodeId: "op-1",
+    episodeVersion: 1,
+    continuityConfidence: 1,
+    startOperationSequence: 1,
+    lastOperationSequence: 1,
+    startedAt:
+      "2026-10-05T09:00:01.000Z",
+    lastActivityAt:
+      "2026-10-05T09:00:01.000Z",
+  });
 });
 
 test("out-of-order context job is retried until its causal predecessor closes the gap", async () => {
@@ -358,4 +369,45 @@ test("malformed context.reduce payload is dead-lettered without touching state",
   assert.equal(await worker.runOnce(), "DEAD");
   assert.deepEqual(store.state, before);
   assert.equal(store.jobs[0].status, "DEAD");
+});
+
+
+test("context reducer continues an active episode for causally adjacent messages inside the temporal gap", async () => {
+  const { worker, store, setNow } = fixture(
+    stateWithOperations([1, 2]),
+    [job(1), job(2)],
+  );
+
+  assert.equal(
+    await worker.runOnce(),
+    "REDUCED",
+  );
+  setNow(
+    "2026-10-05T09:01:02.000Z",
+  );
+  assert.equal(
+    await worker.runOnce(),
+    "REDUCED",
+  );
+
+  assert.equal(
+    store.state.activeEpisode.episodeId,
+    "op-1",
+  );
+  assert.equal(
+    store.state.activeEpisode.episodeVersion,
+    2,
+  );
+  assert.equal(
+    store.state.activeEpisode.startOperationSequence,
+    1,
+  );
+  assert.equal(
+    store.state.activeEpisode.lastOperationSequence,
+    2,
+  );
+  assert.equal(
+    store.state.activeEpisode.lastActivityAt,
+    "2026-10-05T09:00:02.000Z",
+  );
 });
