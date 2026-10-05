@@ -342,6 +342,7 @@ export class PostgresTranslationRepository {
                WHERE cs.tenant_id = te.tenant_id
                  AND cs.snapshot_id = te.context_snapshot_id
                  AND cs.erasure_epoch = c.erasure_epoch
+                  AND cs.policy_version = c.policy_version
             )
           )
         FOR UPDATE OF te, mm, cm, c`,
