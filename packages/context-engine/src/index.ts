@@ -40,6 +40,7 @@ export interface ConversationContextState {
   terminologyClaimRefs?: UUID[];
   lexicalClaimRefs?: UUID[];
   correctionClaimRefs?: UUID[];
+  styleClaimRefs?: UUID[];
   updatedAt: string;
 }
 
