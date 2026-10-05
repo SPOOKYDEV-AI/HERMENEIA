@@ -2,24 +2,54 @@ BEGIN;
 
 CREATE FUNCTION hermeneia_context_jsonb_has_forbidden_key(document jsonb)
 RETURNS boolean
-LANGUAGE sql
+LANGUAGE plpgsql
 IMMUTABLE
 PARALLEL SAFE
-AS $$
-  SELECT jsonb_path_exists(
-    document,
-    '$.**.keyvalue() ? (
-      @.key == "raw_text"
-      || @.key == "message_text"
-      || @.key == "source_text"
-      || @.key == "translated_text"
-      || @.key == "transcript"
-      || @.key == "messages"
-      || @.key == "prompt"
-      || @.key == "provider_output"
-    )'
-  )
-$$;
+AS $
+DECLARE
+  entry record;
+  item jsonb;
+BEGIN
+  IF document IS NULL THEN
+    RETURN false;
+  END IF;
+
+  IF jsonb_typeof(document) = 'object' THEN
+    FOR entry IN
+      SELECT key, value
+        FROM jsonb_each(document)
+    LOOP
+      IF entry.key = ANY (ARRAY[
+        'raw_text',
+        'message_text',
+        'source_text',
+        'translated_text',
+        'transcript',
+        'messages',
+        'prompt',
+        'provider_output'
+      ]) THEN
+        RETURN true;
+      END IF;
+
+      IF hermeneia_context_jsonb_has_forbidden_key(entry.value) THEN
+        RETURN true;
+      END IF;
+    END LOOP;
+  ELSIF jsonb_typeof(document) = 'array' THEN
+    FOR item IN
+      SELECT value
+        FROM jsonb_array_elements(document)
+    LOOP
+      IF hermeneia_context_jsonb_has_forbidden_key(item) THEN
+        RETURN true;
+      END IF;
+    END LOOP;
+  END IF;
+
+  RETURN false;
+END
+$;
 
 CREATE TABLE conversation_context_states (
   tenant_id uuid NOT NULL,
