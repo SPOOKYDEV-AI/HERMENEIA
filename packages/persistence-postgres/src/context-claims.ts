@@ -17,10 +17,12 @@ interface ContextClaimRow extends Record<string, unknown> {
   authority_class:
     | "POLICY"
     | "APPROVED_GLOSSARY"
+    | "EXPLICIT_PREFERENCE"
     | "CONFIRMED_CORRECTION";
   retention_class:
     | "CORRECTIVE_DURABLE"
-    | "POLICY_REFERENCE";
+    | "POLICY_REFERENCE"
+    | "PREFERENCE_REFERENCE";
   sensitivity_class: "NORMAL" | "RESTRICTED";
   confidence: string | number | null;
   scope_kind: "TENANT" | "CONVERSATION";
@@ -30,6 +32,7 @@ interface ContextClaimRow extends Record<string, unknown> {
     | "EXPLICIT_TEXTUAL_CORRECTION"
     | "APPROVED_GLOSSARY_CHANGE"
     | "TENANT_POLICY_CHANGE"
+    | "EXPLICIT_STYLE_PREFERENCE"
     | null;
   valid_from: string | null;
   valid_until: string | null;
@@ -109,6 +112,70 @@ export class PostgresContextClaimRepository {
     if (result.rows.length > 128) {
       throw new Error(
         "Active tenant policy claim overlay exceeds bounded limit",
+      );
+    }
+
+    return result.rows.map(mapClaimRow);
+  }
+
+  async loadRecipientStylePreferences(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+      recipientUserId: UUID;
+      asOf: string;
+    },
+  ): Promise<CandidateClaimRecord[]> {
+    if (!Number.isFinite(Date.parse(input.asOf))) {
+      throw new TypeError("asOf must be a valid timestamp");
+    }
+
+    const result = await tx.query<ContextClaimRow>(
+      `SELECT DISTINCT ON (claim_id)
+              claim_id,
+              claim_version,
+              conversation_id,
+              subject_user_id,
+              proposition_ref,
+              modality,
+              authority_class,
+              retention_class,
+              sensitivity_class,
+              confidence,
+              scope_kind,
+              scope_conversation_id,
+              trigger_kind,
+              valid_from::text AS valid_from,
+              valid_until::text AS valid_until,
+              status
+         FROM context_claims
+        WHERE tenant_id = $1
+          AND conversation_id = $2
+          AND subject_user_id = $3
+          AND scope_kind = 'CONVERSATION'
+          AND scope_conversation_id = $2
+          AND status = 'ACTIVE'
+          AND sensitivity_class = 'NORMAL'
+          AND authority_class = 'EXPLICIT_PREFERENCE'
+          AND retention_class = 'PREFERENCE_REFERENCE'
+          AND modality = 'ASSERTION'
+          AND trigger_kind = 'EXPLICIT_STYLE_PREFERENCE'
+          AND (valid_from IS NULL OR valid_from < $4)
+          AND (valid_until IS NULL OR valid_until > $4)
+        ORDER BY claim_id, claim_version DESC
+        LIMIT 17`,
+      [
+        input.tenantId,
+        input.conversationId,
+        input.recipientUserId,
+        input.asOf,
+      ],
+    );
+
+    if (result.rows.length > 16) {
+      throw new Error(
+        "Active recipient style preference overlay exceeds bounded limit",
       );
     }
 
@@ -197,6 +264,12 @@ export class PostgresContextClaimRepository {
               AND retention_class = 'POLICY_REFERENCE'
               AND modality = 'ASSERTION'
               AND trigger_kind = 'TENANT_POLICY_CHANGE'
+            )
+            OR (
+              authority_class = 'EXPLICIT_PREFERENCE'
+              AND retention_class = 'PREFERENCE_REFERENCE'
+              AND modality = 'ASSERTION'
+              AND trigger_kind = 'EXPLICIT_STYLE_PREFERENCE'
             )
           )
         ORDER BY claim_id, claim_version DESC`,
