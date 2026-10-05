@@ -9,6 +9,7 @@ on:
       - feat/conversation-state-v1
       - feat/conversation-state-runtime-v1
       - feat/context-derived-claims-v1
+      - feat/context-correction-ingestion-v1
   workflow_dispatch:
 
 permissions:
