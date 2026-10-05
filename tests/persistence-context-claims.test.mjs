@@ -89,7 +89,7 @@ test("PostgreSQL claim loader enforces referenced IDs and admissibility in SQL",
         "11111111-1111-4111-8111-111111111111",
         "11111111-1111-4111-8111-111111111111",
       ],
-      now: "2026-10-05T10:00:00.000Z",
+      asOf: "2026-10-05T10:00:00.000Z",
     }),
   );
 
@@ -110,6 +110,8 @@ test("PostgreSQL claim loader enforces referenced IDs and admissibility in SQL",
   );
   assert.match(query.text, /status = 'ACTIVE'/);
   assert.match(query.text, /sensitivity_class = 'NORMAL'/);
+  assert.match(query.text, /valid_from IS NULL OR valid_from < \$4/);
+  assert.match(query.text, /valid_until IS NULL OR valid_until > \$4/);
   assert.match(query.text, /scope_conversation_id = \$3/);
   assert.match(query.text, /CONFIRMED_CORRECTION/);
   assert.match(query.text, /APPROVED_GLOSSARY/);
@@ -135,7 +137,7 @@ test("PostgreSQL claim loader avoids a query for an empty bounded reference set"
       tenantId: "tenant-1",
       conversationId: "conversation-1",
       claimIds: [],
-      now: "2026-10-05T10:00:00.000Z",
+      asOf: "2026-10-05T10:00:00.000Z",
     }),
   );
 
@@ -164,7 +166,7 @@ test("PostgreSQL claim loader rejects malformed durable claim references before 
           conversationId:
             "22222222-2222-4222-8222-222222222222",
           claimIds: ["not-a-uuid"],
-          now: "2026-10-05T10:00:00.000Z",
+          asOf: "2026-10-05T10:00:00.000Z",
         }),
       ),
     /canonical UUID/,

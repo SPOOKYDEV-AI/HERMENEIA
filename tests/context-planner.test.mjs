@@ -33,6 +33,7 @@ function frame(overrides = {}) {
   return {
     currentMessageSequence: 8,
     currentOperationSequence: 8,
+    currentMessageAcceptedAt: "2026-10-04T20:00:00.000Z",
     erasureEpoch: 2,
     recentMessages: [
       {

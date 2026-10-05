@@ -37,6 +37,7 @@ for (const [name, value] of requiredEnv) {
 }
 
 const NOW = "2026-10-05T08:00:00.000Z";
+let runtimeNow = NOW;
 const SOURCE_TEXT = "Bonjour monde 👋";
 const T2_SOURCE_TEXT = "On fait le CR demain.";
 const TRANSLATED_TEXT = "Hola mundo 👋";
@@ -53,7 +54,7 @@ const ids = {
   clientMessageId: randomUUID(),
   t2CommandId: randomUUID(),
   t2ClientMessageId: randomUUID(),
-  correctionClaimId: randomUUID(),
+  correctionCommandId: randomUUID(),
   staleContextCommandId: randomUUID(),
   staleContextClientMessageId: randomUUID(),
 };
@@ -210,7 +211,7 @@ async function seed() {
            membership_version
          ) VALUES
            ($1,$2,$3,'MEMBER','ACTIVE','fr-FR',NULL,1),
-           ($1,$2,$4,'MEMBER','ACTIVE','es-CO',NULL,1)`,
+           ($1,$2,$4,'MODERATOR','ACTIVE','es-CO',NULL,1)`,
         [
           ids.tenantId,
           ids.conversationId,
@@ -248,15 +249,22 @@ async function cleanup() {
         tenant,
       );
       await db.query(
-        "DELETE FROM translation_executions WHERE tenant_id = $1",
-        tenant,
-      );
-      await db.query(
         "DELETE FROM outbox_jobs WHERE tenant_id = $1",
         tenant,
       );
+      // Delete provenance before either side of its foreign keys.
       await db.query(
-        "DELETE FROM command_receipts WHERE tenant_id = $1",
+        "DELETE FROM provenance_edges WHERE tenant_id = $1",
+        tenant,
+      );
+      // Repair events may point at translation executions.
+      await db.query(
+        "DELETE FROM translation_repair_events WHERE tenant_id = $1",
+        tenant,
+      );
+      // Translation executions may point at context snapshots.
+      await db.query(
+        "DELETE FROM translation_executions WHERE tenant_id = $1",
         tenant,
       );
       await db.query(
@@ -269,6 +277,10 @@ async function cleanup() {
       );
       await db.query(
         "DELETE FROM conversation_context_states WHERE tenant_id = $1",
+        tenant,
+      );
+      await db.query(
+        "DELETE FROM command_receipts WHERE tenant_id = $1",
         tenant,
       );
       await db.query(
@@ -335,7 +347,7 @@ try {
       createHpkeP256TranslationEnvelopeProtector(),
     clock: {
       now() {
-        return NOW;
+        return runtimeNow;
       },
     },
   });
@@ -641,74 +653,152 @@ try {
     assert.equal(Number(state.rows[0].last_acked_offset), 2);
   });
 
-  await withConnection(async (db) => {
-    await db.query(
-      `INSERT INTO context_claims(
-         tenant_id,
-         claim_id,
-         claim_version,
-         conversation_id,
-         claim_type,
-         proposition_ref,
-         modality,
-         authority_class,
-         retention_class,
-         sensitivity_class,
-         confidence,
-         scope_kind,
-         scope_conversation_id,
-         trigger_kind,
-         valid_from,
-         status
-       ) VALUES (
-         $1,$2,1,$3,'TERMINOLOGY',
-         $4::jsonb,'CORRECTION','CONFIRMED_CORRECTION',
-         'CORRECTIVE_DURABLE','NORMAL',1,
-         'CONVERSATION',$3,
-         'EXPLICIT_TEXTUAL_CORRECTION',$5,'ACTIVE'
-       )`,
-      [
-        ids.tenantId,
-        ids.correctionClaimId,
-        ids.conversationId,
-        JSON.stringify({
+  const correction =
+    await runtime.correctionService.createCorrection(
+      recipient,
+      {
+        protocol_version: 1,
+        command_id: ids.correctionCommandId,
+        conversation_id: ids.conversationId,
+        target_translation_id: durable.translationId,
+        kind: "TERMINOLOGY",
+        requested_scope: "CONVERSATION",
+        payload: {
           schema_version: 1,
           kind: "TERM_MEANING",
           surface_form: "CR",
           meaning: "change request",
           source_language_tag: "fr-FR",
-        }),
-        NOW,
+        },
+      },
+    );
+
+  assert.equal(correction.status, "APPLIED");
+  assert.equal(
+    correction.applied_scope,
+    "CONVERSATION",
+  );
+  assert.ok(correction.claim_id);
+  assert.equal(correction.claim_version, 1);
+  const correctionClaimId = correction.claim_id;
+
+  await withConnection(async (db) => {
+    const repair = await db.query(
+      `SELECT status,
+              target_translation_id,
+              target_message_id,
+              target_source_revision
+         FROM translation_repair_events
+        WHERE tenant_id = $1
+          AND repair_event_id = $2`,
+      [
+        ids.tenantId,
+        correction.repair_event_id,
       ],
+    );
+    assert.equal(repair.rowCount, 1);
+    assert.equal(repair.rows[0].status, "APPLIED");
+    assert.equal(
+      repair.rows[0].target_translation_id,
+      durable.translationId,
+    );
+    assert.equal(
+      repair.rows[0].target_message_id,
+      accepted.message_id,
+    );
+    assert.equal(
+      Number(repair.rows[0].target_source_revision),
+      1,
+    );
+
+    const claim = await db.query(
+      `SELECT authority_class,
+              retention_class,
+              scope_kind,
+              scope_conversation_id,
+              trigger_kind,
+              proposition_ref
+         FROM context_claims
+        WHERE tenant_id = $1
+          AND claim_id = $2
+          AND claim_version = 1`,
+      [ids.tenantId, correctionClaimId],
+    );
+    assert.equal(claim.rowCount, 1);
+    assert.equal(
+      claim.rows[0].authority_class,
+      "CONFIRMED_CORRECTION",
+    );
+    assert.equal(
+      claim.rows[0].retention_class,
+      "CORRECTIVE_DURABLE",
+    );
+    assert.equal(
+      claim.rows[0].scope_kind,
+      "CONVERSATION",
+    );
+    assert.equal(
+      claim.rows[0].scope_conversation_id,
+      ids.conversationId,
+    );
+    assert.equal(
+      claim.rows[0].trigger_kind,
+      "EXPLICIT_UI_CORRECTION",
+    );
+    assert.deepEqual(
+      claim.rows[0].proposition_ref,
+      {
+        schema_version: 1,
+        kind: "TERM_MEANING",
+        surface_form: "CR",
+        meaning: "change request",
+        source_language_tag: "fr-FR",
+      },
+    );
+
+    const provenance = await db.query(
+      `SELECT relation,
+              source_repair_event_id
+         FROM provenance_edges
+        WHERE tenant_id = $1
+          AND derived_claim_id = $2
+          AND derived_claim_version = 1`,
+      [ids.tenantId, correctionClaimId],
+    );
+    assert.equal(provenance.rowCount, 1);
+    assert.equal(
+      provenance.rows[0].relation,
+      "CORRECTED_BY",
+    );
+    assert.equal(
+      provenance.rows[0].source_repair_event_id,
+      correction.repair_event_id,
     );
 
     const state = await db.query(
-      `UPDATE conversation_context_states
-          SET correction_claim_refs = $3::jsonb,
-              state_version = state_version + 1,
-              updated_at = $4
+      `SELECT processed_prefix_sequence,
+              correction_claim_refs
+         FROM conversation_context_states
         WHERE tenant_id = $1
-          AND conversation_id = $2
-      RETURNING state_version,
-                processed_prefix_sequence,
-                correction_claim_refs`,
-      [
-        ids.tenantId,
-        ids.conversationId,
-        JSON.stringify([ids.correctionClaimId]),
-        NOW,
-      ],
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
     );
     assert.equal(state.rowCount, 1);
     assert.equal(
       Number(state.rows[0].processed_prefix_sequence),
       1,
     );
-    assert.deepEqual(
-      state.rows[0].correction_claim_refs,
-      [ids.correctionClaimId],
+    assert.ok(
+      state.rows[0].correction_claim_refs.includes(
+        correctionClaimId,
+      ),
     );
   });
+
+  // A correction created after a message was already accepted must not
+  // influence that message. Advance the server clock before accepting the
+  // next message so the claim is strictly causal to this new translation.
+  runtimeNow = "2026-10-05T08:00:01.000Z";
 
   const t2Accepted = await runtime.sendService.sendMessage(
     sender,
@@ -754,12 +844,12 @@ try {
     );
     assert.ok(
       snapshot.rows[0].selected_candidate_ids.includes(
-        `claim:${ids.correctionClaimId}:1`,
+        `claim:${correctionClaimId}:1`,
       ),
     );
     assert.ok(
       snapshot.rows[0].selected_claim_refs.includes(
-        `${ids.correctionClaimId}:1`,
+        `${correctionClaimId}:1`,
       ),
     );
     assert.equal(
@@ -915,6 +1005,7 @@ try {
   process.stdout.write(
     "POSTGRES_TRANSLATION_E2E=PASS " +
     "send=accepted fanout=done execute=done " +
+    "correction=service-applied " +
     "t2=confirmed-correction-context " +
     "hpke=original+translation sync=2 ack=purged " +
     "erasure_epoch=stale-context-superseded\n",

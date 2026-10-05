@@ -24,6 +24,7 @@ export interface RecentContextMessageRef {
 export interface ContextPlanningFrame {
   currentMessageSequence: number;
   currentOperationSequence: number;
+  currentMessageAcceptedAt: string;
   erasureEpoch: number;
   recentMessages: RecentContextMessageRef[];
 }
@@ -120,6 +121,16 @@ export class TranslationContextPlanner
         sourceRevision: input.sourceRevision,
       }),
     ]);
+
+    if (
+      !Number.isFinite(
+        Date.parse(frame.currentMessageAcceptedAt),
+      )
+    ) {
+      throw new TypeError(
+        "currentMessageAcceptedAt must be a valid timestamp",
+      );
+    }
 
     const state = stateForCurrentOperation(
       loadedState,

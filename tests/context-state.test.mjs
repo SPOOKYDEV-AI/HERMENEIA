@@ -7,6 +7,7 @@ import {
   cloneValidatedContextState,
   createDegradedContextStateFromFloor,
   createInitialContextState,
+  linkConfirmedCorrectionClaim,
   rebaseContextStateAuthority,
   decideDurableCorrection,
   processingGapRefs,
@@ -494,5 +495,53 @@ test("cold recovery starts at an explicit causal floor and stays degraded", () =
     state.status,
     "DEGRADED",
     "new traffic cannot pretend missing pre-floor history was recovered",
+  );
+});
+
+
+test("confirmed correction linking is deduplicated and keeps only the newest 128 working refs", () => {
+  let state = initial();
+
+  for (let index = 1; index <= 129; index += 1) {
+    state = linkConfirmedCorrectionClaim(
+      state,
+      {
+        claimId: `claim-${index}`,
+        now: `2026-10-04T18:00:${String(
+          index % 60,
+        ).padStart(2, "0")}.000Z`,
+      },
+    );
+  }
+
+  assert.equal(
+    state.correctionClaimRefs.length,
+    128,
+  );
+  assert.equal(
+    state.correctionClaimRefs[0],
+    "claim-2",
+  );
+  assert.equal(
+    state.correctionClaimRefs.at(-1),
+    "claim-129",
+  );
+
+  const before = state.stateVersion;
+  const replay = linkConfirmedCorrectionClaim(
+    state,
+    {
+      claimId: "claim-129",
+      now: "2026-10-04T18:59:59.000Z",
+    },
+  );
+
+  assert.equal(
+    replay.stateVersion,
+    before,
+  );
+  assert.deepEqual(
+    replay.correctionClaimRefs,
+    state.correctionClaimRefs,
   );
 });

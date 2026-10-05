@@ -157,3 +157,90 @@ test("HTTP delete is routed to the injected persistent mutation service", async 
     },
   }]);
 });
+
+
+test("HTTP correction is routed to the injected persistent correction service", async (t) => {
+  const calls = [];
+  const correctionService = {
+    async createCorrection(receivedActor, command) {
+      calls.push({
+        actor: receivedActor,
+        command,
+      });
+      return {
+        protocol_version: 1,
+        repair_event_id: "repair-1",
+        status: "APPLIED",
+        requested_scope: "CONVERSATION",
+        applied_scope: "CONVERSATION",
+        claim_id: "claim-1",
+        claim_version: 1,
+      };
+    },
+  };
+
+  const server = createHermeneiaHttpServer({
+    core: coreThatMustNotMutate(),
+    correctionService,
+    authenticate() {
+      return actor;
+    },
+  });
+  t.after(() => server.close());
+
+  const base = await listen(server);
+  const response = await fetch(
+    `${base}/v1/conversations/conversation-1/corrections`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        protocol_version: 1,
+        command_id: "correction-1",
+        target_message_id: "message-1",
+        target_source_revision: 1,
+        target_translation_id: "translation-1",
+        kind: "TERMINOLOGY",
+        requested_scope: "CONVERSATION",
+        payload: {
+          schema_version: 1,
+          kind: "TERM_MEANING",
+          surface_form: "CR",
+          meaning: "change request",
+        },
+      }),
+    },
+  );
+
+  assert.equal(response.status, 202);
+  assert.deepEqual(await response.json(), {
+    protocol_version: 1,
+    repair_event_id: "repair-1",
+    status: "APPLIED",
+    requested_scope: "CONVERSATION",
+    applied_scope: "CONVERSATION",
+    claim_id: "claim-1",
+    claim_version: 1,
+  });
+  assert.deepEqual(calls, [{
+    actor,
+    command: {
+      protocol_version: 1,
+      command_id: "correction-1",
+      conversation_id: "conversation-1",
+      target_message_id: "message-1",
+      target_source_revision: 1,
+      target_translation_id: "translation-1",
+      kind: "TERMINOLOGY",
+      requested_scope: "CONVERSATION",
+      payload: {
+        schema_version: 1,
+        kind: "TERM_MEANING",
+        surface_form: "CR",
+        meaning: "change request",
+      },
+    },
+  }]);
+});

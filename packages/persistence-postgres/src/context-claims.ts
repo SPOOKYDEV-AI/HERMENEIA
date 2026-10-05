@@ -52,11 +52,11 @@ export class PostgresContextClaimRepository {
       tenantId: UUID;
       conversationId: UUID;
       claimIds: UUID[];
-      now: string;
+      asOf: string;
     },
   ): Promise<CandidateClaimRecord[]> {
-    if (!Number.isFinite(Date.parse(input.now))) {
-      throw new TypeError("now must be a valid timestamp");
+    if (!Number.isFinite(Date.parse(input.asOf))) {
+      throw new TypeError("asOf must be a valid timestamp");
     }
 
     const claimIds = [...new Set(input.claimIds)];
@@ -104,7 +104,7 @@ export class PostgresContextClaimRepository {
               AND scope_conversation_id = $3
             )
           )
-          AND (valid_from IS NULL OR valid_from <= $4)
+          AND (valid_from IS NULL OR valid_from < $4)
           AND (valid_until IS NULL OR valid_until > $4)
           AND (
             (
@@ -134,7 +134,7 @@ export class PostgresContextClaimRepository {
         input.tenantId,
         JSON.stringify(claimIds),
         input.conversationId,
-        input.now,
+        input.asOf,
       ],
     );
 

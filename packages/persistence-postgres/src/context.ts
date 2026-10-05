@@ -198,6 +198,7 @@ export class PostgresContextSnapshotRepository {
 export interface PostgresContextPlanningFrame {
   currentMessageSequence: number;
   currentOperationSequence: number;
+  currentMessageAcceptedAt: string;
   erasureEpoch: number;
   recentMessages: Array<{
     messageId: UUID;
@@ -242,10 +243,12 @@ export class PostgresContextPlanningRepository {
     const current = await tx.query<{
       message_seq: number;
       op_seq: number;
+      accepted_at: string;
       erasure_epoch: number;
     }>(
       `SELECT mm.message_seq,
               mr.op_seq,
+              mr.created_at::text AS accepted_at,
               c.erasure_epoch
          FROM message_metadata mm
          JOIN message_revisions mr
@@ -322,6 +325,7 @@ export class PostgresContextPlanningRepository {
     return {
       currentMessageSequence: Number(currentRow.message_seq),
       currentOperationSequence: Number(currentRow.op_seq),
+      currentMessageAcceptedAt: currentRow.accepted_at,
       erasureEpoch: Number(currentRow.erasure_epoch),
       recentMessages: recent.rows.map((row) => ({
         messageId: row.message_id,

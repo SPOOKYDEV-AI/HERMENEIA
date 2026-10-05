@@ -292,6 +292,7 @@ test("PostgreSQL context planner loads current sequence/erasure epoch and recent
       rows: [{
         message_seq: 8,
         op_seq: 10,
+        accepted_at: "2026-10-04 20:00:00+00",
         erasure_epoch: 3,
       }],
       rowCount: 1,
@@ -341,6 +342,7 @@ test("PostgreSQL context planner loads current sequence/erasure epoch and recent
   assert.deepEqual(result, {
     currentMessageSequence: 8,
     currentOperationSequence: 10,
+    currentMessageAcceptedAt: "2026-10-04 20:00:00+00",
     erasureEpoch: 3,
     recentMessages: [
       {
@@ -361,6 +363,7 @@ test("PostgreSQL context planner loads current sequence/erasure epoch and recent
   });
 
   const currentQuery = connection.queries[1];
+  assert.match(currentQuery.text, /mr\.created_at::text AS accepted_at/);
   assert.match(currentQuery.text, /c\.erasure_epoch/);
   assert.match(currentQuery.text, /mr\.op_seq/);
   assert.match(currentQuery.text, /JOIN message_revisions mr/);

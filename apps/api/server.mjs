@@ -185,6 +185,7 @@ export function createHermeneiaHttpServer({
   mutationService = core,
   deliveryService = null,
   translationRecoveryService = null,
+  correctionService = null,
   deviceService = null,
   readinessService = null,
 }) {
@@ -215,6 +216,14 @@ export function createHermeneiaHttpServer({
   ) {
     throw new TypeError(
       "translationRecoveryService.resupplySource and retryTranslation are required",
+    );
+  }
+  if (
+    correctionService !== null &&
+    typeof correctionService.createCorrection !== "function"
+  ) {
+    throw new TypeError(
+      "correctionService.createCorrection is required",
     );
   }
 
@@ -529,6 +538,77 @@ export function createHermeneiaHttpServer({
         });
 
         return json(res, 200, result);
+      }
+
+      const correctionMatch = matchPath(
+        requestUrl.pathname,
+        /^\/v1\/conversations\/([^/]+)\/corrections$/,
+      );
+
+      if (req.method === "POST" && correctionMatch) {
+        if (!correctionService) {
+          throw new HttpError(
+            503,
+            "INTERNAL_ERROR",
+            "Correction service unavailable",
+            true,
+          );
+        }
+
+        const body = await readJson(req);
+        requireProtocolV1(body);
+
+        if (
+          typeof body.command_id !== "string" ||
+          typeof body.kind !== "string" ||
+          typeof body.requested_scope !== "string" ||
+          !body.payload ||
+          typeof body.payload !== "object" ||
+          Array.isArray(body.payload)
+        ) {
+          throw new HttpError(
+            400,
+            "INVALID_COMMAND",
+            "Invalid correction payload",
+          );
+        }
+
+        const result =
+          await correctionService.createCorrection(
+            actor,
+            {
+              protocol_version: 1,
+              command_id: body.command_id,
+              conversation_id: correctionMatch[0],
+              ...(body.target_message_id === null ||
+              typeof body.target_message_id === "string"
+                ? {
+                    target_message_id:
+                      body.target_message_id,
+                  }
+                : {}),
+              ...(body.target_source_revision === null ||
+              typeof body.target_source_revision === "number"
+                ? {
+                    target_source_revision:
+                      body.target_source_revision,
+                  }
+                : {}),
+              ...(body.target_translation_id === null ||
+              typeof body.target_translation_id === "string"
+                ? {
+                    target_translation_id:
+                      body.target_translation_id,
+                  }
+                : {}),
+              kind: body.kind,
+              requested_scope:
+                body.requested_scope,
+              payload: body.payload,
+            },
+          );
+
+        return json(res, 202, result);
       }
 
       const translationSourceMatch = matchPath(

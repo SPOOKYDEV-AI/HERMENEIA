@@ -93,6 +93,18 @@ Model inference may update short-lived working state.
 
 Durable promotion requires a defined trigger and provenance.
 
+### Executable V1 correction boundary
+
+The persistent V1 runtime now implements the explicit UI correction path. Every accepted correction produces a structured `TranslationRepairEvent`. Promotion into shared `CONFIRMED_CORRECTION` memory is narrower:
+
+- MESSAGE scope remains repair-only;
+- supported CONVERSATION corrections require a conversation `MODERATOR` or tenant `ADMIN/OWNER`;
+- ordinary-member conversation corrections remain `NEEDS_CONFIRMATION`;
+- TENANT corrections remain `NEEDS_CONFIRMATION` until tenant-wide distribution exists;
+- TONE corrections remain `NEEDS_CONFIRMATION` until typed style-memory semantics exist.
+
+A promoted claim receives an explicit `CORRECTED_BY` provenance edge and is linked into bounded ConversationState atomically with the command receipt. Claim use is fenced at the current source revision's server creation timestamp so later corrections cannot alter an earlier translation retroactively.
+
 ## Repair event
 
 A conceptual repair event:
