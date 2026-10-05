@@ -213,8 +213,11 @@ HERMENEIA should:
 3. invalidate the incorrect interpretation within the relevant scope;
 4. invalidate dependent cached context;
 5. rebuild affected Conversation State;
-6. apply the corrected meaning to future translations;
-7. optionally offer retranslation of affected prior messages without overwriting originals.
+6. invalidate any older ACTIVE correction with the same justified subject/scope/semantic key;
+7. record `OVERRIDDEN_BY` provenance from the old correction claim to the replacement;
+8. remove superseded claim references from working Conversation State;
+9. apply the corrected meaning to future translations;
+10. optionally offer retranslation of affected prior messages without overwriting originals.
 
 ## 11. Message edit workflow
 
