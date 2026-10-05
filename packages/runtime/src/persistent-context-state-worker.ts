@@ -13,13 +13,23 @@ import type {
 import {
   ContextStateWorkerService,
   type ContextStateWorkerClock,
+  type ContextStateEpisodeDeriver,
 } from "../../context-state-worker/src/index.js";
+import {
+  deriveActiveEpisode,
+  parseEpisodeSourceRef,
+  type EpisodeSourceEvidence,
+} from "../../context-episode-heuristic/src/index.js";
+import type {
+  TransientSourceStore,
+} from "../../transient-source/src/index.js";
 
 export interface PostgresContextStateWorkerDependencies {
   stateRepository: PostgresConversationContextStateRepository;
   outboxRepository: PostgresOutboxRepository;
   outboxService: PersistentOutboxService<SqlExecutor>;
   clock: ContextStateWorkerClock;
+  transientSources?: TransientSourceStore;
   retryBaseSeconds?: number;
   maxAttempts?: number;
 }
@@ -69,10 +79,88 @@ export function createPostgresContextStateWorker(
     ) => deps.outboxRepository.completeJob(tx, input),
   };
 
+  const episodeDeriver: ContextStateEpisodeDeriver | undefined =
+    deps.transientSources
+      ? {
+          async derive(input) {
+            const messageId =
+              input.operation.messageId;
+            const sourceRevision =
+              input.operation.sourceRevision;
+            if (
+              !messageId ||
+              sourceRevision === undefined
+            ) {
+              return undefined;
+            }
+
+            const current =
+              await deps.transientSources!.get({
+                tenantId: input.tenantId,
+                messageId,
+                sourceRevision,
+              });
+            if (!current) return undefined;
+
+            const priorSources: EpisodeSourceEvidence[] = [];
+            for (
+              const ref of
+                input.state.activeEpisode?.sourceRevisionRefs ?? []
+            ) {
+              const parsed =
+                parseEpisodeSourceRef(ref);
+              if (!parsed) continue;
+              const prior =
+                await deps.transientSources!.get({
+                  tenantId: input.tenantId,
+                  messageId: parsed.messageId,
+                  sourceRevision:
+                    parsed.sourceRevision,
+                });
+              if (!prior) continue;
+              priorSources.push({
+                messageId: prior.messageId,
+                sourceRevision:
+                  prior.sourceRevision,
+                text: prior.source.text,
+                languageTag:
+                  prior.source.language_hint ?? null,
+                createdAt: prior.createdAt,
+              });
+            }
+
+            const result = deriveActiveEpisode({
+              operationId:
+                input.operation.operationId,
+              current: {
+                messageId: current.messageId,
+                sourceRevision:
+                  current.sourceRevision,
+                text: current.source.text,
+                languageTag:
+                  current.source.language_hint ?? null,
+                createdAt: current.createdAt,
+              },
+              activeEpisode:
+                input.state.activeEpisode,
+              priorSources,
+            });
+
+            return result.activeEpisode
+              ? {
+                  activeEpisode:
+                    result.activeEpisode,
+                }
+              : undefined;
+          },
+        }
+      : undefined;
+
   return new ContextStateWorkerService<SqlExecutor>({
     store,
     outbox: deps.outboxService,
     clock: deps.clock,
+    episodeDeriver,
     retryBaseSeconds: deps.retryBaseSeconds,
     maxAttempts: deps.maxAttempts,
   });
