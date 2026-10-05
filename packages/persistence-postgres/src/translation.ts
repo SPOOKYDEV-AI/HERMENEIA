@@ -354,13 +354,20 @@ export class PostgresTranslationRepository {
           AND cm.user_id = te.recipient_user_id
           AND cm.status = 'ACTIVE'
           AND cm.membership_version = te.target_profile_version
-          AND COALESCE(
-                NULLIF(trim(cm.target_locale_override), ''),
-                NULLIF(trim(cm.target_language_tag), '')
-              ) = te.target_language_tag
+         LEFT JOIN user_language_preferences ulp
+           ON ulp.tenant_id = cm.tenant_id
+          AND ulp.user_id = cm.user_id
         WHERE te.tenant_id = $1
           AND te.translation_id = $2
           AND te.status = 'PENDING'
+          AND COALESCE(
+                NULLIF(trim(cm.target_locale_override), ''),
+                NULLIF(trim(cm.target_language_tag), ''),
+                NULLIF(trim(ulp.target_locale_override), ''),
+                NULLIF(trim(ulp.target_language_tag), '')
+              ) = te.target_language_tag
+          AND te.preferred_register
+                IS NOT DISTINCT FROM ulp.preferred_register
           AND (
             te.context_snapshot_id IS NULL
             OR EXISTS (
@@ -469,14 +476,25 @@ export class PostgresTranslationRepository {
       status: "ACTIVE" | "LEFT" | "REMOVED" | "BLOCKED";
       membership_version: number;
       target_language_tag: string | null;
+      preferred_register:
+        | "NEUTRAL"
+        | "FORMAL"
+        | "INFORMAL"
+        | null;
     }>(
       `SELECT cm.status,
               cm.membership_version,
               COALESCE(
                 NULLIF(trim(cm.target_locale_override), ''),
-                NULLIF(trim(cm.target_language_tag), '')
-              ) AS target_language_tag
+                NULLIF(trim(cm.target_language_tag), ''),
+                NULLIF(trim(ulp.target_locale_override), ''),
+                NULLIF(trim(ulp.target_language_tag), '')
+              ) AS target_language_tag,
+              ulp.preferred_register
          FROM conversation_members cm
+         LEFT JOIN user_language_preferences ulp
+           ON ulp.tenant_id = cm.tenant_id
+          AND ulp.user_id = cm.user_id
         WHERE cm.tenant_id = $1
           AND cm.conversation_id = $2
           AND cm.user_id = $3
