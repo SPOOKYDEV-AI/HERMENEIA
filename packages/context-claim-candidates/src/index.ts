@@ -49,8 +49,12 @@ export interface MaterializeReferencedClaimsInput {
   currentSourceAuthorUserId: UUID;
   currentSourceLanguageTag: string | null;
   targetLanguageTag: string;
-  causalThroughOperationSequence: number;
-  erasureEpoch: number;
+  causalThroughOperationSequence?: number;
+  erasureEpoch?: number;
+  state?: {
+    processedPrefixOperationSequence: number;
+    erasureEpoch: number;
+  };
   now: string;
 }
 
@@ -79,19 +83,26 @@ export function materializeReferencedClaimCandidates(
     throw new TypeError("now must be a valid timestamp");
   }
 
+  const causalThroughOperationSequence =
+    input.causalThroughOperationSequence ??
+    input.state?.processedPrefixOperationSequence;
+  const erasureEpoch =
+    input.erasureEpoch ??
+    input.state?.erasureEpoch;
+
   if (
     !Number.isInteger(
-      input.causalThroughOperationSequence,
+      causalThroughOperationSequence,
     ) ||
-    input.causalThroughOperationSequence < 0
+    Number(causalThroughOperationSequence) < 0
   ) {
     throw new TypeError(
       "causalThroughOperationSequence must be a non-negative integer",
     );
   }
   if (
-    !Number.isInteger(input.erasureEpoch) ||
-    input.erasureEpoch < 0
+    !Number.isInteger(erasureEpoch) ||
+    Number(erasureEpoch) < 0
   ) {
     throw new TypeError(
       "erasureEpoch must be a non-negative integer",
@@ -176,7 +187,7 @@ export function materializeReferencedClaimCandidates(
           : "APPROVED_POLICY",
       content: renderProposition(proposition),
       causalThroughOperationSequence:
-        input.causalThroughOperationSequence,
+        Number(causalThroughOperationSequence),
       sourceRevisionRefs: [],
       claimRefs:
         arbitrated.supportingClaimRefs,
@@ -190,7 +201,7 @@ export function materializeReferencedClaimCandidates(
         claim.authorityClass === "CONFIRMED_CORRECTION"
           ? "CORRECTION"
           : "POLICY",
-      erasureEpoch: input.erasureEpoch,
+      erasureEpoch: Number(erasureEpoch),
       validUntil: arbitrated.validUntil,
       correctionTrigger,
     });
