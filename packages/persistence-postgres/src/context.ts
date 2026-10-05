@@ -199,6 +199,7 @@ export interface PostgresContextPlanningFrame {
   currentMessageSequence: number;
   currentOperationSequence: number;
   currentMessageAcceptedAt: string;
+  currentSourceAuthorUserId: UUID;
   erasureEpoch: number;
   recentMessages: Array<{
     messageId: UUID;
