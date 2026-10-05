@@ -24,6 +24,7 @@ export interface CandidateClaimRecord {
   claimId: UUID;
   claimVersion: number;
   conversationId: UUID | null;
+  subjectUserId: UUID | null;
   propositionRef: Record<string, unknown>;
   modality: "ASSERTION" | "CORRECTION";
   authorityClass: CandidateClaimAuthority;
@@ -42,6 +43,7 @@ export interface MaterializeReferencedClaimsInput {
   claims: CandidateClaimRecord[];
   referencedClaimIds: UUID[];
   conversationId: UUID;
+  currentSourceAuthorUserId: UUID;
   targetLanguageTag: string;
   state: ConversationContextState;
   now: string;
@@ -168,6 +170,14 @@ function isAdmissibleClaim(
   if (
     claim.scopeKind === "CONVERSATION" &&
     claim.scopeConversationId !== input.conversationId
+  ) {
+    return false;
+  }
+
+  if (
+    claim.subjectUserId !== null &&
+    claim.subjectUserId !==
+      input.currentSourceAuthorUserId
   ) {
     return false;
   }
