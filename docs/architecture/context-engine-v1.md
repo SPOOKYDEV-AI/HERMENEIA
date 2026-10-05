@@ -1,6 +1,6 @@
 # HERMENEIA Context Engine V1
 
-**Status:** Executable T0/T1 plus authoritative claim-backed T2 slice; episode/recovery enrichment pipeline incomplete  
+**Status:** Executable T0/T1 plus authoritative claim-backed T2, speaker style, transient active episode and bounded semantic episode enrichment; recovery enrichment remains incomplete  
 **Version:** 1  
 **Primary goals:** translation quality, low latency, temporal correctness, reproducibility
 
@@ -54,7 +54,7 @@ Explicit revocation without replacement is executable as a separate authority pa
 
 A second conflict fence runs during claim materialisation, before candidate ranking. Claims are grouped by typed semantic key. Approved `POLICY` / `APPROVED_GLOSSARY` evidence is considered first; when no such approved control-plane evidence applies, a matching speaker-scoped correction is more relevant than a generic correction for that speaker. The applicable level must have value consensus. Contradictory values at the same applicable authority/scope level cause that semantic key to be omitted from T2, not scored against each other. Identical claims are collapsed to one provider candidate with all supporting versioned claim refs retained for snapshot provenance.
 
-Semantic episode enrichment beyond the temporal V1, inferred style, recovery-checkpoint materialisation, dependency-aware invalidation and a production cross-process worker transport remain future work. The current raw-source store is process-local and transient, so `TRANSLATION_WORKER_MODE=external` fails fast rather than pretending a separate process can access plaintext that it does not own.
+Richer semantic episode signals beyond lexical/language/time V1, inferred style, recovery-checkpoint materialisation, dependency-aware invalidation and a production cross-process worker transport remain future work. The current raw-source store is process-local and transient, so `TRANSLATION_WORKER_MODE=external` fails fast rather than pretending a separate process can access plaintext that it does not own.
 
 ## 2. Design principle: understand progressively
 
@@ -189,7 +189,7 @@ It is the fallback when richer enrichment is behind.
 
 An episode represents a coherent segment of conversation.
 
-The **executable V1** deliberately starts with a privacy-minimal temporal episode rather than pretending semantic classification already exists. ConversationState persists no transcript and no episode summary. It stores only:
+The **executable V1** keeps a privacy-minimal structural episode and now permits bounded semantic continuity scoring from transient primary evidence. ConversationState persists no transcript and no episode summary. It stores only:
 
     episode_id
     episode_version
@@ -199,11 +199,11 @@ The **executable V1** deliberately starts with a privacy-minimal temporal episod
     started_at
     last_activity_at
 
-For `MESSAGE_CREATED`, `heuristic-v1` continues the active episode while the registered-time gap is at most 20 minutes. A larger gap starts a new episode. A clock regression also starts a new episode with reduced confidence rather than projecting future state backwards.
+For `MESSAGE_CREATED`, the temporal baseline continues the active episode while the registered-time gap is at most 20 minutes. A larger gap starts a new episode and a clock regression starts a new low-confidence episode. When transient plaintext is still available, semantic enrichment reconstructs at most eight CREATED source revisions from the durable structural op-sequence range, reads their bodies only from the transient source store and scores lexical overlap, language continuity and temporal distance. A confident `CONTINUE_ACTIVE` or `START_NEW` refines the temporal patch; `UNCERTAIN`, missing transient evidence or scorer failure keeps the temporal result.
 
 The current provider-facing episode is materialised only at planning time from source texts that are still available in the bounded transient source store. With the six-message planning window and nominal three-message immediate window, the `ACTIVE_EPISODE` capsule uses only messages 4–6 from the recent window while messages 1–3 by recency remain immediate context. Each episode source is included whole or skipped; no source body is truncated to manufacture a capsule, and missing/expired transient sources result in no episode payload.
 
-The richer research model remains a later enrichment layer. Future episode classification may add semantic similarity, entity/topic evidence, reply/reference signals and explicit `CONTINUE_ACTIVE / START_NEW / REACTIVATE_PRIOR / UNCERTAIN` decisions, but those signals must not be retroactively claimed by the temporal V1.
+The richer research model remains a later enrichment layer. V1 semantic enrichment is deliberately lexical/language/time only. Future classification may add embeddings, entity/topic evidence, reply/reference signals and `REACTIVATE_PRIOR`; those capabilities must not be retroactively claimed by this heuristic.
 
 ## 8. Continuity features
 

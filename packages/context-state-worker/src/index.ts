@@ -6,6 +6,8 @@ import type {
 import {
   applyContextDerivation,
   deriveTemporalEpisodePatch,
+  type ContextOperationRef,
+  type ContextStatePatch,
   type ConversationContextState,
 } from "../../context-state/src/index.js";
 
@@ -55,10 +57,22 @@ export interface ContextStateWorkerStore<Tx> {
   ): Promise<boolean>;
 }
 
+export interface ContextStateEpisodeDeriver<Tx> {
+  derive(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      state: ConversationContextState;
+      operation: ContextOperationRef;
+    },
+  ): Promise<ContextStatePatch | undefined>;
+}
+
 export interface ContextStateWorkerDependencies<Tx> {
   store: ContextStateWorkerStore<Tx>;
   outbox: PersistentOutboxService<Tx>;
   clock: ContextStateWorkerClock;
+  episodeDeriver?: ContextStateEpisodeDeriver<Tx>;
   retryBaseSeconds?: number;
   maxAttempts?: number;
 }
@@ -179,11 +193,38 @@ export class ContextStateWorkerService<Tx> {
           }
         }
 
-        const episodePatch =
+        let episodePatch =
           deriveTemporalEpisodePatch(
             state,
             operation,
           );
+
+        if (
+          this.deps.episodeDeriver &&
+          operation.kind === "MESSAGE_CREATED" &&
+          operation.messageId &&
+          operation.sourceRevision !== undefined
+        ) {
+          try {
+            const semanticPatch =
+              await this.deps.episodeDeriver.derive(
+                tx,
+                {
+                  tenantId: lease.tenantId,
+                  state: structuredClone(state),
+                  operation:
+                    structuredClone(operation),
+                },
+              );
+            if (semanticPatch) {
+              episodePatch = semanticPatch;
+            }
+          } catch {
+            // Semantic enrichment is strictly optional. Any missing transient
+            // source, bounded-history failure or heuristic error preserves
+            // the already-computed temporal V1 decision.
+          }
+        }
 
         const next = applyContextDerivation(state, {
           conversationId: state.conversationId,

@@ -367,3 +367,110 @@ test("PostgreSQL ConversationState remains backward-compatible with legacy episo
     null,
   );
 });
+
+
+test("PostgreSQL episode source refs are bounded by structural op sequence and returned chronologically", async () => {
+  const { repository, connection } = repositoryWith([
+    {
+      rows: [
+        {
+          message_id: "message-7",
+          revision: 1,
+          op_seq: 7,
+        },
+        {
+          message_id: "message-5",
+          revision: 1,
+          op_seq: 5,
+        },
+        {
+          message_id: "message-3",
+          revision: 1,
+          op_seq: 3,
+        },
+      ],
+      rowCount: 3,
+    },
+  ]);
+
+  const refs = await repository.withTransaction((tx) =>
+    repository.loadEpisodeSourceRefs(tx, {
+      tenantId: "tenant-1",
+      conversationId: "conversation-1",
+      startOperationSequence: 3,
+      throughOperationSequence: 7,
+      limit: 8,
+    }),
+  );
+
+  assert.deepEqual(refs, [
+    {
+      messageId: "message-3",
+      sourceRevision: 1,
+      operationSequence: 3,
+    },
+    {
+      messageId: "message-5",
+      sourceRevision: 1,
+      operationSequence: 5,
+    },
+    {
+      messageId: "message-7",
+      sourceRevision: 1,
+      operationSequence: 7,
+    },
+  ]);
+
+  const query = connection.queries[1];
+  assert.match(
+    query.text,
+    /FROM message_revisions/,
+  );
+  assert.match(
+    query.text,
+    /mutation_type = 'CREATED'/,
+  );
+  assert.match(
+    query.text,
+    /op_seq >= \$3/,
+  );
+  assert.match(
+    query.text,
+    /op_seq <= \$4/,
+  );
+  assert.match(query.text, /LIMIT \$5/);
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "conversation-1",
+    3,
+    7,
+    8,
+  ]);
+});
+
+test("PostgreSQL episode source ref range fails closed before SQL", async () => {
+  const { repository, connection } =
+    repositoryWith();
+
+  await assert.rejects(
+    () =>
+      repository.withTransaction((tx) =>
+        repository.loadEpisodeSourceRefs(tx, {
+          tenantId: "tenant-1",
+          conversationId: "conversation-1",
+          startOperationSequence: 8,
+          throughOperationSequence: 7,
+          limit: 8,
+        }),
+      ),
+    /bounded positive integers/,
+  );
+
+  assert.equal(
+    connection.queries.some(
+      ({ text }) =>
+        /FROM message_revisions/.test(text),
+    ),
+    false,
+  );
+});
