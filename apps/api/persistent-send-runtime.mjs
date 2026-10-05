@@ -541,6 +541,8 @@ export async function createPersistentSendRuntime({
                  AS has_context_snapshots,
                to_regclass('public.conversation_context_states') IS NOT NULL
                  AS has_context_state,
+               to_regclass('public.recovery_checkpoints') IS NOT NULL
+                  AS has_recovery_checkpoints,
                EXISTS (
                  SELECT 1
                    FROM information_schema.columns
@@ -578,6 +580,7 @@ export async function createPersistentSendRuntime({
             row?.has_provider_executions &&
             row?.has_context_snapshots &&
             row?.has_context_state &&
+             row?.has_recovery_checkpoints &&
             row?.has_command_fingerprint &&
             row?.has_source_required_constraint &&
             row?.has_device_platform &&
