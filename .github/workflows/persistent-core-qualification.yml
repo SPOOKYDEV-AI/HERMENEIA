@@ -22,6 +22,7 @@ on:
       - feat/tenant-policy-control-plane-v1
       - feat/conversation-style-profile-v1
       - feat/active-episode-v1
+      - feat/semantic-episode-enrichment-v1
   workflow_dispatch:
 
 permissions:
