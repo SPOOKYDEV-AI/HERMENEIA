@@ -7,6 +7,10 @@ import {
   PostgresTranslationRepository,
 } from "../../.build/packages/persistence-postgres/src/index.js";
 import {
+  PostgresContextPlanningRepository,
+  PostgresContextSnapshotRepository,
+} from "../../.build/packages/persistence-postgres/src/context.js";
+import {
   SqlTransactionManager,
 } from "../../.build/packages/persistence/src/index.js";
 import {
@@ -30,6 +34,9 @@ import {
 import {
   createPostgresTranslationRecoveryService,
 } from "../../.build/packages/runtime/src/persistent-translation-recovery.js";
+import {
+  createPostgresTranslationContextRuntime,
+} from "../../.build/packages/runtime/src/persistent-context-translation.js";
 import {
   InMemoryTransientSourceStore,
 } from "../../.build/packages/transient-source/src/index.js";
@@ -174,6 +181,33 @@ export function persistentSendConfigFromEnv(env = process.env) {
       30,
       "OUTBOX_LEASE_SECONDS",
     ),
+    context: {
+      recentMessageLimit: positiveInteger(
+        env.CONTEXT_RECENT_MESSAGE_LIMIT,
+        6,
+        "CONTEXT_RECENT_MESSAGE_LIMIT",
+      ),
+      payloadTtlSeconds: positiveInteger(
+        env.CONTEXT_PAYLOAD_TTL_SECONDS,
+        300,
+        "CONTEXT_PAYLOAD_TTL_SECONDS",
+      ),
+      payloadMaxEntries: positiveInteger(
+        env.CONTEXT_PAYLOAD_MAX_ENTRIES,
+        1_000,
+        "CONTEXT_PAYLOAD_MAX_ENTRIES",
+      ),
+      payloadMaxTotalChars: positiveInteger(
+        env.CONTEXT_PAYLOAD_MAX_TOTAL_CHARS,
+        5_000_000,
+        "CONTEXT_PAYLOAD_MAX_TOTAL_CHARS",
+      ),
+      totalTokens: positiveInteger(
+        env.CONTEXT_TOTAL_TOKENS,
+        2_048,
+        "CONTEXT_TOTAL_TOKENS",
+      ),
+    },
     translation: {
       strategyVersion:
         env.TRANSLATION_STRATEGY_VERSION || "t0-v1",
@@ -247,6 +281,10 @@ export async function createPersistentSendRuntime({
     const sessionRepository = new PostgresSessionRepository(transactions);
     const translationRepository =
       new PostgresTranslationRepository(transactions);
+    const contextSnapshotRepository =
+      new PostgresContextSnapshotRepository(transactions);
+    const contextPlanningRepository =
+      new PostgresContextPlanningRepository(transactions);
 
     const transientSources = new InMemoryTransientSourceStore({
       clock,
@@ -304,6 +342,29 @@ export async function createPersistentSendRuntime({
           config.transientSource.ttlSeconds,
       });
 
+    const contextRuntime = hasTranslationProvider
+      ? createPostgresTranslationContextRuntime({
+          snapshotRepository: contextSnapshotRepository,
+          planningRepository: contextPlanningRepository,
+          transientSources,
+          ids,
+          clock,
+          plannerConfig: {
+            recentMessageLimit:
+              config.context.recentMessageLimit,
+            budget: {
+              totalTokens: config.context.totalTokens,
+            },
+          },
+          payloadTtlSeconds:
+            config.context.payloadTtlSeconds,
+          payloadMaxEntries:
+            config.context.payloadMaxEntries,
+          payloadMaxTotalChars:
+            config.context.payloadMaxTotalChars,
+        })
+      : null;
+
     const translationWorker = hasTranslationProvider
       ? createPostgresTranslationWorker({
           messagingRepository: repository,
@@ -323,6 +384,8 @@ export async function createPersistentSendRuntime({
             config.translation.maxProviderAttempts,
           retryBaseSeconds:
             config.translation.retryBaseSeconds,
+          contextBridge:
+            contextRuntime?.contextBridge,
         })
       : null;
 
@@ -341,6 +404,8 @@ export async function createPersistentSendRuntime({
                  AS has_translation_executions,
                to_regclass('public.provider_executions') IS NOT NULL
                  AS has_provider_executions,
+               to_regclass('public.context_snapshots') IS NOT NULL
+                 AS has_context_snapshots,
                EXISTS (
                  SELECT 1
                    FROM information_schema.columns
@@ -376,6 +441,7 @@ export async function createPersistentSendRuntime({
             row?.has_tenant_sync &&
             row?.has_translation_executions &&
             row?.has_provider_executions &&
+            row?.has_context_snapshots &&
             row?.has_command_fingerprint &&
             row?.has_source_required_constraint &&
             row?.has_device_platform &&
@@ -411,11 +477,14 @@ export async function createPersistentSendRuntime({
       translationService,
       translationRecoveryService,
       translationWorker,
+      contextRuntime,
       readinessService,
       authenticate,
       repository,
       outboxRepository,
       translationRepository,
+      contextSnapshotRepository,
+      contextPlanningRepository,
       sessionRepository,
       transientSources,
       sqlPool,

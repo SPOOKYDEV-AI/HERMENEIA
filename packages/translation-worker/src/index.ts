@@ -46,6 +46,44 @@ export type TranslationWorkerProviderResult =
   | TranslationWorkerProviderSuccess
   | TranslationWorkerProviderFailure;
 
+export interface TranslationWorkerContextItem {
+  candidateId: string;
+  candidateType: string;
+  content: string;
+  selectionReason: string;
+}
+
+export interface TranslationWorkerContextBridge {
+  prepare(input: {
+    tenantId: UUID;
+    conversationId: UUID;
+    sourceMessageId: UUID;
+    sourceRevision: number;
+    recipientUserId: UUID;
+    targetLanguageTag: string;
+    targetProfileVersion: number;
+  }): Promise<{
+    contextSnapshotId: UUID;
+    strategyVersion: string;
+  }>;
+
+  resolve(input: {
+    tenantId: UUID;
+    contextSnapshotId: UUID;
+  }): Promise<
+    | {
+        status: "READY";
+        selected: TranslationWorkerContextItem[];
+      }
+    | {
+        status:
+          | "MISSING_SNAPSHOT"
+          | "PAYLOAD_UNAVAILABLE"
+          | "PAYLOAD_INTEGRITY_MISMATCH";
+      }
+  >;
+}
+
 export interface TranslationWorkerProvider {
   providerId: string;
   modelId: string;
@@ -61,6 +99,7 @@ export interface TranslationWorkerProvider {
     targetProfileVersion: number;
     strategyVersion: string;
     contextSnapshotId: UUID | null;
+    contextItems: TranslationWorkerContextItem[];
   }): Promise<TranslationWorkerProviderResult>;
 }
 
@@ -267,6 +306,7 @@ export interface TranslationWorkerDependencies<Tx> {
   transientSources: TransientSourceStore;
   provider: TranslationWorkerProvider;
   envelopeProtector: TranslationEnvelopeProtector;
+  contextBridge?: TranslationWorkerContextBridge;
   ids: TranslationWorkerIds;
   clock: TranslationWorkerClock;
   strategyVersion?: string;
@@ -280,6 +320,7 @@ export type TranslationWorkerResult =
   | "FANOUT_DONE"
   | "EXECUTION_DONE"
   | "SOURCE_REQUIRED"
+  | "CONTEXT_FALLBACK"
   | "RETRY_SCHEDULED"
   | "FAILED"
   | "STALE_LEASE"
@@ -355,6 +396,30 @@ export class TranslationWorkerService<Tx> {
           continue;
         }
 
+        let contextSnapshotId: UUID | null = null;
+        let strategyVersion = this.strategyVersion;
+
+        if (this.deps.contextBridge) {
+          try {
+            const prepared = await this.deps.contextBridge.prepare({
+              tenantId: lease.tenantId,
+              conversationId: plan.conversationId,
+              sourceMessageId: payload.messageId,
+              sourceRevision: payload.sourceRevision,
+              recipientUserId: target.recipientUserId,
+              targetLanguageTag: target.targetLanguageTag,
+              targetProfileVersion: target.targetProfileVersion,
+            });
+            contextSnapshotId = prepared.contextSnapshotId;
+            strategyVersion = prepared.strategyVersion;
+          } catch {
+            // Context preparation is quality-enhancing, not a messaging
+            // availability dependency. A failed preparation falls back to T0.
+            contextSnapshotId = null;
+            strategyVersion = this.strategyVersion;
+          }
+        }
+
         const execution = await this.deps.executions.ensurePending({
           tenantId: lease.tenantId,
           conversationId: plan.conversationId,
@@ -363,8 +428,8 @@ export class TranslationWorkerService<Tx> {
           recipientUserId: target.recipientUserId,
           targetLanguageTag: target.targetLanguageTag,
           targetProfileVersion: target.targetProfileVersion,
-          contextSnapshotId: null,
-          strategyVersion: this.strategyVersion,
+          contextSnapshotId,
+          strategyVersion,
         });
 
         if (execution.status !== "PENDING") {
@@ -501,6 +566,51 @@ export class TranslationWorkerService<Tx> {
       );
     }
 
+    let contextItems: TranslationWorkerContextItem[] = [];
+
+    if (execution.contextSnapshotId) {
+      if (!this.deps.contextBridge) {
+        return this.replanWithoutContext(
+          lease,
+          execution,
+          payload,
+        );
+      }
+
+      let resolved:
+        | {
+            status: "READY";
+            selected: TranslationWorkerContextItem[];
+          }
+        | {
+            status:
+              | "MISSING_SNAPSHOT"
+              | "PAYLOAD_UNAVAILABLE"
+              | "PAYLOAD_INTEGRITY_MISMATCH";
+          };
+      try {
+        resolved = await this.deps.contextBridge.resolve({
+          tenantId: execution.tenantId,
+          contextSnapshotId: execution.contextSnapshotId,
+        });
+      } catch {
+        return this.replanWithoutContext(
+          lease,
+          execution,
+          payload,
+        );
+      }
+
+      if (resolved.status !== "READY") {
+        return this.replanWithoutContext(
+          lease,
+          execution,
+          payload,
+        );
+      }
+      contextItems = resolved.selected;
+    }
+
     const attempt =
       await this.deps.executions.startProviderAttempt({
         tenantId: execution.tenantId,
@@ -526,6 +636,7 @@ export class TranslationWorkerService<Tx> {
         targetProfileVersion: execution.targetProfileVersion,
         strategyVersion: execution.strategyVersion,
         contextSnapshotId: execution.contextSnapshotId,
+        contextItems,
       });
     } catch (error) {
       providerResult = {
@@ -615,6 +726,79 @@ export class TranslationWorkerService<Tx> {
         execution,
       );
     }
+  }
+
+  private async replanWithoutContext(
+    lease: OutboxJobLease,
+    execution: TranslationExecutionRecord,
+    payload: {
+      translationId: UUID;
+      messageId: UUID;
+      sourceRevision: number;
+      sourceHash: string;
+    },
+  ): Promise<TranslationWorkerResult> {
+    const fallback = await this.deps.executions.ensurePending({
+      tenantId: execution.tenantId,
+      conversationId: execution.conversationId,
+      sourceMessageId: execution.sourceMessageId,
+      sourceRevision: execution.sourceRevision,
+      recipientUserId: execution.recipientUserId,
+      targetLanguageTag: execution.targetLanguageTag,
+      targetProfileVersion: execution.targetProfileVersion,
+      contextSnapshotId: null,
+      strategyVersion: this.strategyVersion,
+    });
+
+    return this.deps.store.withTransaction<TranslationWorkerResult>(
+      async (tx) => {
+        const current =
+          await this.deps.store.lockTranslationExecution(
+            tx,
+            execution.tenantId,
+            execution.translationId,
+          );
+
+        if (
+          current &&
+          current.status === "PENDING"
+        ) {
+          await this.deps.store.markSuperseded(tx, {
+            tenantId: execution.tenantId,
+            translationId: execution.translationId,
+            supersededAt: this.deps.clock.now(),
+          });
+        }
+
+        if (fallback.status === "PENDING") {
+          await this.deps.store.insertOutboxJob(tx, {
+            jobId: this.deps.ids.next("job"),
+            tenantId: fallback.tenantId,
+            jobType: "translation.execute",
+            businessKey: fallback.translationId,
+            payloadRef: {
+              translation_id: fallback.translationId,
+              message_id: payload.messageId,
+              source_revision: payload.sourceRevision,
+              source_hash: payload.sourceHash,
+            },
+            priority: 10,
+            availableAt: this.deps.clock.now(),
+          });
+        }
+
+        const completed = await this.deps.store.completeJob(tx, {
+          tenantId: lease.tenantId,
+          jobId: lease.jobId,
+          fencingToken: lease.fencingToken,
+          now: this.deps.clock.now(),
+        });
+        if (!completed) {
+          throw new StaleLeaseError();
+        }
+        return "CONTEXT_FALLBACK";
+      },
+    );
   }
 
   private async publishTranslation(
