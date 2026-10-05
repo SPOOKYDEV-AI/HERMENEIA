@@ -54,7 +54,7 @@ Explicit revocation without replacement is executable as a separate authority pa
 
 A second conflict fence runs during claim materialisation, before candidate ranking. Claims are grouped by typed semantic key. Approved `POLICY` / `APPROVED_GLOSSARY` evidence is considered first; when no such approved control-plane evidence applies, a matching speaker-scoped correction is more relevant than a generic correction for that speaker. The applicable level must have value consensus. Contradictory values at the same applicable authority/scope level cause that semantic key to be omitted from T2, not scored against each other. Identical claims are collapsed to one provider candidate with all supporting versioned claim refs retained for snapshot provenance.
 
-Semantic episode derivation, typed TONE/style memory, recovery-checkpoint materialisation, dependency-aware invalidation and a production cross-process worker transport remain future work. The current raw-source store is process-local and transient, so `TRANSLATION_WORKER_MODE=external` fails fast rather than pretending a separate process can access plaintext that it does not own.
+Semantic episode enrichment beyond the temporal V1, inferred style, recovery-checkpoint materialisation, dependency-aware invalidation and a production cross-process worker transport remain future work. The current raw-source store is process-local and transient, so `TRANSLATION_WORKER_MODE=external` fails fast rather than pretending a separate process can access plaintext that it does not own.
 
 ## 2. Design principle: understand progressively
 
@@ -189,27 +189,25 @@ It is the fallback when richer enrichment is behind.
 
 An episode represents a coherent segment of conversation.
 
-The active episode maintains incrementally updated features such as:
+The **executable V1** deliberately starts with a privacy-minimal temporal episode rather than pretending semantic classification already exists. ConversationState persists no transcript and no episode summary. It stores only:
 
-- semantic centroid or representation;
-- start/last activity timestamps;
-- active entities;
-- topic keywords/features;
-- compact summary;
-- continuity confidence.
+    episode_id
+    episode_version
+    continuity_confidence
+    start_operation_sequence
+    last_operation_sequence
+    started_at
+    last_activity_at
 
-Episode classification for a new message produces a decision and evidence:
+For `MESSAGE_CREATED`, `heuristic-v1` continues the active episode while the registered-time gap is at most 20 minutes. A larger gap starts a new episode. A clock regression also starts a new episode with reduced confidence rather than projecting future state backwards.
 
-    CONTINUE_ACTIVE
-    START_NEW
-    REACTIVATE_PRIOR
-    UNCERTAIN
+The current provider-facing episode is materialised only at planning time from source texts that are still available in the bounded transient source store. With the six-message planning window and nominal three-message immediate window, the `ACTIVE_EPISODE` capsule uses only messages 4–6 from the recent window while messages 1–3 by recency remain immediate context. Each episode source is included whole or skipped; no source body is truncated to manufacture a capsule, and missing/expired transient sources result in no episode payload.
 
-UNCERTAIN must be a valid state. The engine should not fabricate certainty when signals conflict.
+The richer research model remains a later enrichment layer. Future episode classification may add semantic similarity, entity/topic evidence, reply/reference signals and explicit `CONTINUE_ACTIVE / START_NEW / REACTIVATE_PRIOR / UNCERTAIN` decisions, but those signals must not be retroactively claimed by the temporal V1.
 
 ## 8. Continuity features
 
-V1 may combine:
+Post-temporal-V1 enrichment may combine:
 
 - time delta;
 - semantic similarity to active episode;
