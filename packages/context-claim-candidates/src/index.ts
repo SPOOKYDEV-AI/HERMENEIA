@@ -176,7 +176,7 @@ function isAdmissibleClaim(
   if (
     claim.validFrom &&
     (!Number.isFinite(Date.parse(claim.validFrom)) ||
-      Date.parse(claim.validFrom) > now)
+      Date.parse(claim.validFrom) >= now)
   ) {
     return false;
   }
