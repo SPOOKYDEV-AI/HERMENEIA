@@ -20,6 +20,9 @@ import {
   PostgresContextCorrectionRepository,
 } from "../../.build/packages/persistence-postgres/src/context-corrections.js";
 import {
+  PostgresTenantContextPolicyRepository,
+} from "../../.build/packages/persistence-postgres/src/context-policies.js";
+import {
   PostgresTranslationFeedbackRepository,
 } from "../../.build/packages/persistence-postgres/src/translation-feedback.js";
 import {
@@ -58,6 +61,9 @@ import {
 import {
   createPostgresContextCorrectionService,
 } from "../../.build/packages/runtime/src/persistent-context-correction.js";
+import {
+  createPostgresTenantContextPolicyService,
+} from "../../.build/packages/runtime/src/persistent-context-policy.js";
 import {
   createPostgresTranslationFeedbackService,
 } from "../../.build/packages/runtime/src/persistent-translation-feedback.js";
@@ -319,6 +325,10 @@ export async function createPersistentSendRuntime({
       new PostgresContextCorrectionRepository(
         transactions,
       );
+    const tenantContextPolicyRepository =
+      new PostgresTenantContextPolicyRepository(
+        transactions,
+      );
     const translationFeedbackRepository =
       new PostgresTranslationFeedbackRepository(
         transactions,
@@ -395,6 +405,15 @@ export async function createPersistentSendRuntime({
         clock,
         strategyVersion:
           contextStateStrategyVersion,
+      });
+
+    const tenantPolicyService =
+      createPostgresTenantContextPolicyService({
+        messagingRepository: repository,
+        policyRepository:
+          tenantContextPolicyRepository,
+        ids,
+        clock,
       });
 
     const translationFeedbackService =
@@ -567,6 +586,7 @@ export async function createPersistentSendRuntime({
       translationRecoveryService,
       translationWorker,
       correctionService,
+      tenantPolicyService,
       translationFeedbackService,
       contextStateWorker,
       contextRuntime,
@@ -580,6 +600,7 @@ export async function createPersistentSendRuntime({
       contextStateRepository,
       contextClaimRepository,
       contextCorrectionRepository,
+      tenantContextPolicyRepository,
       translationFeedbackRepository,
       sessionRepository,
       transientSources,

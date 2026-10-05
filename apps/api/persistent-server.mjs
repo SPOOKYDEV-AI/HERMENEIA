@@ -46,6 +46,7 @@ export async function createPersistentHermeneiaHttpRuntime(options = {}) {
       translationRecoveryService:
         runtime.translationRecoveryService,
       correctionService: runtime.correctionService,
+      tenantPolicyService: runtime.tenantPolicyService,
       translationFeedbackService:
         runtime.translationFeedbackService,
       deviceService: runtime.deviceService,

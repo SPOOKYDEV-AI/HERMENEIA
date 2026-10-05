@@ -53,8 +53,10 @@ const ids = {
   tenantId: randomUUID(),
   senderUserId: randomUUID(),
   recipientUserId: randomUUID(),
+  tenantAdminUserId: randomUUID(),
   senderDeviceId: randomUUID(),
   recipientDeviceId: randomUUID(),
+  tenantAdminDeviceId: randomUUID(),
   conversationId: randomUUID(),
   commandId: randomUUID(),
   clientMessageId: randomUUID(),
@@ -69,7 +71,9 @@ const ids = {
   reviewedClaimRevokeCommandId: randomUUID(),
   postRevokeCommandId: randomUUID(),
   postRevokeClientMessageId: randomUUID(),
-  tenantPolicyClaimId: randomUUID(),
+  tenantPolicyMutationCommandId: randomUUID(),
+  tenantPolicyUpdateCommandId: randomUUID(),
+  tenantPolicyRevokeCommandId: randomUUID(),
   tenantPolicyCommandId: randomUUID(),
   tenantPolicyClientMessageId: randomUUID(),
   stalePolicyCommandId: randomUUID(),
@@ -80,6 +84,7 @@ const ids = {
 
 const senderKeys = await generateHpkeP256DeviceKeyPair();
 const recipientKeys = await generateHpkeP256DeviceKeyPair();
+const tenantAdminKeys = await generateHpkeP256DeviceKeyPair();
 const codec = createHpkeP256EnvelopeCodec();
 
 let providerCalls = 0;
@@ -225,8 +230,15 @@ async function seed() {
     try {
       await db.query(
         `INSERT INTO users(user_id, status, default_language_tag)
-         VALUES ($1,'ACTIVE','fr-FR'), ($2,'ACTIVE','es-CO')`,
-        [ids.senderUserId, ids.recipientUserId],
+         VALUES
+           ($1,'ACTIVE','fr-FR'),
+           ($2,'ACTIVE','es-CO'),
+           ($3,'ACTIVE','en')`,
+        [
+          ids.senderUserId,
+          ids.recipientUserId,
+          ids.tenantAdminUserId,
+        ],
       );
 
       await db.query(
@@ -241,8 +253,14 @@ async function seed() {
            tenant_id, user_id, role, status
          ) VALUES
            ($1,$2,'MEMBER','ACTIVE'),
-           ($1,$3,'MEMBER','ACTIVE')`,
-        [ids.tenantId, ids.senderUserId, ids.recipientUserId],
+           ($1,$3,'MEMBER','ACTIVE'),
+           ($1,$4,'ADMIN','ACTIVE')`,
+        [
+          ids.tenantId,
+          ids.senderUserId,
+          ids.recipientUserId,
+          ids.tenantAdminUserId,
+        ],
       );
 
       await db.query(
@@ -251,7 +269,8 @@ async function seed() {
            public_material_ref, revocation_epoch, platform
          ) VALUES
            ($1,$2,'ACTIVE',1,$3,0,'DESKTOP'),
-           ($4,$5,'ACTIVE',1,$6,0,'DESKTOP')`,
+           ($4,$5,'ACTIVE',1,$6,0,'DESKTOP'),
+           ($7,$8,'ACTIVE',1,$9,0,'DESKTOP')`,
         [
           ids.senderDeviceId,
           ids.senderUserId,
@@ -259,6 +278,9 @@ async function seed() {
           ids.recipientDeviceId,
           ids.recipientUserId,
           recipientKeys.publicMaterialRef,
+          ids.tenantAdminDeviceId,
+          ids.tenantAdminUserId,
+          tenantAdminKeys.publicMaterialRef,
         ],
       );
 
@@ -362,13 +384,21 @@ async function cleanup() {
       );
       await db.query(
         `DELETE FROM sessions
-          WHERE user_id IN ($1,$2)`,
-        [ids.senderUserId, ids.recipientUserId],
+          WHERE user_id IN ($1,$2,$3)`,
+        [
+          ids.senderUserId,
+          ids.recipientUserId,
+          ids.tenantAdminUserId,
+        ],
       );
       await db.query(
         `DELETE FROM device_sync_states
-          WHERE device_id IN ($1,$2)`,
-        [ids.senderDeviceId, ids.recipientDeviceId],
+          WHERE device_id IN ($1,$2,$3)`,
+        [
+          ids.senderDeviceId,
+          ids.recipientDeviceId,
+          ids.tenantAdminDeviceId,
+        ],
       );
       await db.query(
         "DELETE FROM conversation_members WHERE tenant_id = $1",
@@ -379,8 +409,12 @@ async function cleanup() {
         tenant,
       );
       await db.query(
-        "DELETE FROM devices WHERE user_id IN ($1,$2)",
-        [ids.senderUserId, ids.recipientUserId],
+        "DELETE FROM devices WHERE user_id IN ($1,$2,$3)",
+        [
+          ids.senderUserId,
+          ids.recipientUserId,
+          ids.tenantAdminUserId,
+        ],
       );
       await db.query(
         "DELETE FROM tenant_memberships WHERE tenant_id = $1",
@@ -391,8 +425,12 @@ async function cleanup() {
         tenant,
       );
       await db.query(
-        "DELETE FROM users WHERE user_id IN ($1,$2)",
-        [ids.senderUserId, ids.recipientUserId],
+        "DELETE FROM users WHERE user_id IN ($1,$2,$3)",
+        [
+          ids.senderUserId,
+          ids.recipientUserId,
+          ids.tenantAdminUserId,
+        ],
       );
       await db.query("COMMIT");
     } catch (error) {
@@ -428,6 +466,11 @@ try {
     tenantId: ids.tenantId,
     userId: ids.recipientUserId,
     deviceId: ids.recipientDeviceId,
+  };
+  const tenantAdmin = {
+    tenantId: ids.tenantId,
+    userId: ids.tenantAdminUserId,
+    deviceId: ids.tenantAdminDeviceId,
   };
 
   const accepted = await runtime.sendService.sendMessage(
@@ -1590,55 +1633,229 @@ try {
   );
   assert.equal(providerCalls, 3);
 
-  runtimeNow = "2026-10-05T08:00:04.000Z";
+  runtimeNow = "2026-10-05T08:00:05.100Z";
 
-  await withConnection(async (db) => {
-    const inserted = await db.query(
-      `INSERT INTO context_claims(
-         tenant_id,
-         claim_id,
-         claim_version,
-         conversation_id,
-         message_id,
-         subject_user_id,
-         claim_type,
-         proposition_ref,
-         modality,
-         authority_class,
-         retention_class,
-         sensitivity_class,
-         confidence,
-         scope_kind,
-         scope_conversation_id,
-         trigger_kind,
-         valid_from,
-         valid_until,
-         status,
-         created_at
-       ) VALUES (
-         $1,$2,1,NULL,NULL,NULL,
-         'TERMINOLOGY',$3::jsonb,
-         'ASSERTION','APPROVED_GLOSSARY',
-         'POLICY_REFERENCE','NORMAL',1,
-         'TENANT',NULL,
-         'APPROVED_GLOSSARY_CHANGE',
-         $4,NULL,'ACTIVE',$4
-       )`,
-      [
-        ids.tenantId,
-        ids.tenantPolicyClaimId,
-        JSON.stringify({
+  const tenantPolicyCreated =
+    await runtime.tenantPolicyService.upsertPolicy(
+      tenantAdmin,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.tenantPolicyMutationCommandId,
+        kind: "GLOSSARY",
+        proposition: {
+          schema_version: 1,
+          kind: "TERM_MEANING",
+          surface_form: "SLA",
+          meaning: "service level accord",
+          source_language_tag: "fr-FR",
+          target_language_tag: TARGET_LANGUAGE,
+        },
+      },
+    );
+
+  assert.equal(
+    tenantPolicyCreated.status,
+    "ACTIVE",
+  );
+  assert.equal(
+    tenantPolicyCreated.kind,
+    "GLOSSARY",
+  );
+  assert.equal(
+    tenantPolicyCreated.claim_version,
+    1,
+  );
+  assert.equal(
+    tenantPolicyCreated.tenant_policy_version,
+    2,
+  );
+  assert.deepEqual(
+    tenantPolicyCreated.superseded_claims,
+    [],
+  );
+  const supersededTenantPolicyClaimId =
+    tenantPolicyCreated.claim_id;
+
+  runtimeNow = "2026-10-05T08:00:05.200Z";
+
+  const tenantPolicyUpdated =
+    await runtime.tenantPolicyService.upsertPolicy(
+      tenantAdmin,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.tenantPolicyUpdateCommandId,
+        kind: "GLOSSARY",
+        proposition: {
           schema_version: 1,
           kind: "TERM_MEANING",
           surface_form: "SLA",
           meaning: "service level agreement",
           source_language_tag: "fr-FR",
           target_language_tag: TARGET_LANGUAGE,
-        }),
-        runtimeNow,
+        },
+      },
+    );
+
+  assert.equal(
+    tenantPolicyUpdated.status,
+    "ACTIVE",
+  );
+  assert.equal(
+    tenantPolicyUpdated.kind,
+    "GLOSSARY",
+  );
+  assert.equal(
+    tenantPolicyUpdated.claim_version,
+    1,
+  );
+  assert.equal(
+    tenantPolicyUpdated.tenant_policy_version,
+    3,
+  );
+  assert.deepEqual(
+    tenantPolicyUpdated.superseded_claims,
+    [{
+      claim_id:
+        supersededTenantPolicyClaimId,
+      claim_version: 1,
+    }],
+  );
+  const tenantPolicyClaimId =
+    tenantPolicyUpdated.claim_id;
+  assert.notEqual(
+    tenantPolicyClaimId,
+    supersededTenantPolicyClaimId,
+  );
+
+  await withConnection(async (db) => {
+    const adminConversationMembership =
+      await db.query(
+        `SELECT COUNT(*)::integer AS count
+           FROM conversation_members
+          WHERE tenant_id = $1
+            AND conversation_id = $2
+            AND user_id = $3`,
+        [
+          ids.tenantId,
+          ids.conversationId,
+          ids.tenantAdminUserId,
+        ],
+      );
+    assert.equal(
+      Number(
+        adminConversationMembership.rows[0].count,
+      ),
+      0,
+    );
+
+    const supersededClaim = await db.query(
+      `SELECT status,
+              proposition_ref
+         FROM context_claims
+        WHERE tenant_id = $1
+          AND claim_id = $2
+          AND claim_version = 1`,
+      [
+        ids.tenantId,
+        supersededTenantPolicyClaimId,
       ],
     );
-    assert.equal(inserted.rowCount, 1);
+    assert.equal(
+      supersededClaim.rowCount,
+      1,
+    );
+    assert.equal(
+      supersededClaim.rows[0].status,
+      "INVALIDATED",
+    );
+    assert.equal(
+      supersededClaim.rows[0].proposition_ref.meaning,
+      "service level accord",
+    );
+
+    const overrideProvenance =
+      await db.query(
+        `SELECT relation,
+                derived_claim_id,
+                source_claim_id
+           FROM provenance_edges
+          WHERE tenant_id = $1
+            AND derived_claim_id = $2
+            AND derived_claim_version = 1
+            AND source_claim_id = $3
+            AND source_claim_version = 1`,
+        [
+          ids.tenantId,
+          supersededTenantPolicyClaimId,
+          tenantPolicyClaimId,
+        ],
+      );
+    assert.equal(
+      overrideProvenance.rowCount,
+      1,
+    );
+    assert.equal(
+      overrideProvenance.rows[0].relation,
+      "OVERRIDDEN_BY",
+    );
+
+    const claim = await db.query(
+      `SELECT authority_class,
+              retention_class,
+              scope_kind,
+              conversation_id,
+              subject_user_id,
+              trigger_kind,
+              proposition_ref,
+              status
+         FROM context_claims
+        WHERE tenant_id = $1
+          AND claim_id = $2
+          AND claim_version = 1`,
+      [ids.tenantId, tenantPolicyClaimId],
+    );
+    assert.equal(claim.rowCount, 1);
+    assert.equal(
+      claim.rows[0].authority_class,
+      "APPROVED_GLOSSARY",
+    );
+    assert.equal(
+      claim.rows[0].retention_class,
+      "POLICY_REFERENCE",
+    );
+    assert.equal(
+      claim.rows[0].scope_kind,
+      "TENANT",
+    );
+    assert.equal(
+      claim.rows[0].conversation_id,
+      null,
+    );
+    assert.equal(
+      claim.rows[0].subject_user_id,
+      null,
+    );
+    assert.equal(
+      claim.rows[0].trigger_kind,
+      "APPROVED_GLOSSARY_CHANGE",
+    );
+    assert.equal(
+      claim.rows[0].status,
+      "ACTIVE",
+    );
+    assert.deepEqual(
+      claim.rows[0].proposition_ref,
+      {
+        schema_version: 1,
+        kind: "TERM_MEANING",
+        surface_form: "SLA",
+        meaning: "service level agreement",
+        source_language_tag: "fr-FR",
+        target_language_tag: TARGET_LANGUAGE,
+      },
+    );
 
     const state = await db.query(
       `SELECT terminology_claim_refs,
@@ -1652,25 +1869,27 @@ try {
     assert.equal(state.rowCount, 1);
     assert.equal(
       state.rows[0].terminology_claim_refs.includes(
-        ids.tenantPolicyClaimId,
+        tenantPolicyClaimId,
       ),
       false,
     );
     assert.equal(
       state.rows[0].lexical_claim_refs.includes(
-        ids.tenantPolicyClaimId,
+        tenantPolicyClaimId,
       ),
       false,
     );
     assert.equal(
       state.rows[0].correction_claim_refs.includes(
-        ids.tenantPolicyClaimId,
+        tenantPolicyClaimId,
       ),
       false,
     );
   });
 
-  runtimeNow = "2026-10-05T08:00:05.000Z";
+  // Claims are admissible strictly before the source revision timestamp,
+  // so the message must be causally later than the replacement policy claim.
+  runtimeNow = "2026-10-05T08:00:05.201Z";
 
   const tenantPolicyAccepted =
     await runtime.sendService.sendMessage(
@@ -1721,12 +1940,12 @@ try {
     );
     assert.ok(
       snapshot.rows[0].selected_claim_refs.includes(
-        `${ids.tenantPolicyClaimId}:1`,
+        `${tenantPolicyClaimId}:1`,
       ),
     );
     assert.ok(
       snapshot.rows[0].selected_candidate_ids.includes(
-        `claim:${ids.tenantPolicyClaimId}:1`,
+        `claim:${tenantPolicyClaimId}:1`,
       ),
     );
   });
@@ -1793,25 +2012,83 @@ try {
       Number(
         snapshots.rows[0].tenant_policy_version,
       ),
-      1,
+      3,
     );
     assert.ok(
       snapshots.rows[0].selected_claim_refs.includes(
-        `${ids.tenantPolicyClaimId}:1`,
+        `${tenantPolicyClaimId}:1`,
       ),
     );
 
-    const bumped = await db.query(
-      `UPDATE tenants
-          SET policy_version = policy_version + 1
+    const conversationPolicy = await db.query(
+      `SELECT policy_version
+         FROM conversations
         WHERE tenant_id = $1
-      RETURNING policy_version`,
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(conversationPolicy.rowCount, 1);
+    assert.equal(
+      Number(
+        conversationPolicy.rows[0].policy_version,
+      ),
+      1,
+    );
+  });
+
+  const tenantPolicyRevoked =
+    await runtime.tenantPolicyService.revokePolicy(
+      tenantAdmin,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.tenantPolicyRevokeCommandId,
+        claim_id: tenantPolicyClaimId,
+      },
+    );
+
+  assert.equal(
+    tenantPolicyRevoked.status,
+    "REVOKED",
+  );
+  assert.equal(
+    tenantPolicyRevoked.claim_id,
+    tenantPolicyClaimId,
+  );
+  assert.equal(
+    tenantPolicyRevoked.claim_version,
+    1,
+  );
+  assert.equal(
+    tenantPolicyRevoked.tenant_policy_version,
+    4,
+  );
+
+  await withConnection(async (db) => {
+    const claim = await db.query(
+      `SELECT status
+         FROM context_claims
+        WHERE tenant_id = $1
+          AND claim_id = $2
+          AND claim_version = 1`,
+      [ids.tenantId, tenantPolicyClaimId],
+    );
+    assert.equal(claim.rowCount, 1);
+    assert.equal(
+      claim.rows[0].status,
+      "REVOKED",
+    );
+
+    const tenant = await db.query(
+      `SELECT policy_version
+         FROM tenants
+        WHERE tenant_id = $1`,
       [ids.tenantId],
     );
-    assert.equal(bumped.rowCount, 1);
+    assert.equal(tenant.rowCount, 1);
     assert.equal(
-      Number(bumped.rows[0].policy_version),
-      2,
+      Number(tenant.rows[0].policy_version),
+      4,
     );
 
     const conversationPolicy = await db.query(
@@ -1985,7 +2262,9 @@ try {
     "reviewed-claim=revoked " +
     "revocation=claim-revoked " +
     "post-revoke=correction-absent " +
-    "tenant-policy=unreferenced-overlay " +
+    "tenant-policy=control-plane-created " +
+    "tenant-policy-update=old-invalidated " +
+    "tenant-policy-revoked=control-plane " +
     "conversation_policy_version=stable " +
     "tenant_policy_version=stale-context-superseded " +
     "t2=confirmed-correction-context " +

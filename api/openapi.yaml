@@ -274,6 +274,60 @@ paths:
           $ref: '#/components/responses/Conflict'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /v1/tenant/context-policies:
+    post:
+      tags: [Translation]
+      operationId: upsertTenantContextPolicy
+      description: >
+        Create or replace a tenant-wide approved glossary/policy claim.
+        Tenant identity is derived from the authenticated actor; ADMIN or OWNER authority is required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantContextPolicyUpsertRequest'
+      responses:
+        '201':
+          description: Tenant context policy claim created and tenant policy frontier advanced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantContextPolicyUpsertResult'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/tenant/context-policies/{claim_id}/revoke:
+    post:
+      tags: [Translation]
+      operationId: revokeTenantContextPolicy
+      description: >
+        Revoke an active tenant-wide approved glossary/policy claim without deleting audit history.
+        Tenant identity is derived from the authenticated actor; ADMIN or OWNER authority is required.
+      parameters:
+        - name: claim_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantContextPolicyRevokeRequest'
+      responses:
+        '200':
+          description: Tenant context policy claim revoked and tenant policy frontier advanced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantContextPolicyRevokeResult'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /v1/translations/{translation_id}/source:
     post:
       tags: [Translation]
@@ -812,6 +866,177 @@ components:
         status:
           type: string
           enum: [REVOKED]
+    TenantContextPolicyTermMeaning:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - kind
+        - surface_form
+        - meaning
+      properties:
+        schema_version:
+          type: integer
+          const: 1
+        kind:
+          type: string
+          const: TERM_MEANING
+        surface_form:
+          type: string
+          minLength: 1
+          maxLength: 128
+        meaning:
+          type: string
+          minLength: 1
+          maxLength: 512
+        source_language_tag:
+          type: string
+          minLength: 1
+          maxLength: 35
+          pattern: '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$'
+        target_language_tag:
+          type: string
+          minLength: 1
+          maxLength: 35
+          pattern: '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$'
+    TenantContextPolicyPreferredRendering:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - kind
+        - source_form
+        - target_form
+        - target_language_tag
+      properties:
+        schema_version:
+          type: integer
+          const: 1
+        kind:
+          type: string
+          const: PREFERRED_RENDERING
+        source_form:
+          type: string
+          minLength: 1
+          maxLength: 128
+        target_form:
+          type: string
+          minLength: 1
+          maxLength: 256
+        source_language_tag:
+          type: string
+          minLength: 1
+          maxLength: 35
+          pattern: '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$'
+        target_language_tag:
+          type: string
+          minLength: 1
+          maxLength: 35
+          pattern: '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$'
+    TenantContextPolicyProposition:
+      oneOf:
+        - $ref: '#/components/schemas/TenantContextPolicyTermMeaning'
+        - $ref: '#/components/schemas/TenantContextPolicyPreferredRendering'
+    TenantContextPolicyUpsertRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - command_id
+        - kind
+        - proposition
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        kind:
+          type: string
+          enum: [GLOSSARY, POLICY]
+        proposition:
+          $ref: '#/components/schemas/TenantContextPolicyProposition'
+    TenantContextPolicySupersededClaim:
+      type: object
+      additionalProperties: false
+      required:
+        - claim_id
+        - claim_version
+      properties:
+        claim_id:
+          $ref: '#/components/schemas/Uuid'
+        claim_version:
+          type: integer
+          minimum: 1
+    TenantContextPolicyUpsertResult:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - claim_id
+        - claim_version
+        - status
+        - kind
+        - tenant_policy_version
+        - superseded_claims
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        claim_id:
+          $ref: '#/components/schemas/Uuid'
+        claim_version:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          const: ACTIVE
+        kind:
+          type: string
+          enum: [GLOSSARY, POLICY]
+        tenant_policy_version:
+          type: integer
+          minimum: 1
+        superseded_claims:
+          type: array
+          items:
+            $ref: '#/components/schemas/TenantContextPolicySupersededClaim'
+    TenantContextPolicyRevokeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - command_id
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+    TenantContextPolicyRevokeResult:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - claim_id
+        - claim_version
+        - status
+        - tenant_policy_version
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        claim_id:
+          $ref: '#/components/schemas/Uuid'
+        claim_version:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          const: REVOKED
+        tenant_policy_version:
+          type: integer
+          minimum: 1
     SourceResupplyRequest:
       type: object
       additionalProperties: false
