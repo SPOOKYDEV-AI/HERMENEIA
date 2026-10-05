@@ -26,9 +26,14 @@ export function translationWorkerRunnerConfigFromEnv(
   env = process.env,
 ) {
   const mode = env.TRANSLATION_WORKER_MODE || "embedded";
-  if (!["embedded", "external"].includes(mode)) {
+  if (mode === "external") {
     throw new TypeError(
-      "TRANSLATION_WORKER_MODE must be embedded or external",
+      "TRANSLATION_WORKER_MODE=external is not supported: raw source is process-local transient state; use embedded until a reviewed cross-process transient source transport exists",
+    );
+  }
+  if (mode !== "embedded") {
+    throw new TypeError(
+      "TRANSLATION_WORKER_MODE must be embedded",
     );
   }
 
