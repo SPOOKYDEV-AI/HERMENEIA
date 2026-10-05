@@ -5,6 +5,7 @@ import type {
 } from "../../outbox-service/src/index.js";
 import {
   applyContextDerivation,
+  deriveTemporalEpisodePatch,
   type ConversationContextState,
 } from "../../context-state/src/index.js";
 
@@ -178,6 +179,12 @@ export class ContextStateWorkerService<Tx> {
           }
         }
 
+        const episodePatch =
+          deriveTemporalEpisodePatch(
+            state,
+            operation,
+          );
+
         const next = applyContextDerivation(state, {
           conversationId: state.conversationId,
           operationId: operation.operationId,
@@ -188,6 +195,9 @@ export class ContextStateWorkerService<Tx> {
           policyVersion: state.policyVersion,
           strategyVersion: state.strategyVersion,
           outcome: "PROCESSED",
+          ...(episodePatch
+            ? { patch: episodePatch }
+            : {}),
           completedAt: this.now(),
         });
 

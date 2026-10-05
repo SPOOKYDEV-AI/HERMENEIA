@@ -88,6 +88,12 @@ function durableRow(overrides = {}) {
       episodeId: "episode-1",
       episodeVersion: 2,
       continuityConfidence: 0.8,
+      startOperationSequence: 3,
+      lastOperationSequence: 7,
+      startedAt:
+        "2026-10-05T08:50:00.000Z",
+      lastActivityAt:
+        "2026-10-05T08:59:30.000Z",
     },
     terminology_claim_refs: ["claim:term-1"],
     lexical_claim_refs: [],
@@ -155,6 +161,13 @@ test("PostgreSQL ConversationState load validates durable JSON and maps operatio
     policyVersion: 1,
     activeEpisodeId: "episode-1",
     activeEpisodeVersion: 2,
+    activeEpisodeContinuityConfidence: 0.8,
+    activeEpisodeStartOperationSequence: 3,
+    activeEpisodeLastOperationSequence: 7,
+    activeEpisodeStartedAt:
+      "2026-10-05T08:50:00.000Z",
+    activeEpisodeLastActivityAt:
+      "2026-10-05T08:59:30.000Z",
     terminologyClaimRefs: ["claim:term-1"],
     lexicalClaimRefs: [],
     correctionClaimRefs: ["claim:correction-1"],
@@ -308,5 +321,49 @@ test("PostgreSQL ConversationState load can take a row lock for mutation", async
   assert.match(
     connection.queries[1].text,
     /FOR UPDATE$/,
+  );
+});
+
+
+test("PostgreSQL ConversationState remains backward-compatible with legacy episode metadata", async () => {
+  const { repository } = repositoryWith([
+    {
+      rows: [durableRow({
+        active_episode_state: {
+          episodeId: "legacy-episode",
+          episodeVersion: 1,
+          continuityConfidence: 0.7,
+        },
+      })],
+      rowCount: 1,
+    },
+  ]);
+
+  const result = await repository.withTransaction((tx) =>
+    repository.loadEngineState(tx, {
+      tenantId: "tenant-1",
+      conversationId: "conversation-1",
+    }),
+  );
+
+  assert.equal(
+    result.activeEpisodeId,
+    "legacy-episode",
+  );
+  assert.equal(
+    result.activeEpisodeStartOperationSequence,
+    null,
+  );
+  assert.equal(
+    result.activeEpisodeLastOperationSequence,
+    null,
+  );
+  assert.equal(
+    result.activeEpisodeStartedAt,
+    null,
+  );
+  assert.equal(
+    result.activeEpisodeLastActivityAt,
+    null,
   );
 });

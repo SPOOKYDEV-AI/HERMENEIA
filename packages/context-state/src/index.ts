@@ -27,6 +27,10 @@ export interface ActiveEpisodeState {
   episodeId: UUID;
   episodeVersion: number;
   continuityConfidence: number;
+  startOperationSequence?: number;
+  lastOperationSequence?: number;
+  startedAt?: string;
+  lastActivityAt?: string;
 }
 
 export interface ConversationStyleProfile {
@@ -131,6 +135,95 @@ export class ContextStateConflictError extends Error {
     super(message);
     this.name = "ContextStateConflictError";
   }
+}
+
+export const ACTIVE_EPISODE_CONTINUITY_GAP_MS =
+  20 * 60 * 1000;
+
+export function deriveTemporalEpisodePatch(
+  state: ConversationContextState,
+  operation: ContextOperationRef,
+): ContextStatePatch | undefined {
+  validateState(state);
+  validateOperation(operation);
+
+  if (operation.kind !== "MESSAGE_CREATED") {
+    return undefined;
+  }
+
+  const acceptedAt = Date.parse(operation.registeredAt);
+  const active = state.activeEpisode;
+  const hasBoundedActive =
+    active &&
+    active.startOperationSequence !== undefined &&
+    active.lastOperationSequence !== undefined &&
+    active.startedAt !== undefined &&
+    active.lastActivityAt !== undefined;
+
+  if (!hasBoundedActive) {
+    return {
+      activeEpisode: {
+        episodeId: operation.operationId,
+        episodeVersion: 1,
+        continuityConfidence: 1,
+        startOperationSequence: operation.opSeq,
+        lastOperationSequence: operation.opSeq,
+        startedAt: operation.registeredAt,
+        lastActivityAt: operation.registeredAt,
+      },
+    };
+  }
+
+  const lastActivityAt = Date.parse(
+    active.lastActivityAt!,
+  );
+  const gapMs = acceptedAt - lastActivityAt;
+
+  if (
+    gapMs < 0 ||
+    gapMs > ACTIVE_EPISODE_CONTINUITY_GAP_MS
+  ) {
+    return {
+      activeEpisode: {
+        episodeId: operation.operationId,
+        episodeVersion: 1,
+        continuityConfidence:
+          gapMs < 0 ? 0.5 : 1,
+        startOperationSequence: operation.opSeq,
+        lastOperationSequence: operation.opSeq,
+        startedAt: operation.registeredAt,
+        lastActivityAt: operation.registeredAt,
+      },
+    };
+  }
+
+  const continuityConfidence =
+    Math.max(
+      0.6,
+      Math.min(
+        1,
+        1 -
+          0.4 *
+            (
+              gapMs /
+              ACTIVE_EPISODE_CONTINUITY_GAP_MS
+            ),
+      ),
+    );
+
+  return {
+    activeEpisode: {
+      episodeId: active.episodeId,
+      episodeVersion:
+        active.episodeVersion + 1,
+      continuityConfidence,
+      startOperationSequence:
+        active.startOperationSequence!,
+      lastOperationSequence: operation.opSeq,
+      startedAt: active.startedAt!,
+      lastActivityAt: operation.registeredAt,
+    },
+  };
 }
 
 export function createInitialContextState(input: {
@@ -1033,6 +1126,65 @@ function validateEpisode(
     episode.continuityConfidence,
     "continuityConfidence",
   );
+
+  const bounded = [
+    episode.startOperationSequence,
+    episode.lastOperationSequence,
+    episode.startedAt,
+    episode.lastActivityAt,
+  ];
+  const present = bounded.filter(
+    (value) => value !== undefined,
+  ).length;
+
+  // Preserve read compatibility with the original V1 three-field shape.
+  // New episode derivation always writes all four structural fields.
+  if (present !== 0 && present !== bounded.length) {
+    throw new ContextStateConflictError(
+      "INVALID_STATE",
+      "activeEpisode structural bounds must be complete when present",
+    );
+  }
+
+  if (present === bounded.length) {
+    requireSafeInteger(
+      episode.startOperationSequence!,
+      "activeEpisode.startOperationSequence",
+      1,
+    );
+    requireSafeInteger(
+      episode.lastOperationSequence!,
+      "activeEpisode.lastOperationSequence",
+      1,
+    );
+    if (
+      episode.lastOperationSequence! <
+      episode.startOperationSequence!
+    ) {
+      throw new ContextStateConflictError(
+        "INVALID_STATE",
+        "activeEpisode lastOperationSequence cannot precede startOperationSequence",
+      );
+    }
+    requireTimestamp(
+      episode.startedAt!,
+      "activeEpisode.startedAt",
+    );
+    requireTimestamp(
+      episode.lastActivityAt!,
+      "activeEpisode.lastActivityAt",
+    );
+    if (
+      Date.parse(episode.lastActivityAt!) <
+      Date.parse(episode.startedAt!)
+    ) {
+      throw new ContextStateConflictError(
+        "INVALID_STATE",
+        "activeEpisode lastActivityAt cannot precede startedAt",
+      );
+    }
+  }
+
   return structuredClone(episode);
 }
 

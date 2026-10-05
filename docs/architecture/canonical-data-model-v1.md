@@ -768,6 +768,18 @@ Indexes support tenant/day/provider aggregation.
 
 Contained inside ConversationContextState/checkpoint.
 
+Executable temporal V1 stores only bounded structural metadata:
+
+    episode_id
+    episode_version
+    continuity_confidence
+    start_operation_sequence
+    last_operation_sequence
+    started_at
+    last_activity_at
+
+It does not persist transcript text or an episode summary. Provider-facing episode text is assembled transiently from still-available source revisions and is absent once those sources expire.
+
 ### TargetLanguageProfile
 
 Derived from:

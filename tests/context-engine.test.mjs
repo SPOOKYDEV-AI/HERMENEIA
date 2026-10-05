@@ -162,6 +162,78 @@ test("T1 selects the most recent causal window in chronological payload order", 
   );
 });
 
+test("T2 keeps the nominal immediate window bounded when an active episode represents older context", () => {
+  const engine = new ContextEngine({
+    t1WindowSize: 3,
+  });
+
+  const immediate = [4, 5, 6, 7, 8, 9].map(
+    (sequence) =>
+      candidate({
+        candidateId: `m${sequence}`,
+        sourceMessageSequence: sequence,
+        causalThroughOperationSequence:
+          sequence,
+        content: `message-${sequence}`,
+      }),
+  );
+
+  const episode = candidate({
+    candidateId: "episode-active",
+    candidateType: "ACTIVE_EPISODE",
+    content: "episode-tail",
+    sourceMessageSequence: null,
+    causalThroughOperationSequence: 9,
+    activeEpisode: true,
+    privacyScope: "EPISODE",
+  });
+
+  const result = engine.build(input({
+    currentMessageSequence: 10,
+    currentOperationSequence: 10,
+    messageId: "message-10",
+    state: state({
+      processedPrefixOperationSequence: 9,
+    }),
+    candidates: [
+      ...immediate,
+      episode,
+    ],
+  }));
+
+  const immediateIds = result.selected
+    .filter(
+      (item) =>
+        item.candidateType ===
+          "IMMEDIATE_MESSAGE",
+    )
+    .map((item) => item.candidateId);
+
+  assert.deepEqual(
+    immediateIds,
+    ["m7", "m8", "m9"],
+  );
+  assert.equal(
+    result.selected.some(
+      (item) =>
+        item.candidateId ===
+          "episode-active" &&
+        item.selectionReason ===
+          "ACTIVE_EPISODE",
+    ),
+    true,
+  );
+  for (const oldId of ["m4", "m5", "m6"]) {
+    assert.equal(
+      result.selected.some(
+        (item) =>
+          item.candidateId === oldId,
+      ),
+      false,
+    );
+  }
+});
+
 test("T2 reconciles causal gaps even when their utility is low", () => {
   const engine = new ContextEngine({
     minAdaptiveUtility: 0.95,

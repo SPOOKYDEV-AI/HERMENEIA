@@ -21,6 +21,7 @@ on:
       - feat/context-policy-version-fence-v1
       - feat/tenant-policy-control-plane-v1
       - feat/conversation-style-profile-v1
+      - feat/active-episode-v1
   workflow_dispatch:
 
 permissions:

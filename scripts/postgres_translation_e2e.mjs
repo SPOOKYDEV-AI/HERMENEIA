@@ -48,6 +48,15 @@ const STYLE_SOURCE_TEXT =
   "Peux-tu me confirmer le SLA ?";
 const POST_STYLE_RESET_SOURCE_TEXT =
   "Le SLA reste important après reset.";
+const EPISODE_SOURCE_TEXTS = [
+  "On prépare la démo client.",
+  "Il faut vérifier le parcours mobile.",
+  "Le bouton principal doit rester visible.",
+  "On garde la traduction instantanée.",
+  "Le contexte doit suivre la discussion.",
+  "On valide les derniers détails.",
+  "Tu peux résumer ce qu'on vient de décider ?",
+];
 const FEEDBACK_NOTE =
   "private feedback detail that must not persist";
 const TRANSLATED_TEXT = "Hola mundo 👋";
@@ -86,6 +95,10 @@ const ids = {
   toneResetCommandId: randomUUID(),
   postStyleResetCommandId: randomUUID(),
   postStyleResetClientMessageId: randomUUID(),
+  episodeCommandIds:
+    Array.from({ length: 7 }, () => randomUUID()),
+  episodeClientMessageIds:
+    Array.from({ length: 7 }, () => randomUUID()),
   stalePolicyCommandId: randomUUID(),
   stalePolicyClientMessageId: randomUUID(),
   staleContextCommandId: randomUUID(),
@@ -98,6 +111,7 @@ const tenantAdminKeys = await generateHpkeP256DeviceKeyPair();
 const codec = createHpkeP256EnvelopeCodec();
 
 let providerCalls = 0;
+let episodeProviderObservation = null;
 const translationProvider = {
   providerId: "ci-deterministic",
   modelId: "ci-translation-v1",
@@ -230,6 +244,35 @@ const translationProvider = {
         ),
         false,
       );
+    } else if (
+      providerCalls >= 7 &&
+      providerCalls <= 12
+    ) {
+      const episodeIndex =
+        providerCalls - 7;
+      assert.equal(
+        input.source.text,
+        EPISODE_SOURCE_TEXTS[episodeIndex],
+      );
+
+      if (providerCalls === 7) {
+        assert.equal(
+          input.contextItems.some(
+            (item) =>
+              item.candidateType ===
+                "ACTIVE_EPISODE",
+          ),
+          false,
+          "episode older than continuity gap must not leak before reducer starts the new episode",
+        );
+      }
+    } else if (providerCalls === 13) {
+      episodeProviderObservation = {
+        sourceText: input.source.text,
+        contextItems: structuredClone(
+          input.contextItems,
+        ),
+      };
     } else {
       assert.fail(
         `Unexpected provider call #${providerCalls}`,
@@ -2255,7 +2298,248 @@ try {
   );
   assert.equal(providerCalls, 6);
 
-  runtimeNow = "2026-10-05T08:00:06.000Z";
+  const episodeAccepted = [];
+
+  for (let index = 0; index < 6; index += 1) {
+    runtimeNow =
+      `2026-10-05T09:00:0${index}.000Z`;
+
+    const accepted =
+      await runtime.sendService.sendMessage(
+        sender,
+        {
+          protocol_version: 1,
+          command_id:
+            ids.episodeCommandIds[index],
+          client_message_id:
+            ids.episodeClientMessageIds[index],
+          conversation_id: ids.conversationId,
+          source: {
+            text: EPISODE_SOURCE_TEXTS[index],
+            language_hint: "fr-FR",
+          },
+          client_authored_at: NOW,
+        },
+      );
+
+    assert.equal(accepted.status, "ACCEPTED");
+    episodeAccepted.push(accepted);
+
+    assert.equal(
+      await runtime.translationWorker.runFanoutOnce(),
+      "FANOUT_DONE",
+    );
+    assert.equal(
+      await runtime.contextStateWorker.runOnce(),
+      "REDUCED",
+    );
+    assert.equal(
+      await runtime.translationWorker.runExecuteOnce(),
+      "EXECUTION_DONE",
+    );
+    assert.equal(
+      providerCalls,
+      7 + index,
+    );
+  }
+
+  await withConnection(async (db) => {
+    const state = await db.query(
+      `SELECT active_episode_state
+         FROM conversation_context_states
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(state.rowCount, 1);
+
+    const firstRevision = await db.query(
+      `SELECT op_seq
+         FROM message_revisions
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND revision = 1`,
+      [
+        ids.tenantId,
+        episodeAccepted[0].message_id,
+      ],
+    );
+    const lastRevision = await db.query(
+      `SELECT op_seq
+         FROM message_revisions
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND revision = 1`,
+      [
+        ids.tenantId,
+        episodeAccepted[5].message_id,
+      ],
+    );
+
+    const episode = state.rows[0].active_episode_state;
+    assert.equal(episode.episodeVersion, 6);
+    assert.equal(
+      episode.startOperationSequence,
+      Number(firstRevision.rows[0].op_seq),
+    );
+    assert.equal(
+      episode.lastOperationSequence,
+      Number(lastRevision.rows[0].op_seq),
+    );
+    assert.equal(
+      episode.startedAt,
+      "2026-10-05T09:00:00.000Z",
+    );
+    assert.equal(
+      episode.lastActivityAt,
+      "2026-10-05T09:00:05.000Z",
+    );
+    assert.ok(
+      episode.continuityConfidence >= 0.6 &&
+      episode.continuityConfidence <= 1,
+    );
+  });
+
+  runtimeNow = "2026-10-05T09:00:06.000Z";
+
+  const episodeTarget =
+    await runtime.sendService.sendMessage(
+      sender,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.episodeCommandIds[6],
+        client_message_id:
+          ids.episodeClientMessageIds[6],
+        conversation_id: ids.conversationId,
+        source: {
+          text: EPISODE_SOURCE_TEXTS[6],
+          language_hint: "fr-FR",
+        },
+        client_authored_at: NOW,
+      },
+    );
+
+  assert.equal(
+    episodeTarget.status,
+    "ACCEPTED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runFanoutOnce(),
+    "FANOUT_DONE",
+  );
+
+  await withConnection(async (db) => {
+    const snapshot = await db.query(
+      `SELECT strategy,
+              selected_candidate_ids,
+              selected_source_revision_refs
+         FROM context_snapshots
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND recipient_user_id = $3`,
+      [
+        ids.tenantId,
+        episodeTarget.message_id,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(snapshot.rowCount, 1);
+    assert.equal(
+      snapshot.rows[0].strategy,
+      "T2_ADAPTIVE_V1",
+    );
+
+    const episodeIds =
+      snapshot.rows[0].selected_candidate_ids
+        .filter(
+          (id) => id.startsWith("episode:"),
+        );
+    assert.equal(episodeIds.length, 1);
+
+    for (const accepted of episodeAccepted.slice(0, 3)) {
+      assert.ok(
+        snapshot.rows[0].selected_source_revision_refs.includes(
+          `${accepted.message_id}:1`,
+        ),
+      );
+    }
+  });
+
+  assert.equal(
+    await runtime.contextStateWorker.runOnce(),
+    "REDUCED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runExecuteOnce(),
+    "EXECUTION_DONE",
+  );
+  assert.equal(providerCalls, 13);
+
+  assert.ok(episodeProviderObservation);
+  assert.equal(
+    episodeProviderObservation.sourceText,
+    EPISODE_SOURCE_TEXTS[6],
+  );
+
+  const observedEpisode =
+    episodeProviderObservation.contextItems.find(
+      (item) =>
+        item.candidateType ===
+          "ACTIVE_EPISODE",
+    );
+  assert.ok(observedEpisode);
+  assert.equal(
+    observedEpisode.selectionReason,
+    "ACTIVE_EPISODE",
+  );
+
+  const episodePayload =
+    JSON.parse(observedEpisode.content);
+  assert.equal(
+    episodePayload.kind,
+    "trusted_active_episode_tail",
+  );
+  assert.equal(
+    episodePayload.episode_version,
+    6,
+  );
+  assert.ok(
+    episodePayload.continuity_confidence >= 0.6 &&
+    episodePayload.continuity_confidence <= 1,
+  );
+  assert.deepEqual(
+    episodePayload.messages,
+    EPISODE_SOURCE_TEXTS
+      .slice(0, 3)
+      .map((source_text) => ({
+        source_text,
+      })),
+  );
+
+  const observedImmediate =
+    episodeProviderObservation.contextItems
+      .filter(
+        (item) =>
+          item.candidateType ===
+            "IMMEDIATE_MESSAGE",
+      )
+      .map((item) => item.content);
+
+  for (const oldText of EPISODE_SOURCE_TEXTS.slice(0, 3)) {
+    assert.equal(
+      observedImmediate.includes(oldText),
+      false,
+    );
+  }
+  for (const recentText of EPISODE_SOURCE_TEXTS.slice(3, 6)) {
+    assert.equal(
+      observedImmediate.includes(recentText),
+      true,
+    );
+  }
+
+  runtimeNow = "2026-10-05T09:00:10.000Z";
 
   const stalePolicyAccepted =
     await runtime.sendService.sendMessage(
@@ -2406,7 +2690,7 @@ try {
     await runtime.translationWorker.runExecuteOnce(),
     "SUPERSEDED",
   );
-  assert.equal(providerCalls, 6);
+  assert.equal(providerCalls, 13);
 
   await withConnection(async (db) => {
     const execution = await db.query(
@@ -2444,7 +2728,7 @@ try {
     );
   });
 
-  runtimeNow = "2026-10-05T08:00:07.000Z";
+  runtimeNow = "2026-10-05T09:00:11.000Z";
 
   const staleContextAccepted =
     await runtime.sendService.sendMessage(
@@ -2518,7 +2802,7 @@ try {
     await runtime.translationWorker.runExecuteOnce(),
     "SUPERSEDED",
   );
-  assert.equal(providerCalls, 6);
+  assert.equal(providerCalls, 13);
 
   await withConnection(async (db) => {
     const execution = await db.query(
@@ -2562,6 +2846,8 @@ try {
     "tenant-policy-revoked=control-plane " +
     "style=self-formal " +
     "style-reset=default " +
+    "episode=transient-tail " +
+    "episode-window=disjoint " +
     "conversation_policy_version=stable " +
     "tenant_policy_version=stale-context-superseded " +
     "t2=confirmed-correction-context " +

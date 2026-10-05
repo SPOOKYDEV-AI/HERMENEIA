@@ -23,7 +23,8 @@ export type ContextPrivacyScope =
   | "CHECKPOINT"
   | "CORRECTION"
   | "POLICY"
-  | "STYLE";
+  | "STYLE"
+  | "EPISODE";
 
 export type CorrectionTrigger =
   | "EXPLICIT_UI"
@@ -39,6 +40,11 @@ export interface ConversationContextState {
   policyVersion: number;
   activeEpisodeId: UUID | null;
   activeEpisodeVersion: number | null;
+  activeEpisodeContinuityConfidence?: number | null;
+  activeEpisodeStartOperationSequence?: number | null;
+  activeEpisodeLastOperationSequence?: number | null;
+  activeEpisodeStartedAt?: string | null;
+  activeEpisodeLastActivityAt?: string | null;
   terminologyClaimRefs?: UUID[];
   lexicalClaimRefs?: UUID[];
   correctionClaimRefs?: UUID[];
@@ -531,12 +537,30 @@ export class ContextEngine {
       true,
     );
 
-    selectFrom(
-      scored.filter(
+    const immediateWindow = scored
+      .filter(
         ({ candidate }) =>
           candidate.candidateType ===
-          "IMMEDIATE_MESSAGE",
-      ),
+            "IMMEDIATE_MESSAGE" &&
+          candidate.sourceMessageSequence !== undefined &&
+          candidate.sourceMessageSequence !== null,
+      )
+      .sort(
+        (left, right) =>
+          Number(
+            right.candidate.sourceMessageSequence,
+          ) -
+            Number(
+              left.candidate.sourceMessageSequence,
+            ) ||
+          left.candidate.candidateId.localeCompare(
+            right.candidate.candidateId,
+          ),
+      )
+      .slice(0, this.config.t1WindowSize);
+
+    selectFrom(
+      immediateWindow,
       "IMMEDIATE_CONTEXT",
       "immediate",
       input.budget.immediateReserveTokens,
@@ -589,8 +613,22 @@ export class ContextEngine {
       input.budget.memoryReserveTokens,
     );
 
+    const immediateWindowIds = new Set(
+      immediateWindow.map(
+        ({ candidate }) =>
+          candidate.candidateId,
+      ),
+    );
+
     selectFrom(
-      scored,
+      scored.filter(
+        ({ candidate }) =>
+          candidate.candidateType !==
+            "IMMEDIATE_MESSAGE" ||
+          immediateWindowIds.has(
+            candidate.candidateId,
+          ),
+      ),
       "ADAPTIVE_UTILITY",
       null,
       null,
