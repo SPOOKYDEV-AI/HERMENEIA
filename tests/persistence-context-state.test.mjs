@@ -88,6 +88,14 @@ function durableRow(overrides = {}) {
       episodeId: "episode-1",
       episodeVersion: 2,
       continuityConfidence: 0.8,
+      continuityStrategy: "heuristic-v1",
+      startedAt: "2026-10-05T08:55:00.000Z",
+      lastActivityAt: "2026-10-05T08:59:00.000Z",
+      sourceLanguageTag: "fr-fr",
+      sourceRevisionRefs: [
+        "message-5:1",
+        "message-6:1"
+      ],
     },
     terminology_claim_refs: ["claim:term-1"],
     lexical_claim_refs: [],
@@ -150,6 +158,11 @@ test("PostgreSQL ConversationState load validates durable JSON and maps operatio
     policyVersion: 1,
     activeEpisodeId: "episode-1",
     activeEpisodeVersion: 2,
+    activeEpisodeContinuityConfidence: 0.8,
+    activeEpisodeSourceRevisionRefs: [
+      "message-5:1",
+      "message-6:1",
+    ],
     terminologyClaimRefs: ["claim:term-1"],
     lexicalClaimRefs: [],
     correctionClaimRefs: ["claim:correction-1"],
