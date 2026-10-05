@@ -430,6 +430,154 @@ export class PostgresContextCorrectionRepository {
     return result.rowCount === 1;
   }
 
+  async invalidateSupersededStylePreferenceClaims(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+      subjectUserId: UUID;
+      propositionRef: Record<string, unknown>;
+      invalidatedAt: string;
+    },
+  ): Promise<Array<{
+    claimId: UUID;
+    claimVersion: number;
+  }>> {
+    const result = await tx.query<{
+      claim_id: UUID;
+      claim_version: number;
+    }>(
+      `UPDATE context_claims
+          SET status = 'INVALIDATED',
+              valid_until = CASE
+                WHEN valid_from IS NULL OR valid_from < $5
+                  THEN $5
+                ELSE valid_from + interval '1 microsecond'
+              END
+        WHERE tenant_id = $1
+          AND conversation_id = $2
+          AND subject_user_id = $3
+          AND scope_kind = 'CONVERSATION'
+          AND scope_conversation_id = $2
+          AND status = 'ACTIVE'
+          AND authority_class = 'EXPLICIT_PREFERENCE'
+          AND retention_class = 'PREFERENCE_REFERENCE'
+          AND modality = 'ASSERTION'
+          AND trigger_kind = 'EXPLICIT_STYLE_PREFERENCE'
+          AND proposition_ref ->> 'kind' = 'STYLE_PREFERENCE'
+          AND COALESCE(
+                proposition_ref ->> 'target_language_tag',
+                ''
+              ) =
+              COALESCE(
+                $4::jsonb ->> 'target_language_tag',
+                ''
+              )
+      RETURNING claim_id, claim_version`,
+      [
+        input.tenantId,
+        input.conversationId,
+        input.subjectUserId,
+        JSON.stringify(input.propositionRef),
+        input.invalidatedAt,
+      ],
+    );
+
+    return result.rows.map((row) => ({
+      claimId: row.claim_id,
+      claimVersion: Number(row.claim_version),
+    }));
+  }
+
+  async insertExplicitPreferenceClaim(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      claimId: UUID;
+      conversationId: UUID;
+      subjectUserId: UUID;
+      propositionRef: Record<string, unknown>;
+      createdAt: string;
+    },
+  ): Promise<void> {
+    const result = await tx.query(
+      `INSERT INTO context_claims(
+         tenant_id,
+         claim_id,
+         claim_version,
+         conversation_id,
+         message_id,
+         subject_user_id,
+         claim_type,
+         proposition_ref,
+         modality,
+         authority_class,
+         retention_class,
+         sensitivity_class,
+         confidence,
+         scope_kind,
+         scope_conversation_id,
+         trigger_kind,
+         valid_from,
+         valid_until,
+         status,
+         created_at
+       ) VALUES (
+         $1,$2,1,$3,NULL,$4,'STYLE',$5::jsonb,
+         'ASSERTION','EXPLICIT_PREFERENCE',
+         'PREFERENCE_REFERENCE','NORMAL',1,
+         'CONVERSATION',$3,
+         'EXPLICIT_STYLE_PREFERENCE',
+         $6,NULL,'ACTIVE',$6
+       )`,
+      [
+        input.tenantId,
+        input.claimId,
+        input.conversationId,
+        input.subjectUserId,
+        JSON.stringify(input.propositionRef),
+        input.createdAt,
+      ],
+    );
+
+    if (result.rowCount !== 1) {
+      throw new Error(
+        "Explicit style preference claim was not inserted",
+      );
+    }
+  }
+
+  async bumpConversationPolicyVersion(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+    },
+  ): Promise<number> {
+    const result = await tx.query<{
+      policy_version: number;
+    }>(
+      `UPDATE conversations
+          SET policy_version = policy_version + 1
+        WHERE tenant_id = $1
+          AND conversation_id = $2
+          AND status = 'ACTIVE'
+      RETURNING policy_version`,
+      [
+        input.tenantId,
+        input.conversationId,
+      ],
+    );
+
+    const row = result.rows[0];
+    if (!row || result.rowCount !== 1) {
+      throw new Error(
+        "Conversation policy version was not advanced",
+      );
+    }
+    return Number(row.policy_version);
+  }
+
   async invalidateSupersededCorrectionClaims(
     tx: SqlExecutor,
     input: {
