@@ -99,8 +99,8 @@ export class PostgresContextSnapshotRepository {
           snapshot.selectedSourceRevisionRefs,
         ),
         JSON.stringify(snapshot.selectedClaimRefs),
-        snapshot.processedPrefixSequence,
-        JSON.stringify(snapshot.processingGapRefs),
+        snapshot.processedPrefixOperationSequence,
+        JSON.stringify(snapshot.processingGapOperationSequences),
         snapshot.erasureEpoch,
         snapshot.tokenEstimate,
         snapshot.recoveryMode,
@@ -178,10 +178,10 @@ export class PostgresContextSnapshotRepository {
           row.selected_claim_refs,
           "selected_claim_refs",
         ),
-      processedPrefixSequence: Number(
+      processedPrefixOperationSequence: Number(
         row.processed_prefix_sequence,
       ),
-      processingGapRefs:
+      processingGapOperationSequences:
         parseNumberArray(
           row.processing_gap_refs,
           "processing_gap_refs",
@@ -196,12 +196,14 @@ export class PostgresContextSnapshotRepository {
 
 
 export interface PostgresContextPlanningFrame {
-  currentSequence: number;
+  currentMessageSequence: number;
+  currentOperationSequence: number;
   erasureEpoch: number;
   recentMessages: Array<{
     messageId: UUID;
     sourceRevision: number;
-    sequence: number;
+    messageSequence: number;
+    operationSequence: number;
     acceptedAt: string;
   }>;
 }
@@ -239,11 +241,18 @@ export class PostgresContextPlanningRepository {
 
     const current = await tx.query<{
       message_seq: number;
+      op_seq: number;
       erasure_epoch: number;
     }>(
       `SELECT mm.message_seq,
+              mr.op_seq,
               c.erasure_epoch
          FROM message_metadata mm
+         JOIN message_revisions mr
+           ON mr.tenant_id = mm.tenant_id
+          AND mr.conversation_id = mm.conversation_id
+          AND mr.message_id = mm.message_id
+          AND mr.revision = $4
          JOIN conversations c
            ON c.tenant_id = mm.tenant_id
           AND c.conversation_id = mm.conversation_id
@@ -282,18 +291,25 @@ export class PostgresContextPlanningRepository {
       message_id: UUID;
       current_revision: number;
       message_seq: number;
+      op_seq: number;
       accepted_at: string;
     }>(
-      `SELECT message_id,
-              current_revision,
-              message_seq,
-              accepted_at::text AS accepted_at
-         FROM message_metadata
-        WHERE tenant_id = $1
-          AND conversation_id = $2
-          AND status = 'ACTIVE'
-          AND message_seq < $3
-        ORDER BY message_seq DESC
+      `SELECT mm.message_id,
+              mm.current_revision,
+              mm.message_seq,
+              mr.op_seq,
+              mm.accepted_at::text AS accepted_at
+         FROM message_metadata mm
+         JOIN message_revisions mr
+           ON mr.tenant_id = mm.tenant_id
+          AND mr.conversation_id = mm.conversation_id
+          AND mr.message_id = mm.message_id
+          AND mr.revision = mm.current_revision
+        WHERE mm.tenant_id = $1
+          AND mm.conversation_id = $2
+          AND mm.status = 'ACTIVE'
+          AND mm.message_seq < $3
+        ORDER BY mm.message_seq DESC
         LIMIT $4`,
       [
         input.tenantId,
@@ -304,12 +320,14 @@ export class PostgresContextPlanningRepository {
     );
 
     return {
-      currentSequence: Number(currentRow.message_seq),
+      currentMessageSequence: Number(currentRow.message_seq),
+      currentOperationSequence: Number(currentRow.op_seq),
       erasureEpoch: Number(currentRow.erasure_epoch),
       recentMessages: recent.rows.map((row) => ({
         messageId: row.message_id,
         sourceRevision: Number(row.current_revision),
-        sequence: Number(row.message_seq),
+        messageSequence: Number(row.message_seq),
+        operationSequence: Number(row.op_seq),
         acceptedAt: row.accepted_at,
       })),
     };
