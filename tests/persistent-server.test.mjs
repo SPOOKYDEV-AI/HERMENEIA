@@ -32,6 +32,7 @@ class FakeClient {
           has_tenant_sync: true,
           has_translation_executions: true,
           has_provider_executions: true,
+          has_context_snapshots: true,
           has_command_fingerprint: true,
           has_source_required_constraint: true,
           has_device_platform: true,
@@ -91,7 +92,7 @@ async function listen(server) {
   return `http://127.0.0.1:${address.port}`;
 }
 
-test("pure persistent HTTP runtime starts without an in-memory Core", async () => {
+test("pure persistent HTTP runtime starts without an in-memory Core", async (t) => {
   FakePool.instances.length = 0;
 
   const app = await createPersistentHermeneiaHttpRuntime({
@@ -109,6 +110,7 @@ test("pure persistent HTTP runtime starts without an in-memory Core", async () =
     },
   });
 
+  t.after(() => app.close());
   const base = await listen(app.server);
 
   const health = await fetch(`${base}/healthz`);
