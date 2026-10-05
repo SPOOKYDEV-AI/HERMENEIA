@@ -36,6 +36,19 @@ function fixture() {
         throw new Error("unused");
       },
     },
+    deliveryService: {
+      async sync() {
+        return {
+          kind: "OK",
+          response: {
+            protocol_version: 1,
+            events: [],
+            next_cursor: "1:0",
+          },
+        };
+      },
+      async acknowledge() {},
+    },
     userLanguagePreferenceService: {
       async update(actor, command) {
         calls.push({
