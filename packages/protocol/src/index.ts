@@ -118,6 +118,27 @@ export interface TranslationRecoveryResult {
   status: "PENDING" | "SOURCE_REQUIRED" | "READY" | "FAILED" | "SUPERSEDED";
 }
 
+export type TranslationFeedbackKind =
+  | "PROBLEM"
+  | "WRONG_MEANING"
+  | "WRONG_TONE"
+  | "TERMINOLOGY"
+  | "OTHER";
+
+export interface TranslationFeedbackCommand {
+  protocol_version: 1;
+  command_id: UUID;
+  translation_id: UUID;
+  kind: TranslationFeedbackKind;
+  note?: string;
+}
+
+export interface TranslationFeedbackResult {
+  protocol_version: 1;
+  repair_event_id: UUID;
+  status: "RECORDED" | "NEEDS_CONFIRMATION";
+}
+
 export type CorrectionKind =
   | "MEANING"
   | "TONE"
