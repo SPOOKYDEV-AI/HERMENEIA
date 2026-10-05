@@ -719,20 +719,15 @@ function promotionDecision(
   if (
     command.requested_scope === "TENANT"
   ) {
-    const elevated =
-      authority.tenantRole === "ADMIN" ||
-      authority.tenantRole === "OWNER";
-    return elevated
-      ? {
-          apply: true,
-          status: "APPLIED",
-          scope: "TENANT",
-        }
-      : {
-          apply: false,
-          status: "NEEDS_CONFIRMATION",
-          scope: null,
-        };
+    // V1 only injects claims explicitly referenced by a conversation's
+    // ConversationState. Until tenant-wide policy/glossary distribution is
+    // implemented, claiming that a tenant correction is APPLIED would be
+    // semantically false even for an ADMIN/OWNER.
+    return {
+      apply: false,
+      status: "NEEDS_CONFIRMATION",
+      scope: null,
+    };
   }
 
   const elevated =
