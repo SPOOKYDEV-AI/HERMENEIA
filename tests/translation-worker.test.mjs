@@ -449,6 +449,7 @@ function fixture({
     providerRegion: "eu-west",
     async translate(input) {
       providerCalls += 1;
+      assert.ok(input.requestId);
       assert.equal(input.targetLanguageTag, "es-CO");
       if (typeof onProviderTranslate === "function") {
         await onProviderTranslate({ store, input });
@@ -756,6 +757,42 @@ test("recipient with no active device is retried before provider cost is incurre
   assert.equal(
     currentExecution(f).nextAttemptAt,
     "2026-10-04T12:00:05.000Z",
+  );
+});
+
+test("provider Retry-After extends durable retry delay", async () => {
+  const f = fixture({
+    providerResult: {
+      ok: false,
+      status: "RATE_LIMITED",
+      retryable: true,
+      errorClass: "OPENAI_SLOW_DOWN",
+      retryAfterSeconds: 30,
+    },
+  });
+  const child = await fanoutOne(f);
+  f.transientSources.put({
+    tenantId: "tenant-1",
+    messageId: "message-1",
+    sourceRevision: 1,
+    sourceHash: "source-hash-1",
+    source: { text: "Bonjour" },
+    createdAt: f.time.now(),
+    expiresAt: "2026-10-04T12:05:00.000Z",
+  });
+
+  assert.equal(
+    await f.worker.runExecuteOnce(),
+    "RETRY_SCHEDULED",
+  );
+  assert.equal(child.status, "AVAILABLE");
+  assert.equal(
+    child.availableAt,
+    "2026-10-04T12:00:30.000Z",
+  );
+  assert.equal(
+    currentExecution(f).nextAttemptAt,
+    "2026-10-04T12:00:30.000Z",
   );
 });
 

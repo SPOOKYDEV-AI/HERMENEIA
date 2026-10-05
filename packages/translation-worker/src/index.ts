@@ -39,6 +39,7 @@ export interface TranslationWorkerProviderFailure {
   outputTokens?: number | null;
   billedCostMicrounits?: number | null;
   latencyMs?: number | null;
+  retryAfterSeconds?: number | null;
 }
 
 export type TranslationWorkerProviderResult =
@@ -51,6 +52,7 @@ export interface TranslationWorkerProvider {
   providerRegion?: string | null;
 
   translate(input: {
+    requestId: UUID;
     source: {
       text: string;
       language_hint?: string;
@@ -518,6 +520,7 @@ export class TranslationWorkerService<Tx> {
     let providerResult: TranslationWorkerProviderResult;
     try {
       providerResult = await this.deps.provider.translate({
+        requestId: attempt.attemptId,
         source: source.source,
         targetLanguageTag: execution.targetLanguageTag,
         targetProfileVersion: execution.targetProfileVersion,
@@ -560,6 +563,7 @@ export class TranslationWorkerService<Tx> {
         return this.scheduleExecutionRetry(
           lease,
           execution,
+          providerResult.retryAfterSeconds ?? 0,
         );
       }
       return this.failExecution(lease, execution);
@@ -660,6 +664,7 @@ export class TranslationWorkerService<Tx> {
         const nextAttemptAt = this.nextRetryAt(
           lease.attemptCount,
           now,
+          minimumDelaySeconds,
         );
         const scheduled = await this.deps.store.scheduleRetry(
           tx,
@@ -897,6 +902,7 @@ export class TranslationWorkerService<Tx> {
   private async scheduleExecutionRetry(
     lease: OutboxJobLease,
     execution: TranslationExecutionRecord,
+    minimumDelaySeconds = 0,
   ): Promise<TranslationWorkerResult> {
     try {
       return await this.deps.store.withTransaction<TranslationWorkerResult>(async (tx) => {
@@ -1000,14 +1006,23 @@ export class TranslationWorkerService<Tx> {
   private nextRetryAt(
     attemptCount: number,
     now: string,
+    minimumDelaySeconds = 0,
   ): string {
     const multiplier = Math.min(
       2 ** Math.max(0, attemptCount - 1),
       64,
     );
+    const providerDelay =
+      Number.isInteger(minimumDelaySeconds) &&
+      minimumDelaySeconds > 0
+        ? Math.min(minimumDelaySeconds, 3600)
+        : 0;
     return addSeconds(
       now,
-      this.retryBaseSeconds * multiplier,
+      Math.max(
+        this.retryBaseSeconds * multiplier,
+        providerDelay,
+      ),
     );
   }
 }
