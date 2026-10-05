@@ -15,6 +15,7 @@ import {
   createDegradedContextStateFromFloor,
   createInitialContextState,
   replaceConfirmedCorrectionClaim,
+  replaceExplicitStylePreferenceClaim,
   rebaseContextStateAuthority,
   unlinkConfirmedCorrectionClaim,
 } from "../../context-state/src/index.js";
@@ -649,41 +650,83 @@ export class ContextCorrectionService<Tx> {
     scope: "CONVERSATION" | "TENANT",
     now: string,
   ): Promise<void> {
-    const superseded =
-      await this.deps.corrections.invalidateSupersededCorrectionClaims(
+    let superseded: Array<{
+      claimId: UUID;
+      claimVersion: number;
+    }>;
+
+    if (command.kind === "TONE") {
+      if (
+        scope !== "CONVERSATION" ||
+        subjectUserId === null
+      ) {
+        throw new Error(
+          "Typed style preference requires speaker-scoped conversation authority",
+        );
+      }
+
+      superseded =
+        await this.deps.corrections.invalidateSupersededStylePreferenceClaims(
+          tx,
+          {
+            tenantId: actor.tenantId,
+            conversationId:
+              command.conversation_id,
+            subjectUserId,
+            invalidatedAt: now,
+          },
+        );
+
+      await this.deps.corrections.insertExplicitStylePreferenceClaim(
         tx,
         {
           tenantId: actor.tenantId,
+          claimId,
           conversationId:
             command.conversation_id,
+          messageId: targetMessageId,
           subjectUserId,
           propositionRef,
-          invalidatedAt: now,
+          createdAt: now,
         },
       );
+    } else {
+      superseded =
+        await this.deps.corrections.invalidateSupersededCorrectionClaims(
+          tx,
+          {
+            tenantId: actor.tenantId,
+            conversationId:
+              command.conversation_id,
+            subjectUserId,
+            propositionRef,
+            invalidatedAt: now,
+          },
+        );
 
-    await this.deps.corrections.insertConfirmedClaim(
-      tx,
-      {
-        tenantId: actor.tenantId,
-        claimId,
-        conversationId:
-          command.conversation_id,
-        messageId: targetMessageId,
-        subjectUserId,
-        claimType:
-          command.kind === "MEANING"
-            ? "MEANING"
-            : "TERMINOLOGY",
-        propositionRef,
-        scopeKind: scope,
-        scopeConversationId:
-          scope === "CONVERSATION"
-            ? command.conversation_id
-            : null,
-        createdAt: now,
-      },
-    );
+      await this.deps.corrections.insertConfirmedClaim(
+        tx,
+        {
+          tenantId: actor.tenantId,
+          claimId,
+          conversationId:
+            command.conversation_id,
+          messageId: targetMessageId,
+          subjectUserId,
+          claimType:
+            command.kind === "MEANING"
+              ? "MEANING"
+              : "TERMINOLOGY",
+          propositionRef,
+          scopeKind: scope,
+          scopeConversationId:
+            scope === "CONVERSATION"
+              ? command.conversation_id
+              : null,
+          createdAt: now,
+        },
+      );
+    }
 
     await this.deps.corrections.insertRepairProvenance(
       tx,
@@ -728,6 +771,9 @@ export class ContextCorrectionService<Tx> {
       superseded.map(
         (claim) => claim.claimId,
       ),
+      command.kind === "TONE"
+        ? "STYLE"
+        : "CORRECTION",
       now,
     );
   }
@@ -881,6 +927,7 @@ export class ContextCorrectionService<Tx> {
     authority: CorrectionAuthority,
     claimId: UUID,
     removeClaimIds: UUID[],
+    memoryKind: "CORRECTION" | "STYLE",
     now: string,
   ): Promise<void> {
     const existing = await this.deps.state.loadState(
@@ -924,14 +971,24 @@ export class ContextCorrectionService<Tx> {
               now,
             });
 
-      created = replaceConfirmedCorrectionClaim(
-        created,
-        {
-          claimId,
-          removeClaimIds,
-          now,
-        },
-      );
+      created =
+        memoryKind === "STYLE"
+          ? replaceExplicitStylePreferenceClaim(
+              created,
+              {
+                claimId,
+                removeClaimIds,
+                now,
+              },
+            )
+          : replaceConfirmedCorrectionClaim(
+              created,
+              {
+                claimId,
+                removeClaimIds,
+                now,
+              },
+            );
 
       const inserted =
         await this.deps.state.insertState(
@@ -958,14 +1015,24 @@ export class ContextCorrectionService<Tx> {
         now,
       },
     );
-    next = replaceConfirmedCorrectionClaim(
-      next,
-      {
-        claimId,
-        removeClaimIds,
-        now,
-      },
-    );
+    next =
+      memoryKind === "STYLE"
+        ? replaceExplicitStylePreferenceClaim(
+            next,
+            {
+              claimId,
+              removeClaimIds,
+              now,
+            },
+          )
+        : replaceConfirmedCorrectionClaim(
+            next,
+            {
+              claimId,
+              removeClaimIds,
+              now,
+            },
+          );
 
     if (
       next.stateVersion ===
