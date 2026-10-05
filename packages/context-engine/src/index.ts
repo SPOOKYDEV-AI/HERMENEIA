@@ -15,12 +15,14 @@ export type ContextCandidateType =
   | "ACTIVE_EPISODE"
   | "RECOVERY_CHECKPOINT"
   | "CORRECTION_MEMORY"
+  | "STYLE_MEMORY"
   | "APPROVED_POLICY";
 
 export type ContextPrivacyScope =
   | "TRANSIENT"
   | "CHECKPOINT"
   | "CORRECTION"
+  | "STYLE"
   | "POLICY";
 
 export type CorrectionTrigger =
@@ -155,6 +157,7 @@ export interface SelectedContextItem {
     | "IMMEDIATE_CONTEXT"
     | "ACTIVE_EPISODE"
     | "CORRECTION_OR_POLICY"
+    | "STYLE_PREFERENCE"
     | "RECOVERY_CHECKPOINT"
     | "ADAPTIVE_UTILITY";
 }
@@ -424,6 +427,7 @@ export class ContextEngine {
         | "IMMEDIATE_CONTEXT"
         | "ACTIVE_EPISODE"
         | "CORRECTION_OR_POLICY"
+        | "STYLE_PREFERENCE"
         | "RECOVERY_CHECKPOINT"
         | "ADAPTIVE_UTILITY",
       softBand:
@@ -549,6 +553,16 @@ export class ContextEngine {
             "APPROVED_POLICY",
       ),
       "CORRECTION_OR_POLICY",
+      "memory",
+      input.budget.memoryReserveTokens,
+    );
+
+    selectFrom(
+      scored.filter(
+        ({ candidate }) =>
+          candidate.candidateType === "STYLE_MEMORY",
+      ),
+      "STYLE_PREFERENCE",
       "memory",
       input.budget.memoryReserveTokens,
     );
