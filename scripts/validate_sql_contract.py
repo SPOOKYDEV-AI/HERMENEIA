@@ -395,6 +395,10 @@ def main() -> int:
         "'APPROVED_GLOSSARY_CHANGE'",
         "'TENANT_POLICY_CHANGE'",
         "recovery_checkpoints_one_active_idx",
+        "REFERENCES translation_executions(tenant_id, translation_id)",
+        "REFERENCES message_metadata(tenant_id, conversation_id, message_id)",
+        "REFERENCES tenant_memberships(tenant_id, user_id)",
+        "conversation_id IS NOT NULL",
         "NOT hermeneia_context_jsonb_has_forbidden_key",
     ]
     for snippet in context_state_required:
