@@ -234,6 +234,10 @@ async function cleanup() {
         tenant,
       );
       await db.query(
+        "DELETE FROM conversation_context_states WHERE tenant_id = $1",
+        tenant,
+      );
+      await db.query(
         "DELETE FROM message_revisions WHERE tenant_id = $1",
         tenant,
       );
