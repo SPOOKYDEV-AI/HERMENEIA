@@ -244,11 +244,13 @@ export class PostgresContextPlanningRepository {
       message_seq: number;
       op_seq: number;
       accepted_at: string;
+      author_user_id: UUID;
       erasure_epoch: number;
     }>(
       `SELECT mm.message_seq,
               mr.op_seq,
               mr.created_at::text AS accepted_at,
+              mm.author_user_id,
               c.erasure_epoch
          FROM message_metadata mm
          JOIN message_revisions mr
@@ -326,6 +328,8 @@ export class PostgresContextPlanningRepository {
       currentMessageSequence: Number(currentRow.message_seq),
       currentOperationSequence: Number(currentRow.op_seq),
       currentMessageAcceptedAt: currentRow.accepted_at,
+      currentSourceAuthorUserId:
+        currentRow.author_user_id,
       erasureEpoch: Number(currentRow.erasure_epoch),
       recentMessages: recent.rows.map((row) => ({
         messageId: row.message_id,
