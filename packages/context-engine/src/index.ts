@@ -537,12 +537,30 @@ export class ContextEngine {
       true,
     );
 
-    selectFrom(
-      scored.filter(
+    const immediateWindow = scored
+      .filter(
         ({ candidate }) =>
           candidate.candidateType ===
-          "IMMEDIATE_MESSAGE",
-      ),
+            "IMMEDIATE_MESSAGE" &&
+          candidate.sourceMessageSequence !== undefined &&
+          candidate.sourceMessageSequence !== null,
+      )
+      .sort(
+        (left, right) =>
+          Number(
+            right.candidate.sourceMessageSequence,
+          ) -
+            Number(
+              left.candidate.sourceMessageSequence,
+            ) ||
+          left.candidate.candidateId.localeCompare(
+            right.candidate.candidateId,
+          ),
+      )
+      .slice(0, this.config.t1WindowSize);
+
+    selectFrom(
+      immediateWindow,
       "IMMEDIATE_CONTEXT",
       "immediate",
       input.budget.immediateReserveTokens,
