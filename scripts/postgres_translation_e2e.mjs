@@ -251,12 +251,23 @@ async function cleanup() {
         "DELETE FROM outbox_jobs WHERE tenant_id = $1",
         tenant,
       );
+      // Delete provenance before either side of its foreign keys.
       await db.query(
-        "DELETE FROM context_snapshots WHERE tenant_id = $1",
+        "DELETE FROM provenance_edges WHERE tenant_id = $1",
+        tenant,
+      );
+      // Repair events may point at translation executions.
+      await db.query(
+        "DELETE FROM translation_repair_events WHERE tenant_id = $1",
+        tenant,
+      );
+      // Translation executions may point at context snapshots.
+      await db.query(
+        "DELETE FROM translation_executions WHERE tenant_id = $1",
         tenant,
       );
       await db.query(
-        "DELETE FROM provenance_edges WHERE tenant_id = $1",
+        "DELETE FROM context_snapshots WHERE tenant_id = $1",
         tenant,
       );
       await db.query(
@@ -264,15 +275,7 @@ async function cleanup() {
         tenant,
       );
       await db.query(
-        "DELETE FROM translation_repair_events WHERE tenant_id = $1",
-        tenant,
-      );
-      await db.query(
         "DELETE FROM conversation_context_states WHERE tenant_id = $1",
-        tenant,
-      );
-      await db.query(
-        "DELETE FROM translation_executions WHERE tenant_id = $1",
         tenant,
       );
       await db.query(
