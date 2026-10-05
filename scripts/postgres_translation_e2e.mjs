@@ -98,7 +98,6 @@ const env = {
   ...process.env,
   DATABASE_URL: databaseUrl,
   HERMENEIA_TEST_DATABASE_URL: databaseUrl,
-  TRANSLATION_WORKER_MODE: "external",
   TRANSLATION_STRATEGY_VERSION: "t0-v1",
 };
 
