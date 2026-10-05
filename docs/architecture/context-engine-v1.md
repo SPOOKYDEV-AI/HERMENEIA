@@ -1,6 +1,6 @@
 # HERMENEIA Context Engine V1
 
-**Status:** Executable T0/T1 runtime plus durable ConversationState schema/reducer baseline; T2 runtime/enrichment pipeline incomplete  
+**Status:** Executable T0/T1 runtime plus persistent causal ConversationState runtime; semantic T2 enrichment/recovery pipeline incomplete  
 **Version:** 1  
 **Primary goals:** translation quality, low latency, temporal correctness, reproducibility
 
@@ -28,7 +28,9 @@ The current V1 runtime implements and tests:
 - stale ContextSnapshots being rejected when their epoch no longer matches the authoritative conversation epoch;
 - a real PostgreSQL E2E proving stale contextual work is superseded before another provider call and cannot publish a TRANSLATION envelope.
 
-The persistent runtime does **not** yet make T2 production-complete. The engine contains adaptive T2 selection semantics and causal/future-leakage tests. Migration 0013 now adds a bounded durable ConversationState/claim/provenance/checkpoint schema, and `packages/context-state` provides a deterministic causal reducer with strict ordered publication, stale-version/epoch rejection, degraded recovery floors and authorised correction decisions. Persistent repositories, operation registration from messaging, enrichment workers, episode/memory derivation and Context Engine candidate wiring remain future implementation work.
+The persistent runtime does **not** yet make T2 production-complete. Migration 0013 provides the bounded durable ConversationState/claim/provenance/checkpoint schema; PostgreSQL persistence, messaging-operation registration, a fenced `context.reduce` worker and the ConversationState-to-planner boundary are now executable. Context planning projects state strictly before the current operation, strips current/future pending operations from historical gap checks, and rejects state that has already processed the message being translated. A compatible state alone is not called T2: T2 requires material derived candidates, and enrichment failure degrades to T1/T0.
+
+Semantic episode/memory/correction derivation, recovery-checkpoint materialisation, dependency-aware invalidation and a production cross-process worker transport remain future work. The current raw-source store is process-local and transient, so `TRANSLATION_WORKER_MODE=external` fails fast rather than pretending a separate process can access plaintext that it does not own.
 
 ## 2. Design principle: understand progressively
 
