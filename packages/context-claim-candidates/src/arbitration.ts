@@ -62,6 +62,18 @@ export function arbitrateCandidateClaims(
       continue;
     }
 
+    const speakerPreferences = group.filter(
+      ({ claim }) =>
+        claim.authorityClass === "EXPLICIT_PREFERENCE" &&
+        claim.subjectUserId !== null,
+    );
+
+    if (speakerPreferences.length > 0) {
+      const winner = resolveConsensus(speakerPreferences);
+      if (winner) resolved.push(winner);
+      continue;
+    }
+
     const speakerScoped = group.filter(
       ({ claim }) =>
         claim.authorityClass ===
@@ -149,15 +161,19 @@ function semanticKey(
   // Language applicability is resolved before arbitration. At this point a
   // generic claim and a language-specific claim may both apply to the same
   // current message, so qualifiers must not split them into separate keys.
-  return proposition.kind === "TERM_MEANING"
-    ? JSON.stringify([
-        proposition.kind,
-        proposition.surfaceForm,
-      ])
-    : JSON.stringify([
-        proposition.kind,
-        proposition.sourceForm,
-      ]);
+  if (proposition.kind === "TERM_MEANING") {
+    return JSON.stringify([
+      proposition.kind,
+      proposition.surfaceForm,
+    ]);
+  }
+  if (proposition.kind === "TONE_PREFERENCE") {
+    return JSON.stringify([proposition.kind]);
+  }
+  return JSON.stringify([
+    proposition.kind,
+    proposition.sourceForm,
+  ]);
 }
 
 function propositionValueKey(
@@ -169,7 +185,12 @@ function propositionValueKey(
       proposition.meaning,
     ]);
   }
-
+  if (proposition.kind === "TONE_PREFERENCE") {
+    return JSON.stringify([
+      semanticKey(proposition),
+      proposition.preferredRegister,
+    ]);
+  }
   return JSON.stringify([
     semanticKey(proposition),
     proposition.targetForm,
