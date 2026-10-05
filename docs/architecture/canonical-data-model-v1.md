@@ -311,6 +311,7 @@ Fields:
     membership_epoch bigint
     erasure_epoch bigint
     policy_version bigint
+    tenant_policy_version bigint
     degraded boolean
     token_estimate integer
     created_at timestamptz
