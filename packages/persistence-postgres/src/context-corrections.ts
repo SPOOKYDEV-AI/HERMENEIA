@@ -98,23 +98,28 @@ export class PostgresContextCorrectionRepository {
     return result.rows[0]?.present === true;
   }
 
-  async translationVisibleToActor(
+  async loadVisibleTranslationTarget(
     tx: SqlExecutor,
     input: {
       actor: ActorContext;
       conversationId: UUID;
       translationId: UUID;
     },
-  ): Promise<boolean> {
-    const result = await tx.query<{ present: boolean }>(
-      `SELECT EXISTS(
-         SELECT 1
-           FROM translation_executions te
-          WHERE te.tenant_id = $1
-            AND te.conversation_id = $2
-            AND te.translation_id = $3
-            AND te.recipient_user_id = $4
-       ) AS present`,
+  ): Promise<{
+    messageId: UUID;
+    sourceRevision: number;
+  } | undefined> {
+    const result = await tx.query<{
+      source_message_id: UUID;
+      source_revision: number;
+    }>(
+      `SELECT te.source_message_id,
+              te.source_revision
+         FROM translation_executions te
+        WHERE te.tenant_id = $1
+          AND te.conversation_id = $2
+          AND te.translation_id = $3
+          AND te.recipient_user_id = $4`,
       [
         input.actor.tenantId,
         input.conversationId,
@@ -122,7 +127,13 @@ export class PostgresContextCorrectionRepository {
         input.actor.userId,
       ],
     );
-    return result.rows[0]?.present === true;
+    const row = result.rows[0];
+    return row
+      ? {
+          messageId: row.source_message_id,
+          sourceRevision: Number(row.source_revision),
+        }
+      : undefined;
   }
 
   async insertRepairEvent(
