@@ -8,6 +8,7 @@ import {
   createDegradedContextStateFromFloor,
   createInitialContextState,
   linkConfirmedCorrectionClaim,
+  replaceConfirmedCorrectionClaim,
   rebaseContextStateAuthority,
   decideDurableCorrection,
   processingGapRefs,
@@ -543,5 +544,36 @@ test("confirmed correction linking is deduplicated and keeps only the newest 128
   assert.deepEqual(
     replay.correctionClaimRefs,
     state.correctionClaimRefs,
+  );
+});
+
+
+test("correction replacement removes superseded refs and appends the replacement once", () => {
+  let state = initial();
+  state.correctionClaimRefs = [
+    "claim-old-a",
+    "claim-keep",
+    "claim-old-b",
+  ];
+
+  const next = replaceConfirmedCorrectionClaim(
+    state,
+    {
+      claimId: "claim-new",
+      removeClaimIds: [
+        "claim-old-a",
+        "claim-old-b",
+      ],
+      now: "2026-10-04T18:30:00.000Z",
+    },
+  );
+
+  assert.deepEqual(
+    next.correctionClaimRefs,
+    ["claim-keep", "claim-new"],
+  );
+  assert.equal(
+    next.stateVersion,
+    state.stateVersion + 1,
   );
 });
