@@ -908,6 +908,63 @@ test("mutation allocates only conversation op_seq under active actor membership"
   ]);
 });
 
+test("conversation erasure epoch bump is actor-scoped and transaction-safe", async () => {
+  const connection = new ScriptedConnection([
+    {
+      rows: [{ erasure_epoch: 7 }],
+      rowCount: 1,
+    },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const erasureEpoch = await repository.withTransaction((tx) =>
+    repository.bumpConversationErasureEpoch(
+      tx,
+      actor(),
+      "conversation-1",
+    ),
+  );
+
+  assert.equal(erasureEpoch, 7);
+  const query = connection.queries[1];
+  assert.match(
+    query.text,
+    /erasure_epoch = c\.erasure_epoch \+ 1/,
+  );
+  assert.match(query.text, /conversation_members/);
+  assert.match(query.text, /tenant_memberships/);
+  assert.match(query.text, /actor_device\.status = 'ACTIVE'/);
+  assert.match(query.text, /c\.status = 'ACTIVE'/);
+  assert.match(query.text, /cm\.status = 'ACTIVE'/);
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "conversation-1",
+    "user-1",
+    "device-1",
+  ]);
+});
+
+test("conversation erasure epoch bump returns undefined when actor fencing rejects the update", async () => {
+  const connection = new ScriptedConnection([
+    { rows: [], rowCount: 0 },
+  ]);
+  const repository = new PostgresMessagingRepository(
+    new SqlTransactionManager(new SingleConnectionPool(connection)),
+  );
+
+  const erasureEpoch = await repository.withTransaction((tx) =>
+    repository.bumpConversationErasureEpoch(
+      tx,
+      actor(),
+      "conversation-1",
+    ),
+  );
+
+  assert.equal(erasureEpoch, undefined);
+});
+
 test("message revision pointer update is fenced by expected revision", async () => {
   const connection = new ScriptedConnection([
     { rows: [], rowCount: 1 },

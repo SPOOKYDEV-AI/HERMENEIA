@@ -21,6 +21,7 @@ function cloneState(state) {
   return {
     nextMessageSeq: state.nextMessageSeq,
     nextOpSeq: state.nextOpSeq,
+    erasureEpoch: state.erasureEpoch,
     messages: clone(state.messages),
     revisions: clone(state.revisions),
     envelopes: clone(state.envelopes),
@@ -89,6 +90,7 @@ class TransactionalFakeStore {
     this.state = {
       nextMessageSeq: 1,
       nextOpSeq: 1,
+      erasureEpoch: 2,
       messages: [],
       revisions: [],
       envelopes: [],
@@ -180,7 +182,7 @@ class TransactionalFakeStore {
       messageSeq: this.state.nextMessageSeq,
       opSeq: this.state.nextOpSeq,
       membershipEpoch: 7,
-      erasureEpoch: 2,
+      erasureEpoch: this.state.erasureEpoch,
       policyVersion: 11,
     };
     this.state.nextMessageSeq += 1;
@@ -249,9 +251,16 @@ class TransactionalFakeStore {
     return {
       opSeq,
       membershipEpoch: 7,
-      erasureEpoch: 2,
+      erasureEpoch: this.state.erasureEpoch,
       policyVersion: 11,
     };
+  }
+
+  async bumpConversationErasureEpoch() {
+    this.maybeFail("bumpConversationErasureEpoch");
+    if (!this.authorized) return undefined;
+    this.state.erasureEpoch += 1;
+    return this.state.erasureEpoch;
   }
 
   async updateMessageRevisionPointer(_tx, input) {
@@ -1170,6 +1179,7 @@ test("persistent delete creates tombstone, purges pending delivery and transient
 
   assert.equal(store.state.messages[0].currentRevision, 2);
   assert.equal(store.state.messages[0].status, "DELETED");
+  assert.equal(store.state.erasureEpoch, 3);
   assert.equal(
     store.state.envelopes.every(
       (row) => row.status === "REVOKED" && row.protectedPayload === "",
@@ -1203,6 +1213,34 @@ test("persistent delete creates tombstone, purges pending delivery and transient
   );
 });
 
+test("persistent delete rolls back erasure epoch when the transaction fails after the bump", async () => {
+  const store = new TransactionalFakeStore();
+  const { service } = createService(store);
+  const accepted = await service.sendMessage(actor, sendCommand());
+
+  store.failAt = "insertMessageRevision";
+  await assert.rejects(
+    () =>
+      service.deleteMessage(actor, {
+        protocol_version: 1,
+        command_id: "delete-erasure-rollback",
+        message_id: accepted.message_id,
+        expected_revision: 1,
+      }),
+    /forced store failure at insertMessageRevision/,
+  );
+
+  assert.equal(store.state.erasureEpoch, 2);
+  assert.equal(store.state.messages[0].currentRevision, 1);
+  assert.equal(store.state.messages[0].status, "ACTIVE");
+  assert.equal(
+    store.state.revisions.some(
+      (row) => row.mutationType === "DELETED",
+    ),
+    false,
+  );
+});
+
 test("persistent delete retry is idempotent and a new stale delete conflicts", async () => {
   const store = new TransactionalFakeStore();
   const { service } = createService(store);
@@ -1217,6 +1255,7 @@ test("persistent delete retry is idempotent and a new stale delete conflicts", a
   const first = await service.deleteMessage(actor, command);
   const retry = await service.deleteMessage(actor, command);
   assert.deepEqual(retry, first);
+  assert.equal(store.state.erasureEpoch, 3);
 
   await assert.rejects(
     () =>

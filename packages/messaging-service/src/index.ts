@@ -145,6 +145,12 @@ export interface PersistentMessagingStore<Tx> {
     conversationId: UUID,
   ): Promise<PersistentOperationAllocation | undefined>;
 
+  bumpConversationErasureEpoch(
+    tx: Tx,
+    actor: ActorContext,
+    conversationId: UUID,
+  ): Promise<number | undefined>;
+
   updateMessageRevisionPointer(
     tx: Tx,
     input: {

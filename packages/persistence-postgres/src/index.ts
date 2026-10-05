@@ -900,6 +900,46 @@ export class PostgresMessagingRepository {
       : undefined;
   }
 
+  async bumpConversationErasureEpoch(
+    tx: SqlExecutor,
+    actor: ActorContext,
+    conversationId: UUID,
+  ): Promise<number | undefined> {
+    const result = await tx.query<{
+      erasure_epoch: number;
+    }>(
+      `UPDATE conversations c
+          SET erasure_epoch = c.erasure_epoch + 1
+         FROM conversation_members cm
+         JOIN tenant_memberships tm
+           ON tm.tenant_id = cm.tenant_id
+          AND tm.user_id = cm.user_id
+          AND tm.status = 'ACTIVE'
+         JOIN devices actor_device
+           ON actor_device.device_id = $4
+          AND actor_device.user_id = cm.user_id
+          AND actor_device.status = 'ACTIVE'
+        WHERE c.tenant_id = $1
+          AND c.conversation_id = $2
+          AND c.status = 'ACTIVE'
+          AND cm.tenant_id = c.tenant_id
+          AND cm.conversation_id = c.conversation_id
+          AND cm.user_id = $3
+          AND cm.status = 'ACTIVE'
+      RETURNING c.erasure_epoch`,
+      [
+        actor.tenantId,
+        conversationId,
+        actor.userId,
+        actor.deviceId,
+      ],
+    );
+    const row = first(result);
+    return row
+      ? Number(row.erasure_epoch)
+      : undefined;
+  }
+
   async updateMessageRevisionPointer(
     tx: SqlExecutor,
     input: {
