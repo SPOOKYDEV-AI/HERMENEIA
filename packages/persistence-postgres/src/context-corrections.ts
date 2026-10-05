@@ -86,7 +86,7 @@ export class PostgresContextCorrectionRepository {
       : undefined;
   }
 
-  async messageRevisionExists(
+  async loadMessageRevisionTarget(
     tx: SqlExecutor,
     input: {
       tenantId: UUID;
@@ -94,16 +94,28 @@ export class PostgresContextCorrectionRepository {
       messageId: UUID;
       sourceRevision: number;
     },
-  ): Promise<boolean> {
-    const result = await tx.query<{ present: boolean }>(
-      `SELECT EXISTS(
-         SELECT 1
-           FROM message_revisions mr
-          WHERE mr.tenant_id = $1
-            AND mr.conversation_id = $2
-            AND mr.message_id = $3
-            AND mr.revision = $4
-       ) AS present`,
+  ): Promise<{
+    messageId: UUID;
+    sourceRevision: number;
+    authorUserId: UUID;
+  } | undefined> {
+    const result = await tx.query<{
+      message_id: UUID;
+      revision: number;
+      author_user_id: UUID;
+    }>(
+      `SELECT mr.message_id,
+              mr.revision,
+              mm.author_user_id
+         FROM message_revisions mr
+         JOIN message_metadata mm
+           ON mm.tenant_id = mr.tenant_id
+          AND mm.conversation_id = mr.conversation_id
+          AND mm.message_id = mr.message_id
+        WHERE mr.tenant_id = $1
+          AND mr.conversation_id = $2
+          AND mr.message_id = $3
+          AND mr.revision = $4`,
       [
         input.tenantId,
         input.conversationId,
@@ -111,7 +123,14 @@ export class PostgresContextCorrectionRepository {
         input.sourceRevision,
       ],
     );
-    return result.rows[0]?.present === true;
+    const row = result.rows[0];
+    return row
+      ? {
+          messageId: row.message_id,
+          sourceRevision: Number(row.revision),
+          authorUserId: row.author_user_id,
+        }
+      : undefined;
   }
 
   async loadVisibleTranslationTarget(
@@ -124,14 +143,21 @@ export class PostgresContextCorrectionRepository {
   ): Promise<{
     messageId: UUID;
     sourceRevision: number;
+    authorUserId: UUID;
   } | undefined> {
     const result = await tx.query<{
       source_message_id: UUID;
       source_revision: number;
+      author_user_id: UUID;
     }>(
       `SELECT te.source_message_id,
-              te.source_revision
+              te.source_revision,
+              mm.author_user_id
          FROM translation_executions te
+         JOIN message_metadata mm
+           ON mm.tenant_id = te.tenant_id
+          AND mm.conversation_id = te.conversation_id
+          AND mm.message_id = te.source_message_id
         WHERE te.tenant_id = $1
           AND te.conversation_id = $2
           AND te.translation_id = $3
@@ -148,6 +174,7 @@ export class PostgresContextCorrectionRepository {
       ? {
           messageId: row.source_message_id,
           sourceRevision: Number(row.source_revision),
+          authorUserId: row.author_user_id,
         }
       : undefined;
   }
@@ -219,6 +246,7 @@ export class PostgresContextCorrectionRepository {
       claimId: UUID;
       conversationId: UUID;
       messageId: UUID | null;
+      subjectUserId: UUID | null;
       claimType: "MEANING" | "TERMINOLOGY";
       propositionRef: Record<string, unknown>;
       scopeKind: "CONVERSATION" | "TENANT";
@@ -249,17 +277,18 @@ export class PostgresContextCorrectionRepository {
          status,
          created_at
        ) VALUES (
-         $1,$2,1,$3,$4,NULL,$5,$6::jsonb,
+         $1,$2,1,$3,$4,$5,$6,$7::jsonb,
          'CORRECTION','CONFIRMED_CORRECTION',
          'CORRECTIVE_DURABLE','NORMAL',1,
-         $7,$8,'EXPLICIT_UI_CORRECTION',
-         $9,NULL,'ACTIVE',$9
+         $8,$9,'EXPLICIT_UI_CORRECTION',
+         $10,NULL,'ACTIVE',$10
        )`,
       [
         input.tenantId,
         input.claimId,
         input.conversationId,
         input.messageId,
+        input.subjectUserId,
         input.claimType,
         JSON.stringify(input.propositionRef),
         input.scopeKind,

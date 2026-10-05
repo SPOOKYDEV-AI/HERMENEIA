@@ -22,6 +22,8 @@ const MESSAGE =
   "10000000-0000-4000-8000-000000000006";
 const TRANSLATION =
   "10000000-0000-4000-8000-000000000007";
+const OTHER_USER =
+  "10000000-0000-4000-8000-000000000008";
 const NOW = "2026-10-05T11:00:00.000Z";
 
 const actor = {
@@ -64,7 +66,9 @@ function fixture({
   translationTarget = {
     messageId: MESSAGE,
     sourceRevision: 1,
+    authorUserId: OTHER_USER,
   },
+  messageAuthorUserId = OTHER_USER,
   nextOperationSequence = 1,
 } = {}) {
   const receipts = new Map();
@@ -128,11 +132,18 @@ function fixture({
         : undefined;
     },
 
-    async messageRevisionExists(_tx, input) {
+    async loadMessageRevisionTarget(_tx, input) {
       return (
         input.messageId === MESSAGE &&
         input.sourceRevision === 1
-      );
+      )
+        ? {
+            messageId: MESSAGE,
+            sourceRevision: 1,
+            authorUserId:
+              messageAuthorUserId,
+          }
+        : undefined;
     },
 
     async loadVisibleTranslationTarget() {
@@ -257,6 +268,10 @@ test("moderator conversation correction is atomically promoted into T2 state", a
     f.claims[0].scopeConversationId,
     CONVERSATION,
   );
+  assert.equal(
+    f.claims[0].subjectUserId,
+    null,
+  );
   assert.equal(f.provenance.length, 1);
   assert.equal(
     f.provenance[0].repairEventId,
@@ -269,7 +284,7 @@ test("moderator conversation correction is atomically promoted into T2 state", a
   );
 });
 
-test("ordinary member shared correction is recorded for confirmation, not promoted", async () => {
+test("ordinary member cannot promote an unanchored shared correction", async () => {
   const f = fixture({
     conversationRole: "MEMBER",
   });
@@ -294,6 +309,63 @@ test("ordinary member shared correction is recorded for confirmation, not promot
   assert.equal(f.events.length, 1);
   assert.equal(f.claims.length, 0);
   assert.equal(f.provenance.length, 0);
+  assert.deepEqual(
+    f.state().correctionClaimRefs,
+    [],
+  );
+});
+
+test("ordinary member can promote a conversation correction anchored to their own source message", async () => {
+  const f = fixture({
+    conversationRole: "MEMBER",
+    messageAuthorUserId: USER,
+  });
+
+  const result = await f.service.createCorrection(
+    actor,
+    command({
+      target_message_id: MESSAGE,
+      target_source_revision: 1,
+    }),
+  );
+
+  assert.equal(result.status, "APPLIED");
+  assert.equal(
+    result.applied_scope,
+    "CONVERSATION",
+  );
+  assert.ok(result.claim_id);
+  assert.equal(f.claims.length, 1);
+  assert.equal(
+    f.claims[0].subjectUserId,
+    USER,
+  );
+  assert.deepEqual(
+    f.state().correctionClaimRefs,
+    [result.claim_id],
+  );
+});
+
+test("ordinary member cannot promote a correction anchored to another speaker", async () => {
+  const f = fixture({
+    conversationRole: "MEMBER",
+    messageAuthorUserId: OTHER_USER,
+  });
+
+  const result = await f.service.createCorrection(
+    actor,
+    command({
+      target_message_id: MESSAGE,
+      target_source_revision: 1,
+    }),
+  );
+
+  assert.equal(
+    result.status,
+    "NEEDS_CONFIRMATION",
+  );
+  assert.equal(result.claim_id, null);
+  assert.equal(f.claims.length, 0);
   assert.deepEqual(
     f.state().correctionClaimRefs,
     [],
@@ -434,6 +506,7 @@ test("translation and message targets must resolve to the same source revision",
       messageId:
         "30000000-0000-4000-8000-000000000001",
       sourceRevision: 2,
+      authorUserId: OTHER_USER,
     },
   });
 

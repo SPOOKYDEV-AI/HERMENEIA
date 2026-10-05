@@ -126,6 +126,8 @@ export class ContextCorrectionService<Tx> {
             command,
             authority,
             normalised.canBecomeClaim,
+            actor.userId,
+            target.authorUserId,
           );
 
         const repairEventId =
@@ -165,6 +167,7 @@ export class ContextCorrectionService<Tx> {
             command,
             authority,
             target.messageId,
+            promotion.subjectUserId,
             claimId,
             repairEventId,
             normalised.payload,
@@ -210,6 +213,7 @@ export class ContextCorrectionService<Tx> {
     command: CorrectionCommand,
     authority: CorrectionAuthority,
     targetMessageId: UUID | null,
+    subjectUserId: UUID | null,
     claimId: UUID,
     repairEventId: UUID,
     propositionRef: Record<string, unknown>,
@@ -224,6 +228,7 @@ export class ContextCorrectionService<Tx> {
         conversationId:
           command.conversation_id,
         messageId: targetMessageId,
+        subjectUserId,
         claimType:
           command.kind === "MEANING"
             ? "MEANING"
@@ -269,15 +274,17 @@ export class ContextCorrectionService<Tx> {
   ): Promise<{
     messageId: UUID | null;
     sourceRevision: number | null;
+    authorUserId: UUID | null;
   }> {
     let messageId =
       command.target_message_id ?? null;
     let sourceRevision =
       command.target_source_revision ?? null;
+    let authorUserId: UUID | null = null;
 
     if (messageId) {
-      const exists =
-        await this.deps.corrections.messageRevisionExists(
+      const target =
+        await this.deps.corrections.loadMessageRevisionTarget(
           tx,
           {
             tenantId: actor.tenantId,
@@ -287,12 +294,13 @@ export class ContextCorrectionService<Tx> {
             sourceRevision: sourceRevision!,
           },
         );
-      if (!exists) {
+      if (!target) {
         throw new DomainError(
           "NOT_AUTHORIZED",
           "Correction target is not available to actor",
         );
       }
+      authorUserId = target.authorUserId;
     }
 
     if (command.target_translation_id) {
@@ -331,9 +339,15 @@ export class ContextCorrectionService<Tx> {
       messageId = translation.messageId;
       sourceRevision =
         translation.sourceRevision;
+      authorUserId =
+        translation.authorUserId;
     }
 
-    return { messageId, sourceRevision };
+    return {
+      messageId,
+      sourceRevision,
+      authorUserId,
+    };
   }
 
   private async linkClaimIntoState(

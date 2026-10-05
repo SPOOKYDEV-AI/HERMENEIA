@@ -60,7 +60,7 @@ export interface ContextCorrectionStore<Tx> {
     },
   ): Promise<CorrectionAuthority | undefined>;
 
-  messageRevisionExists(
+  loadMessageRevisionTarget(
     tx: Tx,
     input: {
       tenantId: UUID;
@@ -68,7 +68,11 @@ export interface ContextCorrectionStore<Tx> {
       messageId: UUID;
       sourceRevision: number;
     },
-  ): Promise<boolean>;
+  ): Promise<{
+    messageId: UUID;
+    sourceRevision: number;
+    authorUserId: UUID;
+  } | undefined>;
 
   loadVisibleTranslationTarget(
     tx: Tx,
@@ -80,6 +84,7 @@ export interface ContextCorrectionStore<Tx> {
   ): Promise<{
     messageId: UUID;
     sourceRevision: number;
+    authorUserId: UUID;
   } | undefined>;
 
   insertRepairEvent(
@@ -113,6 +118,7 @@ export interface ContextCorrectionStore<Tx> {
       claimId: UUID;
       conversationId: UUID;
       messageId: UUID | null;
+      subjectUserId: UUID | null;
       claimType: "MEANING" | "TERMINOLOGY";
       propositionRef: Record<string, unknown>;
       scopeKind: "CONVERSATION" | "TENANT";

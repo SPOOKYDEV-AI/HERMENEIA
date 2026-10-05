@@ -34,6 +34,7 @@ function frame(overrides = {}) {
     currentMessageSequence: 8,
     currentOperationSequence: 8,
     currentMessageAcceptedAt: "2026-10-04T20:00:00.000Z",
+    currentSourceAuthorUserId: "user-a",
     erasureEpoch: 2,
     recentMessages: [
       {

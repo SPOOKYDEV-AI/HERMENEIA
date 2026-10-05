@@ -129,6 +129,7 @@ test("PostgreSQL translation correction target is restricted to the receiving ac
       rows: [{
         source_message_id: "message-1",
         source_revision: 3,
+        author_user_id: "author-1",
       }],
       rowCount: 1,
     }]);
@@ -150,10 +151,15 @@ test("PostgreSQL translation correction target is restricted to the receiving ac
   assert.deepEqual(target, {
     messageId: "message-1",
     sourceRevision: 3,
+    authorUserId: "author-1",
   });
   assert.match(
     connection.queries[1].text,
     /te\.recipient_user_id = \$4/,
+  );
+  assert.match(
+    connection.queries[1].text,
+    /mm\.author_user_id/,
   );
   assert.deepEqual(
     connection.queries[1].params,
@@ -201,6 +207,7 @@ test("PostgreSQL correction writes bounded structured repair, claim and provenan
       claimId: "claim-1",
       conversationId: "conversation-1",
       messageId: "message-1",
+      subjectUserId: "user-1",
       claimType: "TERMINOLOGY",
       propositionRef: {
         schema_version: 1,
@@ -241,6 +248,14 @@ test("PostgreSQL correction writes bounded structured repair, claim and provenan
   );
   assert.match(
     claim.text,
+    /subject_user_id/,
+  );
+  assert.equal(
+    claim.params[4],
+    "user-1",
+  );
+  assert.match(
+    claim.text,
     /'CONFIRMED_CORRECTION'/,
   );
   assert.match(
@@ -266,5 +281,46 @@ test("PostgreSQL correction writes bounded structured repair, claim and provenan
   assert.equal(
     connection.queries.at(-1).text,
     "COMMIT",
+  );
+});
+
+
+test("PostgreSQL direct correction target resolves the source author", async () => {
+  const { repository, connection } =
+    repositoryWith([{
+      rows: [{
+        message_id: "message-1",
+        revision: 2,
+        author_user_id: "author-1",
+      }],
+      rowCount: 1,
+    }]);
+
+  const target =
+    await repository.withTransaction((tx) =>
+      repository.loadMessageRevisionTarget(
+        tx,
+        {
+          tenantId: "tenant-1",
+          conversationId:
+            "conversation-1",
+          messageId: "message-1",
+          sourceRevision: 2,
+        },
+      ),
+    );
+
+  assert.deepEqual(target, {
+    messageId: "message-1",
+    sourceRevision: 2,
+    authorUserId: "author-1",
+  });
+  assert.match(
+    connection.queries[1].text,
+    /JOIN message_metadata mm/,
+  );
+  assert.match(
+    connection.queries[1].text,
+    /mm\.author_user_id/,
   );
 });

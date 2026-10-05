@@ -11,6 +11,7 @@ interface ContextClaimRow extends Record<string, unknown> {
   claim_id: UUID;
   claim_version: number;
   conversation_id: UUID | null;
+  subject_user_id: UUID | null;
   proposition_ref: unknown;
   modality: "ASSERTION" | "CORRECTION";
   authority_class:
@@ -77,6 +78,7 @@ export class PostgresContextClaimRepository {
               claim_id,
               claim_version,
               conversation_id,
+              subject_user_id,
               proposition_ref,
               modality,
               authority_class,
@@ -174,6 +176,7 @@ function mapClaimRow(
     claimId: row.claim_id,
     claimVersion: Number(row.claim_version),
     conversationId: row.conversation_id,
+    subjectUserId: row.subject_user_id,
     propositionRef: structuredClone(
       row.proposition_ref as Record<string, unknown>,
     ),

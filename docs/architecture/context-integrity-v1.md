@@ -121,6 +121,8 @@ High confidence never grants a lower-authority source permission to override an 
 
 A user's correction of their own intended meaning can override an earlier inference in the justified scope. It does not automatically create tenant-wide policy.
 
+The executable V1 runtime enforces this with a speaker subject fence. A supported correction anchored to the actor's own source revision may become a `CONFIRMED_CORRECTION` with `subject_user_id = actor_user_id`. Context planning obtains the author of the source revision currently being translated, and the claim materializer rejects a subject-scoped claim unless those identities match. Corrections from an ordinary member about another speaker therefore cannot silently become durable authority over that speaker's future messages.
+
 ## 6. No self-reinforcement
 
 A claim cannot gain confidence merely because HERMENEIA generated several artifacts from the same source.

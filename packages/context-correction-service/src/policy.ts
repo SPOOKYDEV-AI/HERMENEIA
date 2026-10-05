@@ -22,6 +22,7 @@ export interface CorrectionPromotionDecision {
     | "NEEDS_CONFIRMATION"
     | "APPLIED";
   scope: "CONVERSATION" | "TENANT" | null;
+  subjectUserId: string | null;
 }
 
 export function validateCorrectionCommand(
@@ -177,6 +178,8 @@ export function decideCorrectionPromotion(
   command: CorrectionCommand,
   authority: CorrectionAuthority,
   canBecomeClaim: boolean,
+  actorUserId: string,
+  targetAuthorUserId: string | null,
 ): CorrectionPromotionDecision {
   if (
     command.requested_scope === "MESSAGE"
@@ -185,6 +188,7 @@ export function decideCorrectionPromotion(
       apply: false,
       status: "RECORDED",
       scope: null,
+      subjectUserId: null,
     };
   }
 
@@ -193,6 +197,7 @@ export function decideCorrectionPromotion(
       apply: false,
       status: "NEEDS_CONFIRMATION",
       scope: null,
+      subjectUserId: null,
     };
   }
 
@@ -204,6 +209,19 @@ export function decideCorrectionPromotion(
       apply: false,
       status: "NEEDS_CONFIRMATION",
       scope: null,
+      subjectUserId: null,
+    };
+  }
+
+  if (
+    targetAuthorUserId !== null &&
+    targetAuthorUserId === actorUserId
+  ) {
+    return {
+      apply: true,
+      status: "APPLIED",
+      scope: "CONVERSATION",
+      subjectUserId: actorUserId,
     };
   }
 
@@ -217,11 +235,13 @@ export function decideCorrectionPromotion(
         apply: true,
         status: "APPLIED",
         scope: "CONVERSATION",
+        subjectUserId: null,
       }
     : {
         apply: false,
         status: "NEEDS_CONFIRMATION",
         scope: null,
+        subjectUserId: null,
       };
 }
 

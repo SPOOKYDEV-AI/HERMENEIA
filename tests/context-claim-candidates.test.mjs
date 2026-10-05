@@ -29,6 +29,7 @@ function correction(overrides = {}) {
     claimId: "claim-correction",
     claimVersion: 3,
     conversationId: "conversation-1",
+    subjectUserId: null,
     propositionRef: {
       schema_version: 1,
       kind: "TERM_MEANING",
@@ -56,6 +57,7 @@ test("confirmed correction becomes a causal T2 correction candidate", () => {
     claims: [correction()],
     referencedClaimIds: ["claim-correction"],
     conversationId: "conversation-1",
+    currentSourceAuthorUserId: "speaker-a",
     targetLanguageTag: "es-CO",
     state: state({
       correctionClaimRefs: ["claim-correction"],
@@ -113,6 +115,7 @@ test("approved glossary can materialise target-specific preferred rendering", ()
     claims: [claim],
     referencedClaimIds: ["claim-glossary"],
     conversationId: "conversation-1",
+    currentSourceAuthorUserId: "speaker-a",
     targetLanguageTag: "es-CO",
     state: state({
       terminologyClaimRefs: ["claim-glossary"],
@@ -135,6 +138,7 @@ test("approved glossary can materialise target-specific preferred rendering", ()
     claims: [claim],
     referencedClaimIds: ["claim-glossary"],
     conversationId: "conversation-1",
+    currentSourceAuthorUserId: "speaker-a",
     targetLanguageTag: "en-GB",
     state: state(),
     now: NOW,
@@ -179,6 +183,7 @@ test("claim materialisation fails closed on authority, sensitivity, scope, expir
       .filter((claim) => claim.claimId !== "not-referenced")
       .map((claim) => claim.claimId),
     conversationId: "conversation-1",
+    currentSourceAuthorUserId: "speaker-a",
     targetLanguageTag: "es-CO",
     state: state(),
     now: NOW,
@@ -210,4 +215,50 @@ test("claim created at current message acceptance is excluded to prevent retroac
     });
 
   assert.deepEqual(candidates, []);
+});
+
+
+test("speaker-scoped correction materialises only for the matching source author", () => {
+  const claim = correction({
+    subjectUserId: "speaker-a",
+  });
+
+  const matching =
+    materializeReferencedClaimCandidates({
+      claims: [claim],
+      referencedClaimIds: [
+        "claim-correction",
+      ],
+      conversationId: "conversation-1",
+      currentSourceAuthorUserId:
+        "speaker-a",
+      targetLanguageTag: "es-CO",
+      state: state({
+        correctionClaimRefs: [
+          "claim-correction",
+        ],
+      }),
+      now: NOW,
+    });
+
+  const otherSpeaker =
+    materializeReferencedClaimCandidates({
+      claims: [claim],
+      referencedClaimIds: [
+        "claim-correction",
+      ],
+      conversationId: "conversation-1",
+      currentSourceAuthorUserId:
+        "speaker-b",
+      targetLanguageTag: "es-CO",
+      state: state({
+        correctionClaimRefs: [
+          "claim-correction",
+        ],
+      }),
+      now: NOW,
+    });
+
+  assert.equal(matching.length, 1);
+  assert.deepEqual(otherSpeaker, []);
 });
