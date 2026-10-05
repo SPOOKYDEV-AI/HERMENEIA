@@ -15,7 +15,12 @@ import {
 } from "../../context-claim-candidates/src/index.js";
 import {
   ContextEngine,
+  type ContextCandidate,
+  type ConversationContextState,
 } from "../../context-engine/src/index.js";
+import {
+  parseEpisodeSourceRef,
+} from "../../context-episode-heuristic/src/index.js";
 import {
   ContextPreparationService,
   InMemoryContextPayloadStore,
@@ -103,94 +108,110 @@ export function createPostgresTranslationContextRuntime(
       : undefined);
 
   const derivedCandidates: DerivedContextCandidateSource | undefined =
-    deps.derivedCandidates ??
-    (deps.claimRepository
-      ? {
-          async load(input, state, frame) {
-            const referencedClaimIds = [
-              ...(state.correctionClaimRefs ?? []),
-              ...(state.terminologyClaimRefs ?? []),
-              ...(state.lexicalClaimRefs ?? []),
-            ].filter(
-              (value, index, values) =>
-                values.indexOf(value) === index,
-            );
+    deps.derivedCandidates ?? {
+      async load(input, state, frame) {
+        const asOf = frame.currentMessageAcceptedAt;
+        if (!Number.isFinite(Date.parse(asOf))) {
+          throw new TypeError(
+            "Current message acceptance timestamp is invalid",
+          );
+        }
 
-            const asOf = frame.currentMessageAcceptedAt;
-            if (!Number.isFinite(Date.parse(asOf))) {
-              throw new TypeError(
-                "Current message acceptance timestamp is invalid",
-              );
-            }
+        const episodeCandidates =
+          await materializeActiveEpisodeCandidates(
+            deps.transientSources,
+            input.tenantId,
+            state,
+            frame,
+          );
 
-            const {
-              claims,
-              materializedClaimIds,
-            } =
-              await deps.claimRepository!.withTransaction(
-                async (tx) => {
-                  const referencedClaims =
-                    referencedClaimIds.length === 0
-                      ? []
-                      : await deps.claimRepository!.loadReferencedClaims(
-                          tx,
-                          {
-                            tenantId: input.tenantId,
-                            conversationId:
-                              input.conversationId,
-                            claimIds:
-                              referencedClaimIds,
-                            asOf,
-                          },
-                        );
+        if (!deps.claimRepository) {
+          return episodeCandidates;
+        }
 
-                  const tenantPolicyClaims =
-                    await deps.claimRepository!.loadTenantPolicyClaims(
+        const referencedClaimIds = [
+          ...(state.correctionClaimRefs ?? []),
+          ...(state.terminologyClaimRefs ?? []),
+          ...(state.lexicalClaimRefs ?? []),
+        ].filter(
+          (value, index, values) =>
+            values.indexOf(value) === index,
+        );
+
+        const {
+          claims,
+          materializedClaimIds,
+        } =
+          await deps.claimRepository.withTransaction(
+            async (tx) => {
+              const referencedClaims =
+                referencedClaimIds.length === 0
+                  ? []
+                  : await deps.claimRepository!.loadReferencedClaims(
                       tx,
                       {
                         tenantId: input.tenantId,
+                        conversationId:
+                          input.conversationId,
+                        claimIds:
+                          referencedClaimIds,
                         asOf,
                       },
                     );
 
-                  const materializedClaimIds = [
-                    ...new Set([
-                      ...referencedClaimIds,
-                      ...tenantPolicyClaims.map(
-                        (claim) => claim.claimId,
-                      ),
-                    ]),
-                  ];
+              const tenantPolicyClaims =
+                await deps.claimRepository!.loadTenantPolicyClaims(
+                  tx,
+                  {
+                    tenantId: input.tenantId,
+                    asOf,
+                  },
+                );
 
-                  return {
-                    claims: [
-                      ...referencedClaims,
-                      ...tenantPolicyClaims,
-                    ],
-                    materializedClaimIds,
-                  };
-                },
-              );
+              const materializedClaimIds = [
+                ...new Set([
+                  ...referencedClaimIds,
+                  ...tenantPolicyClaims.map(
+                    (claim) => claim.claimId,
+                  ),
+                ]),
+              ];
 
-            if (materializedClaimIds.length === 0) {
-              return [];
-            }
+              return {
+                claims: [
+                  ...referencedClaims,
+                  ...tenantPolicyClaims,
+                ],
+                materializedClaimIds,
+              };
+            },
+          );
 
-            return materializeReferencedClaimCandidates({
-              claims,
-              referencedClaimIds: materializedClaimIds,
-              conversationId: input.conversationId,
-              currentSourceAuthorUserId:
-                frame.currentSourceAuthorUserId,
-              currentSourceLanguageTag:
-                frame.currentSourceLanguageTag,
-              targetLanguageTag: input.targetLanguageTag,
-              state,
-              now: asOf,
-            });
-          },
-        }
-      : undefined);
+        const claimCandidates =
+          materializedClaimIds.length === 0
+            ? []
+            : materializeReferencedClaimCandidates({
+                claims,
+                referencedClaimIds:
+                  materializedClaimIds,
+                conversationId:
+                  input.conversationId,
+                currentSourceAuthorUserId:
+                  frame.currentSourceAuthorUserId,
+                currentSourceLanguageTag:
+                  frame.currentSourceLanguageTag,
+                targetLanguageTag:
+                  input.targetLanguageTag,
+                state,
+                now: asOf,
+              });
+
+        return [
+          ...episodeCandidates,
+          ...claimCandidates,
+        ];
+      },
+    };
 
   const planner = new TranslationContextPlanner({
     metadata: {
@@ -232,4 +253,79 @@ export function createPostgresTranslationContextRuntime(
     payloads,
     planner,
   };
+}
+
+
+async function materializeActiveEpisodeCandidates(
+  transientSources: TransientSourceStore,
+  tenantId: UUID,
+  state: ConversationContextState,
+  frame: {
+    recentMessages: Array<{
+      messageId: UUID;
+      sourceRevision: number;
+    }>;
+  },
+): Promise<ContextCandidate[]> {
+  if (
+    !state.activeEpisodeId ||
+    !state.activeEpisodeVersion ||
+    !state.activeEpisodeSourceRevisionRefs?.length
+  ) {
+    return [];
+  }
+
+  const immediateRefs = new Set(
+    frame.recentMessages.map(
+      (ref) =>
+        `${ref.messageId}:${ref.sourceRevision}`,
+    ),
+  );
+
+  const episodeRefs =
+    state.activeEpisodeSourceRevisionRefs
+      .filter((ref) => !immediateRefs.has(ref))
+      .slice(-4);
+
+  const candidates: ContextCandidate[] = [];
+  for (const [index, ref] of episodeRefs.entries()) {
+    const parsed = parseEpisodeSourceRef(ref);
+    if (!parsed) continue;
+
+    const source = await transientSources.get({
+      tenantId,
+      messageId: parsed.messageId,
+      sourceRevision: parsed.sourceRevision,
+    });
+    if (!source) continue;
+
+    const recency =
+      episodeRefs.length <= 1
+        ? 1
+        : (index + 1) / episodeRefs.length;
+
+    candidates.push({
+      candidateId:
+        `episode:${state.activeEpisodeId}:${state.activeEpisodeVersion}:${ref}`,
+      candidateType: "ACTIVE_EPISODE",
+      content: source.source.text,
+      causalThroughOperationSequence:
+        state.processedPrefixOperationSequence,
+      sourceRevisionRefs: [ref],
+      claimRefs: [],
+      semanticScore: 0,
+      temporalScore: Math.max(0.4, recency),
+      confidence:
+        state.activeEpisodeContinuityConfidence ?? 0.5,
+      importance: 0.4,
+      explicitReference: false,
+      activeEpisode: true,
+      privacyScope: "TRANSIENT",
+      erasureEpoch: state.erasureEpoch,
+      validUntil: source.expiresAt,
+      correctionTrigger: null,
+    });
+  }
+
+  return candidates;
 }
