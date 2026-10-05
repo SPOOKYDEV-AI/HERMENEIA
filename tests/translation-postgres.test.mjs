@@ -286,6 +286,18 @@ test("fanout plan resolves locale override and membership version without source
   assert.match(connection.queries[1].text, /mr\.source_hash/);
   assert.match(connection.queries[1].text, /mr\.source_hash IS NOT NULL/);
   assert.match(connection.queries[2].text, /target_locale_override/);
+  assert.match(
+    connection.queries[2].text,
+    /LEFT JOIN user_language_preferences ulp/,
+  );
+  assert.match(
+    connection.queries[2].text,
+    /ulp\.target_locale_override/,
+  );
+  assert.match(
+    connection.queries[2].text,
+    /ulp\.target_language_tag/,
+  );
   assert.match(connection.queries[2].text, /membership_version/);
   assert.doesNotMatch(
     connection.queries[2].text,
@@ -314,6 +326,14 @@ test("publish lock verifies source, target profile, erasure, conversation policy
   assert.match(sql.text, /mm\.current_revision = te\.source_revision/);
   assert.match(sql.text, /cm\.membership_version = te\.target_profile_version/);
   assert.match(sql.text, /target_locale_override/);
+  assert.match(
+    sql.text,
+    /LEFT JOIN user_language_preferences ulp/,
+  );
+  assert.match(
+    sql.text,
+    /ulp\.target_language_tag/,
+  );
   assert.match(sql.text, /JOIN conversations c/);
   assert.match(sql.text, /c\.status = 'ACTIVE'/);
   assert.match(sql.text, /te\.context_snapshot_id IS NULL/);
@@ -519,6 +539,19 @@ test("translation recovery lock is actor-scoped and returns blocked target state
   assert.equal(recovery.targetMembershipStatus, "BLOCKED");
   assert.equal(recovery.currentTargetProfileVersion, 3);
   assert.equal(recovery.currentTargetLanguageTag, "es-CO");
+  const targetSql = connection.queries[2];
+  assert.match(
+    targetSql.text,
+    /LEFT JOIN user_language_preferences ulp/,
+  );
+  assert.match(
+    targetSql.text,
+    /ulp\.target_locale_override/,
+  );
+  assert.match(
+    targetSql.text,
+    /ulp\.target_language_tag/,
+  );
   assert.equal(
     recovery.expectedSourceHash,
     "hmac-sha256:k1:" + "a".repeat(64),
