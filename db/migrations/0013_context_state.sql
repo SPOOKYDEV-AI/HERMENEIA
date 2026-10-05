@@ -5,7 +5,7 @@ RETURNS boolean
 LANGUAGE plpgsql
 IMMUTABLE
 PARALLEL SAFE
-AS $
+AS $function$
 DECLARE
   entry record;
   item jsonb;
@@ -49,7 +49,7 @@ BEGIN
 
   RETURN false;
 END
-$;
+$function$;
 
 CREATE TABLE conversation_context_states (
   tenant_id uuid NOT NULL,
