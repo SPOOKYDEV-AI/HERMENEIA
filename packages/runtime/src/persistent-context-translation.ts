@@ -153,10 +153,26 @@ export function createPostgresTranslationContextRuntime(
                       },
                     );
 
+                  const recipientStylePreferences =
+                    await deps.claimRepository!.loadRecipientStylePreferences(
+                      tx,
+                      {
+                        tenantId: input.tenantId,
+                        conversationId:
+                          input.conversationId,
+                        recipientUserId:
+                          input.recipientUserId,
+                        asOf,
+                      },
+                    );
+
                   const materializedClaimIds = [
                     ...new Set([
                       ...referencedClaimIds,
                       ...tenantPolicyClaims.map(
+                        (claim) => claim.claimId,
+                      ),
+                      ...recipientStylePreferences.map(
                         (claim) => claim.claimId,
                       ),
                     ]),
@@ -166,6 +182,7 @@ export function createPostgresTranslationContextRuntime(
                     claims: [
                       ...referencedClaims,
                       ...tenantPolicyClaims,
+                      ...recipientStylePreferences,
                     ],
                     materializedClaimIds,
                   };
@@ -182,6 +199,8 @@ export function createPostgresTranslationContextRuntime(
               conversationId: input.conversationId,
               currentSourceAuthorUserId:
                 frame.currentSourceAuthorUserId,
+              recipientUserId:
+                input.recipientUserId,
               currentSourceLanguageTag:
                 frame.currentSourceLanguageTag,
               targetLanguageTag: input.targetLanguageTag,
