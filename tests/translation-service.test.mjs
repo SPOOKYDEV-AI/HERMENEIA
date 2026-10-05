@@ -38,6 +38,7 @@ class FakeTranslationStore {
       current.recipientUserId === key.recipientUserId &&
       current.targetLanguageTag === key.targetLanguageTag &&
       current.targetProfileVersion === key.targetProfileVersion &&
+      current.preferredRegister === key.preferredRegister &&
       current.contextSnapshotId === key.contextSnapshotId &&
       current.strategyVersion === key.strategyVersion;
 
@@ -137,6 +138,7 @@ function key(overrides = {}) {
     recipientUserId: "user-b",
     targetLanguageTag: "es-CO",
     targetProfileVersion: 1,
+    preferredRegister: null,
     contextSnapshotId: null,
     strategyVersion: "t0-v1",
     ...overrides,
@@ -329,6 +331,7 @@ function recoveryExecution(status = "SOURCE_REQUIRED", overrides = {}) {
     recipientUserId: "user-b",
     targetLanguageTag: "es-CO",
     targetProfileVersion: 3,
+    preferredRegister: null,
     contextSnapshotId: null,
     strategyVersion: "t0-v1",
     status,
