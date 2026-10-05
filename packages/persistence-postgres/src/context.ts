@@ -200,6 +200,7 @@ export interface PostgresContextPlanningFrame {
   currentOperationSequence: number;
   currentMessageAcceptedAt: string;
   currentSourceAuthorUserId: UUID;
+  currentSourceLanguageTag: string | null;
   erasureEpoch: number;
   recentMessages: Array<{
     messageId: UUID;
@@ -246,12 +247,14 @@ export class PostgresContextPlanningRepository {
       op_seq: number;
       accepted_at: string;
       author_user_id: UUID;
+      declared_source_language: string | null;
       erasure_epoch: number;
     }>(
       `SELECT mm.message_seq,
               mr.op_seq,
               mr.created_at::text AS accepted_at,
               mm.author_user_id,
+              mr.declared_source_language,
               c.erasure_epoch
          FROM message_metadata mm
          JOIN message_revisions mr
@@ -331,6 +334,8 @@ export class PostgresContextPlanningRepository {
       currentMessageAcceptedAt: currentRow.accepted_at,
       currentSourceAuthorUserId:
         currentRow.author_user_id,
+      currentSourceLanguageTag:
+        currentRow.declared_source_language,
       erasureEpoch: Number(currentRow.erasure_epoch),
       recentMessages: recent.rows.map((row) => ({
         messageId: row.message_id,

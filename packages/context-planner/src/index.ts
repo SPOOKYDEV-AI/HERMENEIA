@@ -26,6 +26,7 @@ export interface ContextPlanningFrame {
   currentOperationSequence: number;
   currentMessageAcceptedAt: string;
   currentSourceAuthorUserId: UUID;
+  currentSourceLanguageTag: string | null;
   erasureEpoch: number;
   recentMessages: RecentContextMessageRef[];
 }
