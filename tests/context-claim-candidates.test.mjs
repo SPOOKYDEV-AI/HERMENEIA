@@ -186,3 +186,28 @@ test("claim materialisation fails closed on authority, sensitivity, scope, expir
 
   assert.deepEqual(candidates, []);
 });
+
+
+test("claim created at current message acceptance is excluded to prevent retroactive context leakage", () => {
+  const candidates =
+    materializeReferencedClaimCandidates({
+      claims: [
+        correction({
+          validFrom: NOW,
+        }),
+      ],
+      referencedClaimIds: [
+        "claim-correction",
+      ],
+      conversationId: "conversation-1",
+      targetLanguageTag: "es-CO",
+      state: state({
+        correctionClaimRefs: [
+          "claim-correction",
+        ],
+      }),
+      now: NOW,
+    });
+
+  assert.deepEqual(candidates, []);
+});
