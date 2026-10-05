@@ -337,23 +337,18 @@ export class PostgresTranslationRepository {
           AND cm.user_id = te.recipient_user_id
           AND cm.status = 'ACTIVE'
           AND cm.membership_version = te.target_profile_version
-          LEFT JOIN user_language_preferences ulp
-            ON ulp.tenant_id = cm.tenant_id
-           AND ulp.user_id = cm.user_id
-         WHERE te.tenant_id = JOIN conversation_members cm
-           ON cm.tenant_id = te.tenant_id
-          AND cm.conversation_id = te.conversation_id
-          AND cm.user_id = te.recipient_user_id
-          AND cm.status = 'ACTIVE'
-          AND cm.membership_version = te.target_profile_version
-           AND te.translation_id = $2
-           AND te.status = 'PENDING'
-           AND COALESCE(
-                 NULLIF(trim(cm.target_locale_override), ''),
-                 NULLIF(trim(cm.target_language_tag), ''),
-                 NULLIF(trim(ulp.target_locale_override), ''),
-                 NULLIF(trim(ulp.target_language_tag), '')
-               ) = te.target_language_tag
+         LEFT JOIN user_language_preferences ulp
+           ON ulp.tenant_id = cm.tenant_id
+          AND ulp.user_id = cm.user_id
+        WHERE te.tenant_id = $1
+          AND te.translation_id = $2
+          AND te.status = 'PENDING'
+          AND COALESCE(
+                NULLIF(trim(cm.target_locale_override), ''),
+                NULLIF(trim(cm.target_language_tag), ''),
+                NULLIF(trim(ulp.target_locale_override), ''),
+                NULLIF(trim(ulp.target_language_tag), '')
+              ) = te.target_language_tag
           AND (
             te.context_snapshot_id IS NULL
             OR EXISTS (
