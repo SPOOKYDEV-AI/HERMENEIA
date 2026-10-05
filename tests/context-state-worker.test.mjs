@@ -210,6 +210,8 @@ function fixture(state, jobs, options = {}) {
     clock,
     episodeDeriver:
       options.episodeDeriver,
+    checkpointWriter:
+      options.checkpointWriter,
     retryBaseSeconds: 1,
     maxAttempts: 4,
   });
@@ -520,4 +522,106 @@ test("semantic episode deriver failure preserves temporal V1 reduction", async (
     lastActivityAt:
       "2026-10-05T09:00:01.000Z",
   });
+});
+
+
+test("successful reduction captures checkpoint only after durable reduce completes", async () => {
+  const captures = [];
+  const { worker, store } = fixture(
+    stateWithOperations([1]),
+    [job(1)],
+    {
+      checkpointWriter: {
+        async capture(state, now) {
+          captures.push({
+            state: clone(state),
+            now,
+            jobStatus:
+              store.jobs[0].status,
+          });
+        },
+      },
+    },
+  );
+
+  assert.equal(
+    await worker.runOnce(),
+    "REDUCED",
+  );
+  assert.equal(captures.length, 1);
+  assert.equal(
+    captures[0].state.processedPrefixOpSeq,
+    1,
+  );
+  assert.deepEqual(
+    captures[0].state.pendingOperations,
+    [],
+  );
+  assert.equal(
+    captures[0].jobStatus,
+    "DONE",
+  );
+});
+
+test("checkpoint capture failure never rolls back a successful context reduce", async () => {
+  const { worker, store } = fixture(
+    stateWithOperations([1]),
+    [job(1)],
+    {
+      checkpointWriter: {
+        async capture() {
+          throw new Error(
+            "checkpoint store unavailable",
+          );
+        },
+      },
+    },
+  );
+
+  assert.equal(
+    await worker.runOnce(),
+    "REDUCED",
+  );
+  assert.equal(
+    store.state.processedPrefixOpSeq,
+    1,
+  );
+  assert.equal(
+    store.jobs[0].status,
+    "DONE",
+  );
+});
+
+test("already-reduced retry re-attempts best-effort checkpoint capture", async () => {
+  const captures = [];
+  const state = stateWithOperations([1]);
+  const first = fixture(
+    state,
+    [job(1)],
+    {
+      checkpointWriter: {
+        async capture(value) {
+          captures.push(
+            value.processedPrefixOpSeq,
+          );
+        },
+      },
+    },
+  );
+
+  assert.equal(
+    await first.worker.runOnce(),
+    "REDUCED",
+  );
+  first.store.jobs.push(
+    job(1, {
+      jobId: "job-checkpoint-retry",
+    }),
+  );
+
+  assert.equal(
+    await first.worker.runOnce(),
+    "ALREADY_REDUCED",
+  );
+  assert.deepEqual(captures, [1, 1]);
 });
