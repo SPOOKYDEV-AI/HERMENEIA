@@ -121,12 +121,11 @@ export class TranslationContextPlanner
       }),
     ]);
 
-    const state =
-      loadedState &&
-      loadedState.conversationId === input.conversationId &&
-      loadedState.erasureEpoch === frame.erasureEpoch
-        ? loadedState
-        : null;
+    const state = stateForCurrentOperation(
+      loadedState,
+      input.conversationId,
+      frame,
+    );
 
     const resolved = await Promise.all(
       frame.recentMessages.map(async (ref) => {
@@ -232,6 +231,45 @@ export class TranslationContextPlanner
       return undefined;
     }
   }
+}
+
+function stateForCurrentOperation(
+  loadedState: ConversationContextState | null,
+  conversationId: UUID,
+  frame: ContextPlanningFrame,
+): ConversationContextState | null {
+  if (
+    !loadedState ||
+    loadedState.conversationId !== conversationId ||
+    loadedState.erasureEpoch !== frame.erasureEpoch
+  ) {
+    return null;
+  }
+
+  // Once durable derived state has processed the current operation (or a
+  // later one), we cannot project it backwards safely: episode/style/etc.
+  // may already contain evidence from the message being translated.
+  if (
+    loadedState.processedPrefixOperationSequence >=
+    frame.currentOperationSequence
+  ) {
+    return null;
+  }
+
+  // Pending operations at/after the current operation are not historical
+  // freshness gaps for this translation. In particular, the current message
+  // is normally registered before its translation fanout and must not make
+  // context preparation reject an otherwise causal state.
+  return {
+    ...structuredClone(loadedState),
+    processingGapOperationSequences:
+      loadedState.processingGapOperationSequences.filter(
+        (sequence) =>
+          sequence >
+            loadedState.processedPrefixOperationSequence &&
+          sequence < frame.currentOperationSequence,
+      ),
+  };
 }
 
 function toImmediateCandidate(
