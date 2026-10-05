@@ -66,6 +66,11 @@ export class PostgresContextClaimRepository {
         "claimIds exceeds the bounded referenced-claim limit",
       );
     }
+    if (claimIds.some((claimId) => !isUuid(claimId))) {
+      throw new TypeError(
+        "claimIds must contain canonical UUID values",
+      );
+    }
 
     const result = await tx.query<ContextClaimRow>(
       `SELECT DISTINCT ON (claim_id)
@@ -184,4 +189,11 @@ function mapClaimRow(
     validUntil: row.valid_until,
     status: row.status,
   };
+}
+
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
 }
