@@ -129,7 +129,8 @@ test("PostgreSQL context snapshot insert persists metadata only", async () => {
     serialized.includes("candidate-a"),
     true,
   );
-  assert.equal(query.params.length, 21);
+  assert.equal(query.params.length, 22);
+  assert.equal(query.params[18], 4);
   assert.deepEqual(query.params.slice(0, 10), [
     "tenant-1",
     "snapshot-1",
