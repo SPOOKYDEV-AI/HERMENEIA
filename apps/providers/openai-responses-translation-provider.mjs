@@ -352,6 +352,22 @@ export function createOpenAIResponsesTranslationProvider({
         );
       }
 
+      const preferredRegister =
+        input.preferredRegister === undefined ||
+        input.preferredRegister === null
+          ? null
+          : input.preferredRegister;
+      if (
+        preferredRegister !== null &&
+        !["NEUTRAL", "FORMAL", "INFORMAL"].includes(
+          preferredRegister,
+        )
+      ) {
+        throw new TypeError(
+          "preferredRegister must be NEUTRAL, FORMAL, INFORMAL or null",
+        );
+      }
+
       const contextItems = normalizeContextItems(
         input.contextItems,
       );
@@ -386,6 +402,7 @@ export function createOpenAIResponsesTranslationProvider({
                 source_language_hint:
                   input.source.language_hint ?? null,
                 target_language_tag: input.targetLanguageTag,
+                preferred_register: preferredRegister,
                 context_items: contextItems,
               }),
               text: {
