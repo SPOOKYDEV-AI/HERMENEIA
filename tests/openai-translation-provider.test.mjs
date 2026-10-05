@@ -27,6 +27,7 @@ function input() {
     },
     targetLanguageTag: "es-CO",
     targetProfileVersion: 1,
+    preferredRegister: null,
     strategyVersion: "t0-v1",
     contextSnapshotId: null,
     contextItems: [],
@@ -379,4 +380,43 @@ test("OpenAI refusal is terminal and never exposes provider text", async () => {
     outputTokens: 2,
     latencyMs: 0,
   });
+});
+
+
+test("OpenAI provider forwards only the bounded explicit register enum as data", async () => {
+  const calls = [];
+  const provider = createOpenAIResponsesTranslationProvider({
+    env: env(),
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return new Response(
+        JSON.stringify(completedBody()),
+        { status: 200 },
+      );
+    },
+  });
+
+  const request = input();
+  request.preferredRegister = "FORMAL";
+  const result = await provider.translate(request);
+
+  assert.equal(result.ok, true);
+  const body = JSON.parse(calls[0].init.body);
+  const providerInput = JSON.parse(body.input);
+  assert.equal(
+    providerInput.preferred_register,
+    "FORMAL",
+  );
+  assert.equal(
+    body.instructions.includes("FORMAL"),
+    false,
+  );
+
+  const invalid = input();
+  invalid.preferredRegister = "SYSTEM_PROMPT";
+  await assert.rejects(
+    () => provider.translate(invalid),
+    /preferredRegister must be/,
+  );
+  assert.equal(calls.length, 1);
 });
