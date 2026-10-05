@@ -80,6 +80,7 @@ function snapshot() {
     processingGapOperationSequences: [],
     erasureEpoch: 2,
     policyVersion: 4,
+    tenantPolicyVersion: 7,
     tokenEstimate: 18,
     recoveryMode: "FAST",
     createdAt: "2026-10-04T20:00:00.000Z",
@@ -129,8 +130,9 @@ test("PostgreSQL context snapshot insert persists metadata only", async () => {
     serialized.includes("candidate-a"),
     true,
   );
-  assert.equal(query.params.length, 22);
+  assert.equal(query.params.length, 23);
   assert.equal(query.params[18], 4);
+  assert.equal(query.params[19], 7);
   assert.deepEqual(query.params.slice(0, 10), [
     "tenant-1",
     "snapshot-1",
@@ -176,6 +178,7 @@ test("PostgreSQL context snapshot lookup reconstructs typed metadata", async () 
         processing_gap_refs: [5, 6],
         erasure_epoch: 2,
         policy_version: 4,
+        tenant_policy_version: 7,
         token_estimate: 18,
         recovery_mode: "PARTIAL",
         created_at: "2026-10-04 20:00:00+00",
@@ -223,6 +226,7 @@ test("PostgreSQL context snapshot lookup reconstructs typed metadata", async () 
     processingGapOperationSequences: [5, 6],
     erasureEpoch: 2,
     policyVersion: 4,
+    tenantPolicyVersion: 7,
     tokenEstimate: 18,
     recoveryMode: "PARTIAL",
     createdAt: "2026-10-04 20:00:00+00",
@@ -257,6 +261,8 @@ test("PostgreSQL context snapshot lookup rejects malformed JSON metadata", async
         processed_prefix_sequence: 0,
         processing_gap_refs: [],
         erasure_epoch: 0,
+        policy_version: 1,
+        tenant_policy_version: 1,
         token_estimate: 0,
         recovery_mode: "DEGRADED",
         created_at: "2026-10-04 20:00:00+00",
@@ -301,6 +307,7 @@ test("PostgreSQL context planner loads current sequence/erasure epoch and recent
         declared_source_language: "fr-FR",
         erasure_epoch: 3,
         policy_version: 6,
+        tenant_policy_version: 8,
       }],
       rowCount: 1,
     },
@@ -354,6 +361,7 @@ test("PostgreSQL context planner loads current sequence/erasure epoch and recent
     currentSourceLanguageTag: "fr-FR",
     erasureEpoch: 3,
     policyVersion: 6,
+    tenantPolicyVersion: 8,
     recentMessages: [
       {
         messageId: "message-7",
@@ -381,6 +389,8 @@ test("PostgreSQL context planner loads current sequence/erasure epoch and recent
   );
   assert.match(currentQuery.text, /c\.erasure_epoch/);
   assert.match(currentQuery.text, /c\.policy_version/);
+  assert.match(currentQuery.text, /t\.policy_version AS tenant_policy_version/);
+  assert.match(currentQuery.text, /JOIN tenants t/);
   assert.match(currentQuery.text, /mr\.op_seq/);
   assert.match(currentQuery.text, /JOIN message_revisions mr/);
   assert.match(currentQuery.text, /mm\.current_revision = \$4/);
