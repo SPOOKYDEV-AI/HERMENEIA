@@ -147,6 +147,8 @@ export function createPostgresTranslationContextRuntime(
               conversationId: input.conversationId,
               currentSourceAuthorUserId:
                 frame.currentSourceAuthorUserId,
+              currentSourceLanguageTag:
+                frame.currentSourceLanguageTag,
               targetLanguageTag: input.targetLanguageTag,
               state,
               now: asOf,
