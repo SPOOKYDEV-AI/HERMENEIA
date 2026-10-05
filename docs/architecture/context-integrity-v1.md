@@ -50,6 +50,8 @@ Examples:
 
 Derived evidence never becomes primary evidence by repetition.
 
+The executable active-episode V1 follows the same rule. Episode continuity is a derived projection, never primary evidence and never durable transcript storage. The server persists only bounded episode metadata plus source revision references; lexical/topic evidence is calculated from still-live transient source payloads and discarded with them. If those payloads are unavailable, HERMENEIA omits episode enrichment rather than reconstructing or inventing historical text.
+
 ## 3. ContextClaim
 
 A conceptual claim object:
@@ -420,6 +422,8 @@ A dependency index should support:
       -> snapshots
 
 When a source changes, dependent objects are marked stale before recomputation.
+
+Current coarse invalidation already clears active episode projection when conversation authority/content epochs rebase. Episode source references are therefore bounded metadata only; they cannot bypass the authoritative erasure frontier, and the provider receives episode plaintext only when the referenced transient payload still exists.
 
 Correctness is more important than keeping a stale cache available.
 
