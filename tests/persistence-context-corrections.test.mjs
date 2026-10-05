@@ -324,3 +324,118 @@ test("PostgreSQL direct correction target resolves the source author", async () 
     /mm\.author_user_id/,
   );
 });
+
+
+test("PostgreSQL supersession invalidates only same-subject same-key active corrections", async () => {
+  const { repository, connection } =
+    repositoryWith([{
+      rows: [{
+        claim_id: "old-claim",
+        claim_version: 2,
+      }],
+      rowCount: 1,
+    }]);
+
+  const invalidated =
+    await repository.withTransaction((tx) =>
+      repository.invalidateSupersededCorrectionClaims(
+        tx,
+        {
+          tenantId: "tenant-1",
+          conversationId:
+            "conversation-1",
+          subjectUserId: "user-1",
+          propositionRef: {
+            schema_version: 1,
+            kind: "TERM_MEANING",
+            surface_form: "CR",
+            meaning: "compte rendu",
+            source_language_tag: "fr-FR",
+          },
+          invalidatedAt:
+            "2026-10-05T12:00:00.000Z",
+        },
+      ),
+    );
+
+  assert.deepEqual(invalidated, [{
+    claimId: "old-claim",
+    claimVersion: 2,
+  }]);
+
+  const query = connection.queries[1];
+  assert.match(
+    query.text,
+    /status = 'INVALIDATED'/,
+  );
+  assert.match(
+    query.text,
+    /subject_user_id IS NOT DISTINCT FROM \$3/,
+  );
+  assert.match(
+    query.text,
+    /proposition_ref ->> 'surface_form'/,
+  );
+  assert.match(
+    query.text,
+    /PREFERRED_RENDERING/,
+  );
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "conversation-1",
+    "user-1",
+    JSON.stringify({
+      schema_version: 1,
+      kind: "TERM_MEANING",
+      surface_form: "CR",
+      meaning: "compte rendu",
+      source_language_tag: "fr-FR",
+    }),
+    "2026-10-05T12:00:00.000Z",
+  ]);
+});
+
+test("PostgreSQL override provenance points from old claim to replacement claim", async () => {
+  const { repository, connection } =
+    repositoryWith([{
+      rows: [],
+      rowCount: 1,
+    }]);
+
+  await repository.withTransaction((tx) =>
+    repository.insertClaimOverrideProvenance(
+      tx,
+      {
+        tenantId: "tenant-1",
+        provenanceEdgeId:
+          "provenance-override-1",
+        overriddenClaimId:
+          "claim-old",
+        overriddenClaimVersion: 2,
+        replacementClaimId:
+          "claim-new",
+        replacementClaimVersion: 1,
+        strategyVersion:
+          "context-state-v1",
+        createdAt:
+          "2026-10-05T12:00:00.000Z",
+      },
+    ),
+  );
+
+  const query = connection.queries[1];
+  assert.match(
+    query.text,
+    /'OVERRIDDEN_BY'/,
+  );
+  assert.deepEqual(query.params, [
+    "tenant-1",
+    "provenance-override-1",
+    "claim-old",
+    2,
+    "claim-new",
+    1,
+    "context-state-v1",
+    "2026-10-05T12:00:00.000Z",
+  ]);
+});
