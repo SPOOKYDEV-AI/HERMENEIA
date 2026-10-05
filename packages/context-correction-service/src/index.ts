@@ -8,6 +8,8 @@ import type {
   CorrectionResult,
   CorrectionRevocationCommand,
   CorrectionRevocationResult,
+  CorrectionReviewCommand,
+  CorrectionReviewResult,
 } from "../../protocol/src/index.js";
 import {
   createDegradedContextStateFromFloor,
@@ -30,6 +32,7 @@ import {
 import {
   replayCorrectionCommand,
   replayCorrectionRevocationCommand,
+  replayCorrectionReviewCommand,
 } from "./replay.js";
 
 export type {
@@ -200,6 +203,226 @@ export class ContextCorrectionService<Tx> {
             actorUserId: actor.userId,
             actorDeviceId: actor.deviceId,
             commandType: "context.correction",
+            commandFingerprint,
+            result:
+              result as unknown as Record<string, unknown>,
+            now,
+          },
+        );
+
+        return result;
+      },
+    );
+  }
+
+  async reviewCorrection(
+    actor: ActorContext,
+    command: CorrectionReviewCommand,
+  ): Promise<CorrectionReviewResult> {
+    if (
+      command.protocol_version !== 1 ||
+      !isUuid(command.command_id) ||
+      !isUuid(command.conversation_id) ||
+      !isUuid(command.repair_event_id) ||
+      !["APPROVE", "REJECT"].includes(
+        command.decision,
+      )
+    ) {
+      throw new DomainError(
+        "INVALID_COMMAND",
+        "Invalid correction review command",
+      );
+    }
+
+    const now = this.deps.clock.now();
+    if (!Number.isFinite(Date.parse(now))) {
+      throw new TypeError(
+        "Correction review clock returned an invalid timestamp",
+      );
+    }
+
+    const commandFingerprint = JSON.stringify({
+      v: 1,
+      type: "context.correction.review",
+      conversation_id: command.conversation_id,
+      repair_event_id: command.repair_event_id,
+      decision: command.decision,
+    });
+
+    return this.deps.transactions.withTransaction(
+      async (tx) => {
+        const commandClaim =
+          await this.deps.commands.claimCommand(tx, {
+            actor,
+            commandId: command.command_id,
+            commandType:
+              "context.correction.review",
+            commandFingerprint,
+            now,
+          });
+
+        if (!commandClaim.claimed) {
+          return replayCorrectionReviewCommand(
+            commandClaim.existing,
+            actor,
+            commandFingerprint,
+          );
+        }
+
+        const authority =
+          await this.deps.corrections.loadAuthority(
+            tx,
+            {
+              actor,
+              conversationId:
+                command.conversation_id,
+            },
+          );
+        if (!authority) {
+          throw new DomainError(
+            "NOT_AUTHORIZED",
+            "Conversation is not available to actor",
+          );
+        }
+
+        const elevated =
+          authority.conversationRole ===
+            "MODERATOR" ||
+          authority.tenantRole === "ADMIN" ||
+          authority.tenantRole === "OWNER";
+        if (!elevated) {
+          throw new DomainError(
+            "NOT_AUTHORIZED",
+            "Pending correction review requires elevated conversation authority",
+          );
+        }
+
+        const repair =
+          await this.deps.corrections.loadReviewableRepairEvent(
+            tx,
+            {
+              tenantId: actor.tenantId,
+              conversationId:
+                command.conversation_id,
+              repairEventId:
+                command.repair_event_id,
+            },
+          );
+        if (!repair) {
+          throw new DomainError(
+            "NOT_AUTHORIZED",
+            "Repair event is not available for review",
+          );
+        }
+
+        let proposed:
+          | {
+              command: CorrectionCommand;
+              payload: Record<string, unknown>;
+            }
+          | undefined;
+
+        if (command.decision === "APPROVE") {
+          proposed = reviewableCorrectionProposal(
+            command.conversation_id,
+            repair,
+          );
+        }
+
+        const reviewEventId =
+          this.deps.ids.next("repair");
+
+        await this.deps.corrections.insertRepairEvent(
+          tx,
+          {
+            tenantId: actor.tenantId,
+            repairEventId: reviewEventId,
+            conversationId:
+              command.conversation_id,
+            actorUserId: actor.userId,
+            targetTranslationId: null,
+            targetMessageId:
+              repair.targetMessageId,
+            targetSourceRevision:
+              repair.targetSourceRevision,
+            kind: "EXPLICIT_CORRECTION",
+            status: "APPLIED",
+            structuredPayload: {
+              schema_version: 1,
+              action:
+                command.decision === "APPROVE"
+                  ? "APPROVE_PENDING_CORRECTION"
+                  : "REJECT_PENDING_REPAIR",
+              source_repair_event_id:
+                repair.repairEventId,
+              proposal_actor_user_id:
+                repair.actorUserId,
+            },
+            commandId: command.command_id,
+            createdAt: now,
+          },
+        );
+
+        const terminalStatus =
+          command.decision === "APPROVE"
+            ? "APPLIED"
+            : "REJECTED";
+
+        const transitioned =
+          await this.deps.corrections.updateRepairReviewStatus(
+            tx,
+            {
+              tenantId: actor.tenantId,
+              repairEventId:
+                repair.repairEventId,
+              status: terminalStatus,
+            },
+          );
+        if (!transitioned) {
+          throw new Error(
+            "Pending repair changed despite review row lock",
+          );
+        }
+
+        let claimId: UUID | null = null;
+        if (proposed) {
+          claimId =
+            this.deps.ids.next("claim");
+          await this.persistPromotedClaim(
+            tx,
+            actor,
+            proposed.command,
+            authority,
+            repair.targetMessageId,
+            null,
+            claimId,
+            reviewEventId,
+            proposed.payload,
+            "CONVERSATION",
+            now,
+          );
+        }
+
+        const result: CorrectionReviewResult = {
+          protocol_version: 1,
+          repair_event_id:
+            repair.repairEventId,
+          review_event_id: reviewEventId,
+          status: terminalStatus,
+          claim_id: claimId,
+          claim_version:
+            claimId ? 1 : null,
+        };
+
+        await this.deps.commands.markCommandSucceeded(
+          tx,
+          {
+            tenantId: actor.tenantId,
+            commandId: command.command_id,
+            actorUserId: actor.userId,
+            actorDeviceId: actor.deviceId,
+            commandType:
+              "context.correction.review",
             commandFingerprint,
             result:
               result as unknown as Record<string, unknown>,
@@ -765,4 +988,150 @@ export class ContextCorrectionService<Tx> {
       );
     }
   }
+}
+
+
+function reviewableCorrectionProposal(
+  conversationId: UUID,
+  repair: {
+    repairEventId: UUID;
+    actorUserId: UUID;
+    targetMessageId: UUID | null;
+    targetSourceRevision: number | null;
+    kind:
+      | "PROBLEM_REPORT"
+      | "MEANING_CORRECTION"
+      | "TONE_CORRECTION"
+      | "TERMINOLOGY_CORRECTION";
+    structuredPayload: Record<string, unknown>;
+    originalCommandId: UUID;
+    commandType: string;
+    commandFingerprint: string | null;
+  },
+): {
+  command: CorrectionCommand;
+  payload: Record<string, unknown>;
+} {
+  if (
+    repair.commandType !== "context.correction" ||
+    !repair.commandFingerprint
+  ) {
+    throw new DomainError(
+      "INVALID_COMMAND",
+      "Pending feedback cannot be approved as semantic correction memory",
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(
+      repair.commandFingerprint,
+    );
+  } catch {
+    throw new DomainError(
+      "INVALID_COMMAND",
+      "Pending correction fingerprint is malformed",
+    );
+  }
+
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed)
+  ) {
+    throw new DomainError(
+      "INVALID_COMMAND",
+      "Pending correction fingerprint is malformed",
+    );
+  }
+
+  const value =
+    parsed as Record<string, unknown>;
+  if (
+    value.v !== 1 ||
+    value.type !== "context.correction" ||
+    value.conversation_id !==
+      conversationId ||
+    value.requested_scope !==
+      "CONVERSATION" ||
+    !["MEANING", "TERMINOLOGY"].includes(
+      String(value.kind),
+    ) ||
+    !value.payload ||
+    typeof value.payload !== "object" ||
+    Array.isArray(value.payload)
+  ) {
+    throw new DomainError(
+      "INVALID_COMMAND",
+      "Pending correction is not approvable in V1",
+    );
+  }
+
+  const original: CorrectionCommand = {
+    protocol_version: 1,
+    command_id:
+      repair.originalCommandId,
+    conversation_id: conversationId,
+    kind:
+      value.kind as CorrectionCommand["kind"],
+    requested_scope: "CONVERSATION",
+    payload:
+      structuredClone(
+        value.payload as Record<string, unknown>,
+      ),
+    ...(repair.targetMessageId &&
+    repair.targetSourceRevision !== null
+      ? {
+          target_message_id:
+            repair.targetMessageId,
+          target_source_revision:
+            repair.targetSourceRevision,
+        }
+      : {}),
+  };
+
+  const normalised =
+    normaliseCorrection(original);
+  if (
+    !normalised.canBecomeClaim ||
+    canonicalJson(normalised.payload) !==
+      canonicalJson(repair.structuredPayload)
+  ) {
+    throw new DomainError(
+      "INVALID_COMMAND",
+      "Pending correction proposal does not match its durable repair event",
+    );
+  }
+
+  return {
+    command: original,
+    payload: normalised.payload,
+  };
+}
+
+function canonicalJson(
+  value: unknown,
+): string {
+  if (Array.isArray(value)) {
+    return `[${value
+      .map((item) => canonicalJson(item))
+      .join(",")}]`;
+  }
+  if (
+    value &&
+    typeof value === "object"
+  ) {
+    const record =
+      value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map(
+        (key) =>
+          `${JSON.stringify(key)}:${canonicalJson(
+            record[key],
+          )}`,
+      )
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
