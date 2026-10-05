@@ -149,6 +149,9 @@ test("PostgreSQL ConversationState load validates durable JSON and maps operatio
     erasureEpoch: 2,
     activeEpisodeId: "episode-1",
     activeEpisodeVersion: 2,
+    terminologyClaimRefs: ["claim:term-1"],
+    lexicalClaimRefs: [],
+    correctionClaimRefs: ["claim:correction-1"],
     updatedAt: "2026-10-05 09:00:00+00",
   });
 

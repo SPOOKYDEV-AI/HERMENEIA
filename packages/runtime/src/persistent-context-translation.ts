@@ -7,6 +7,12 @@ import type {
 import type {
   PostgresConversationContextStateRepository,
 } from "../../persistence-postgres/src/context-state.js";
+import type {
+  PostgresContextClaimRepository,
+} from "../../persistence-postgres/src/context-claims.js";
+import {
+  materializeReferencedClaimCandidates,
+} from "../../context-claim-candidates/src/index.js";
 import {
   ContextEngine,
 } from "../../context-engine/src/index.js";
@@ -20,6 +26,7 @@ import {
 import {
   TranslationContextPlanner,
   type ConversationContextStateSource,
+  type DerivedContextCandidateSource,
   type TranslationContextPlannerConfig,
 } from "../../context-planner/src/index.js";
 import type {
@@ -45,6 +52,8 @@ export interface PersistentContextTranslationDependencies {
   clock: PersistentContextTranslationClock;
   stateSource?: ConversationContextStateSource;
   stateRepository?: PostgresConversationContextStateRepository;
+  derivedCandidates?: DerivedContextCandidateSource;
+  claimRepository?: PostgresContextClaimRepository;
   plannerConfig?: Omit<
     Partial<TranslationContextPlannerConfig>,
     "budget"
@@ -93,6 +102,57 @@ export function createPostgresTranslationContextRuntime(
         }
       : undefined);
 
+  const derivedCandidates: DerivedContextCandidateSource | undefined =
+    deps.derivedCandidates ??
+    (deps.claimRepository
+      ? {
+          async load(input, state) {
+            const referencedClaimIds = [
+              ...(state.correctionClaimRefs ?? []),
+              ...(state.terminologyClaimRefs ?? []),
+              ...(state.lexicalClaimRefs ?? []),
+            ].filter(
+              (value, index, values) =>
+                values.indexOf(value) === index,
+            );
+
+            if (referencedClaimIds.length === 0) {
+              return [];
+            }
+
+            const now = deps.clock.now();
+            if (!Number.isFinite(Date.parse(now))) {
+              throw new TypeError(
+                "Context candidate clock returned an invalid timestamp",
+              );
+            }
+
+            const claims =
+              await deps.claimRepository!.withTransaction(
+                (tx) =>
+                  deps.claimRepository!.loadReferencedClaims(
+                    tx,
+                    {
+                      tenantId: input.tenantId,
+                      conversationId: input.conversationId,
+                      claimIds: referencedClaimIds,
+                      now,
+                    },
+                  ),
+              );
+
+            return materializeReferencedClaimCandidates({
+              claims,
+              referencedClaimIds,
+              conversationId: input.conversationId,
+              targetLanguageTag: input.targetLanguageTag,
+              state,
+              now,
+            });
+          },
+        }
+      : undefined);
+
   const planner = new TranslationContextPlanner({
     metadata: {
       load(input, recentMessageLimit) {
@@ -114,6 +174,7 @@ export function createPostgresTranslationContextRuntime(
     },
     transientSources: deps.transientSources,
     stateSource,
+    derivedCandidates,
     config: deps.plannerConfig,
   });
 

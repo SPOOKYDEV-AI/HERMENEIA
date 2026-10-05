@@ -38,6 +38,7 @@ for (const [name, value] of requiredEnv) {
 
 const NOW = "2026-10-05T08:00:00.000Z";
 const SOURCE_TEXT = "Bonjour monde 👋";
+const T2_SOURCE_TEXT = "On fait le CR demain.";
 const TRANSLATED_TEXT = "Hola mundo 👋";
 const TARGET_LANGUAGE = "es-CO";
 
@@ -50,6 +51,9 @@ const ids = {
   conversationId: randomUUID(),
   commandId: randomUUID(),
   clientMessageId: randomUUID(),
+  t2CommandId: randomUUID(),
+  t2ClientMessageId: randomUUID(),
+  correctionClaimId: randomUUID(),
   staleContextCommandId: randomUUID(),
   staleContextClientMessageId: randomUUID(),
 };
@@ -69,7 +73,6 @@ const translationProvider = {
       input.requestId,
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
-    assert.equal(input.source.text, SOURCE_TEXT);
     assert.equal(input.source.language_hint, "fr-FR");
     assert.equal(input.targetLanguageTag, TARGET_LANGUAGE);
     assert.equal(input.targetProfileVersion, 1);
@@ -81,7 +84,35 @@ const translationProvider = {
       input.contextSnapshotId,
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
-    assert.deepEqual(input.contextItems, []);
+
+    if (providerCalls === 1) {
+      assert.equal(input.source.text, SOURCE_TEXT);
+      assert.deepEqual(input.contextItems, []);
+    } else if (providerCalls === 2) {
+      assert.equal(input.source.text, T2_SOURCE_TEXT);
+      const correctionItem = input.contextItems.find(
+        (item) =>
+          item.candidateType === "CORRECTION_MEMORY",
+      );
+      assert.ok(correctionItem);
+      assert.equal(
+        correctionItem.selectionReason,
+        "CORRECTION_OR_POLICY",
+      );
+      assert.deepEqual(
+        JSON.parse(correctionItem.content),
+        {
+          kind: "trusted_term_meaning",
+          surface_form: "CR",
+          meaning: "change request",
+          source_language_tag: "fr-FR",
+        },
+      );
+    } else {
+      assert.fail(
+        `Unexpected provider call #${providerCalls}`,
+      );
+    }
 
     return {
       ok: true,
@@ -230,6 +261,10 @@ async function cleanup() {
       );
       await db.query(
         "DELETE FROM context_snapshots WHERE tenant_id = $1",
+        tenant,
+      );
+      await db.query(
+        "DELETE FROM context_claims WHERE tenant_id = $1",
         tenant,
       );
       await db.query(
@@ -606,6 +641,176 @@ try {
     assert.equal(Number(state.rows[0].last_acked_offset), 2);
   });
 
+  await withConnection(async (db) => {
+    await db.query(
+      `INSERT INTO context_claims(
+         tenant_id,
+         claim_id,
+         claim_version,
+         conversation_id,
+         claim_type,
+         proposition_ref,
+         modality,
+         authority_class,
+         retention_class,
+         sensitivity_class,
+         confidence,
+         scope_kind,
+         scope_conversation_id,
+         trigger_kind,
+         valid_from,
+         status
+       ) VALUES (
+         $1,$2,1,$3,'TERMINOLOGY',
+         $4::jsonb,'CORRECTION','CONFIRMED_CORRECTION',
+         'CORRECTIVE_DURABLE','NORMAL',1,
+         'CONVERSATION',$3,
+         'EXPLICIT_TEXTUAL_CORRECTION',$5,'ACTIVE'
+       )`,
+      [
+        ids.tenantId,
+        ids.correctionClaimId,
+        ids.conversationId,
+        JSON.stringify({
+          schema_version: 1,
+          kind: "TERM_MEANING",
+          surface_form: "CR",
+          meaning: "change request",
+          source_language_tag: "fr-FR",
+        }),
+        NOW,
+      ],
+    );
+
+    const state = await db.query(
+      `UPDATE conversation_context_states
+          SET correction_claim_refs = $3::jsonb,
+              state_version = state_version + 1,
+              updated_at = $4
+        WHERE tenant_id = $1
+          AND conversation_id = $2
+      RETURNING state_version,
+                processed_prefix_sequence,
+                correction_claim_refs`,
+      [
+        ids.tenantId,
+        ids.conversationId,
+        JSON.stringify([ids.correctionClaimId]),
+        NOW,
+      ],
+    );
+    assert.equal(state.rowCount, 1);
+    assert.equal(
+      Number(state.rows[0].processed_prefix_sequence),
+      1,
+    );
+    assert.deepEqual(
+      state.rows[0].correction_claim_refs,
+      [ids.correctionClaimId],
+    );
+  });
+
+  const t2Accepted = await runtime.sendService.sendMessage(
+    sender,
+    {
+      protocol_version: 1,
+      command_id: ids.t2CommandId,
+      client_message_id: ids.t2ClientMessageId,
+      conversation_id: ids.conversationId,
+      source: {
+        text: T2_SOURCE_TEXT,
+        language_hint: "fr-FR",
+      },
+      client_authored_at: NOW,
+    },
+  );
+
+  assert.equal(t2Accepted.status, "ACCEPTED");
+  assert.equal(
+    await runtime.translationWorker.runFanoutOnce(),
+    "FANOUT_DONE",
+  );
+
+  const t2Snapshot = await withConnection(async (db) => {
+    const snapshot = await db.query(
+      `SELECT strategy,
+              selected_candidate_ids,
+              selected_claim_refs,
+              processed_prefix_sequence
+         FROM context_snapshots
+        WHERE tenant_id = $1
+          AND message_id = $2
+          AND recipient_user_id = $3`,
+      [
+        ids.tenantId,
+        t2Accepted.message_id,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(snapshot.rowCount, 1);
+    assert.equal(
+      snapshot.rows[0].strategy,
+      "T2_ADAPTIVE_V1",
+    );
+    assert.ok(
+      snapshot.rows[0].selected_candidate_ids.includes(
+        `claim:${ids.correctionClaimId}:1`,
+      ),
+    );
+    assert.ok(
+      snapshot.rows[0].selected_claim_refs.includes(
+        `${ids.correctionClaimId}:1`,
+      ),
+    );
+    assert.equal(
+      Number(snapshot.rows[0].processed_prefix_sequence),
+      1,
+    );
+    return snapshot.rows[0];
+  });
+
+  assert.ok(t2Snapshot);
+
+  assert.equal(
+    await runtime.contextStateWorker.runOnce(),
+    "REDUCED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runExecuteOnce(),
+    "EXECUTION_DONE",
+  );
+  assert.equal(providerCalls, 2);
+
+  await withConnection(async (db) => {
+    const execution = await db.query(
+      `SELECT status
+         FROM translation_executions
+        WHERE tenant_id = $1
+          AND source_message_id = $2
+          AND recipient_user_id = $3`,
+      [
+        ids.tenantId,
+        t2Accepted.message_id,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(execution.rowCount, 1);
+    assert.equal(execution.rows[0].status, "READY");
+
+    const state = await db.query(
+      `SELECT processed_prefix_sequence
+         FROM conversation_context_states
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(state.rowCount, 1);
+    assert.equal(
+      Number(state.rows[0].processed_prefix_sequence),
+      2,
+    );
+  });
+
   const staleContextAccepted =
     await runtime.sendService.sendMessage(
       sender,
@@ -678,7 +883,7 @@ try {
     await runtime.translationWorker.runExecuteOnce(),
     "SUPERSEDED",
   );
-  assert.equal(providerCalls, 1);
+  assert.equal(providerCalls, 2);
 
   await withConnection(async (db) => {
     const execution = await db.query(
@@ -710,6 +915,7 @@ try {
   process.stdout.write(
     "POSTGRES_TRANSLATION_E2E=PASS " +
     "send=accepted fanout=done execute=done " +
+    "t2=confirmed-correction-context " +
     "hpke=original+translation sync=2 ack=purged " +
     "erasure_epoch=stale-context-superseded\n",
   );

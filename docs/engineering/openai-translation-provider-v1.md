@@ -33,13 +33,15 @@ Optional:
 
 Every request sets `store:false`.
 
-The adapter sends only the transient source text, optional source-language hint and target language tag required for the T0 translation call. It does not send tenant IDs, user IDs, conversation IDs, message IDs or context-snapshot IDs.
+The adapter sends the transient source text, optional source-language hint, target language tag and the **already-selected bounded context items** required by the current ContextSnapshot. It does not send tenant IDs, user IDs, conversation IDs, message IDs or context-snapshot IDs. Context items are capped at 32 entries, 4,096 characters per content field and 16,384 content characters in aggregate; candidate type and selection reason are allow-listed before network I/O.
 
 `store:false` disables Responses application-state storage, but it must not be presented as equivalent to Zero Data Retention. Production privacy/compliance review must still account for the provider account's data controls, abuse-monitoring policy, processing region and contractual terms.
 
 ## 4. Prompt-injection boundary
 
-The provider instruction explicitly treats source text as untrusted data rather than instructions.
+The provider instruction explicitly treats both source text and every context field as **untrusted data rather than instructions**. Context is serialized only inside the request's data payload; no candidate content is concatenated into the provider instruction. The adapter rejects unknown candidate types/reasons, malformed items and oversized context before any network call.
+
+This boundary is defense in depth, not a claim that a confirmed correction becomes privileged executable instruction. A confirmed correction can influence translation meaning only as typed contextual evidence.
 
 The response is constrained with a strict JSON Schema containing one required `translation` field. The adapter rejects refusal, incomplete or malformed response shapes instead of accepting arbitrary provider text.
 
@@ -74,6 +76,9 @@ The HTTP contract tests cover:
 
 - stateless `store:false` request shape;
 - strict Structured Output schema;
+- bounded T2 context serialization as untrusted data;
+- prompt-injection isolation between context payload and provider instructions;
+- rejection of unknown/oversized context before network I/O;
 - request-ID propagation;
 - token/latency accounting;
 - `429` retryable and terminal quota cases;
@@ -82,7 +87,7 @@ The HTTP contract tests cover:
 - refusal handling;
 - durable worker propagation of `Retry-After`.
 
-The PostgreSQL E2E additionally proves that a successful provider result travels through the real durable path to a decryptable HPKE TRANSLATION envelope, recipient sync and ACK-triggered ciphertext purge.
+The PostgreSQL E2E additionally proves that a successful provider result travels through the real durable path to a decryptable HPKE TRANSLATION envelope, recipient sync and ACK-triggered ciphertext purge. The claim-backed T2 slice also proves a confirmed correction is selected into a ContextSnapshot and reaches the provider interface as bounded contextual evidence.
 
 A real external API request is intentionally not executed on every push. Use the manual workflow:
 

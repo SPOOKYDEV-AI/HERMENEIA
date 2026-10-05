@@ -8,6 +8,7 @@ on:
       - feat/context-engine-runtime-v1
       - feat/conversation-state-v1
       - feat/conversation-state-runtime-v1
+      - feat/context-derived-claims-v1
   workflow_dispatch:
 
 permissions:

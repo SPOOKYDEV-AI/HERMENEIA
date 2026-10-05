@@ -1,6 +1,6 @@
 # HERMENEIA Context Engine V1
 
-**Status:** Executable T0/T1 runtime plus persistent causal ConversationState runtime; semantic T2 enrichment/recovery pipeline incomplete  
+**Status:** Executable T0/T1 plus authoritative claim-backed T2 slice; episode/recovery enrichment pipeline incomplete  
 **Version:** 1  
 **Primary goals:** translation quality, low latency, temporal correctness, reproducibility
 
@@ -30,7 +30,11 @@ The current V1 runtime implements and tests:
 
 The persistent runtime does **not** yet make T2 production-complete. Migration 0013 provides the bounded durable ConversationState/claim/provenance/checkpoint schema; PostgreSQL persistence, messaging-operation registration, a fenced `context.reduce` worker and the ConversationState-to-planner boundary are now executable. Context planning projects state strictly before the current operation, strips current/future pending operations from historical gap checks, and rejects state that has already processed the message being translated. A compatible state alone is not called T2: T2 requires material derived candidates, and enrichment failure degrades to T1/T0.
 
-Semantic episode/memory/correction derivation, recovery-checkpoint materialisation, dependency-aware invalidation and a production cross-process worker transport remain future work. The current raw-source store is process-local and transient, so `TRANSLATION_WORKER_MODE=external` fails fast rather than pretending a separate process can access plaintext that it does not own.
+The first material T2 source is authoritative structured claim memory. The planner may materialise only claims already referenced by ConversationState and revalidated at read time. Eligible classes are confirmed corrections, approved glossary entries and tenant policy references. Restricted/sensitive, inactive, expired, out-of-scope, malformed or unauthorised claims are dropped. Supported V1 propositions are bounded structured `TERM_MEANING` and `PREFERRED_RENDERING` records; arbitrary free-form prompt payloads are not accepted as provider context. Selected claim provenance is recorded as `claim_id:claim_version` in ContextSnapshot metadata.
+
+A PostgreSQL E2E now proves a confirmed correction can move through `context_claims -> ConversationState reference -> T2 ContextSnapshot -> provider context` while preserving the causal prefix fence. This is deliberately a **claim consumption** slice. Creation of correction claims from the repair/API workflow and automatic episode/semantic inference remain separate responsibilities.
+
+Semantic episode derivation, automatic correction ingestion/promotion, recovery-checkpoint materialisation, dependency-aware invalidation and a production cross-process worker transport remain future work. The current raw-source store is process-local and transient, so `TRANSLATION_WORKER_MODE=external` fails fast rather than pretending a separate process can access plaintext that it does not own.
 
 ## 2. Design principle: understand progressively
 

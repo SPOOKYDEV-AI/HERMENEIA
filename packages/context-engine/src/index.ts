@@ -36,6 +36,9 @@ export interface ConversationContextState {
   erasureEpoch: number;
   activeEpisodeId: UUID | null;
   activeEpisodeVersion: number | null;
+  terminologyClaimRefs?: UUID[];
+  lexicalClaimRefs?: UUID[];
+  correctionClaimRefs?: UUID[];
   updatedAt: string;
 }
 
