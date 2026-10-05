@@ -111,6 +111,20 @@ export interface ContextCorrectionStore<Tx> {
     },
   ): Promise<void>;
 
+  invalidateSupersededCorrectionClaims(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+      subjectUserId: UUID | null;
+      propositionRef: Record<string, unknown>;
+      invalidatedAt: string;
+    },
+  ): Promise<Array<{
+    claimId: UUID;
+    claimVersion: number;
+  }>>;
+
   insertConfirmedClaim(
     tx: Tx,
     input: {
@@ -123,6 +137,20 @@ export interface ContextCorrectionStore<Tx> {
       propositionRef: Record<string, unknown>;
       scopeKind: "CONVERSATION" | "TENANT";
       scopeConversationId: UUID | null;
+      createdAt: string;
+    },
+  ): Promise<void>;
+
+  insertClaimOverrideProvenance(
+    tx: Tx,
+    input: {
+      tenantId: UUID;
+      provenanceEdgeId: UUID;
+      overriddenClaimId: UUID;
+      overriddenClaimVersion: number;
+      replacementClaimId: UUID;
+      replacementClaimVersion: number;
+      strategyVersion: string;
       createdAt: string;
     },
   ): Promise<void>;

@@ -100,6 +100,37 @@ explicit correction
 
 The OpenAI adapter treats the resulting context as untrusted translation data, never executable provider instructions.
 
+## Supersession
+
+A new promoted correction does not leave an older contradictory correction active.
+
+Before the replacement claim is inserted, PostgreSQL invalidates ACTIVE `CONFIRMED_CORRECTION / CORRECTIVE_DURABLE` claims that have the same:
+
+- tenant and conversation;
+- conversation scope;
+- speaker subject (including NULL for generic authorised corrections);
+- semantic key.
+
+V1 semantic keys are:
+
+```text
+TERM_MEANING:
+  surface_form
+  source_language_tag
+  target_language_tag
+
+PREFERRED_RENDERING:
+  source_form
+  source_language_tag
+  target_language_tag
+```
+
+The corrected meaning/rendering value itself is intentionally not part of the identity key: changing that value is exactly what causes supersession.
+
+The old claim becomes `INVALIDATED`, receives a bounded `valid_until`, and gets an `OVERRIDDEN_BY` provenance edge whose source is the new claim. ConversationState removes every superseded claim reference and appends the replacement in the same correction transaction.
+
+This preserves history and provenance while ensuring current T2 planning sees one active correction per subject/key rather than contradictory active memories.
+
 ## Qualification
 
 The persistent qualification suite exercises:

@@ -239,6 +239,102 @@ export class PostgresContextCorrectionRepository {
     }
   }
 
+  async invalidateSupersededCorrectionClaims(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+      subjectUserId: UUID | null;
+      propositionRef: Record<string, unknown>;
+      invalidatedAt: string;
+    },
+  ): Promise<Array<{
+    claimId: UUID;
+    claimVersion: number;
+  }>> {
+    const result = await tx.query<{
+      claim_id: UUID;
+      claim_version: number;
+    }>(
+      `UPDATE context_claims
+          SET status = 'INVALIDATED',
+              valid_until = CASE
+                WHEN valid_from IS NULL OR valid_from < $5
+                  THEN $5
+                ELSE valid_from + interval '1 microsecond'
+              END
+        WHERE tenant_id = $1
+          AND conversation_id = $2
+          AND scope_kind = 'CONVERSATION'
+          AND scope_conversation_id = $2
+          AND subject_user_id IS NOT DISTINCT FROM $3
+          AND status = 'ACTIVE'
+          AND authority_class = 'CONFIRMED_CORRECTION'
+          AND retention_class = 'CORRECTIVE_DURABLE'
+          AND modality = 'CORRECTION'
+          AND (
+            (
+              ($4::jsonb ->> 'kind') = 'TERM_MEANING'
+              AND proposition_ref ->> 'kind' = 'TERM_MEANING'
+              AND proposition_ref ->> 'surface_form' =
+                  ($4::jsonb ->> 'surface_form')
+              AND COALESCE(
+                    proposition_ref ->> 'source_language_tag',
+                    ''
+                  ) =
+                  COALESCE(
+                    $4::jsonb ->> 'source_language_tag',
+                    ''
+                  )
+              AND COALESCE(
+                    proposition_ref ->> 'target_language_tag',
+                    ''
+                  ) =
+                  COALESCE(
+                    $4::jsonb ->> 'target_language_tag',
+                    ''
+                  )
+            )
+            OR
+            (
+              ($4::jsonb ->> 'kind') = 'PREFERRED_RENDERING'
+              AND proposition_ref ->> 'kind' = 'PREFERRED_RENDERING'
+              AND proposition_ref ->> 'source_form' =
+                  ($4::jsonb ->> 'source_form')
+              AND COALESCE(
+                    proposition_ref ->> 'source_language_tag',
+                    ''
+                  ) =
+                  COALESCE(
+                    $4::jsonb ->> 'source_language_tag',
+                    ''
+                  )
+              AND COALESCE(
+                    proposition_ref ->> 'target_language_tag',
+                    ''
+                  ) =
+                  COALESCE(
+                    $4::jsonb ->> 'target_language_tag',
+                    ''
+                  )
+            )
+          )
+      RETURNING claim_id, claim_version`,
+      [
+        input.tenantId,
+        input.conversationId,
+        input.subjectUserId,
+        JSON.stringify(input.propositionRef),
+        input.invalidatedAt,
+      ],
+    );
+
+    return result.rows.map((row) => ({
+      claimId: row.claim_id,
+      claimVersion: Number(row.claim_version),
+    }));
+  }
+
   async insertConfirmedClaim(
     tx: SqlExecutor,
     input: {
@@ -298,6 +394,52 @@ export class PostgresContextCorrectionRepository {
     );
     if (result.rowCount !== 1) {
       throw new Error("Confirmed correction claim was not inserted");
+    }
+  }
+
+  async insertClaimOverrideProvenance(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      provenanceEdgeId: UUID;
+      overriddenClaimId: UUID;
+      overriddenClaimVersion: number;
+      replacementClaimId: UUID;
+      replacementClaimVersion: number;
+      strategyVersion: string;
+      createdAt: string;
+    },
+  ): Promise<void> {
+    const result = await tx.query(
+      `INSERT INTO provenance_edges(
+         tenant_id,
+         provenance_edge_id,
+         derived_claim_id,
+         derived_claim_version,
+         relation,
+         source_claim_id,
+         source_claim_version,
+         strategy_version,
+         created_at
+       ) VALUES (
+         $1,$2,$3,$4,'OVERRIDDEN_BY',$5,$6,$7,$8
+       )`,
+      [
+        input.tenantId,
+        input.provenanceEdgeId,
+        input.overriddenClaimId,
+        input.overriddenClaimVersion,
+        input.replacementClaimId,
+        input.replacementClaimVersion,
+        input.strategyVersion,
+        input.createdAt,
+      ],
+    );
+
+    if (result.rowCount !== 1) {
+      throw new Error(
+        "Correction override provenance edge was not inserted",
+      );
     }
   }
 

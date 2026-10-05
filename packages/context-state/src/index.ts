@@ -193,6 +193,55 @@ export function cloneValidatedContextState(
   return structuredClone(state);
 }
 
+export function replaceConfirmedCorrectionClaim(
+  state: ConversationContextState,
+  input: {
+    claimId: UUID;
+    removeClaimIds: UUID[];
+    now: string;
+  },
+): ConversationContextState {
+  validateState(state);
+  requireOpaqueIdentifier(input.claimId, "claimId");
+  requireTimestamp(input.now, "now");
+
+  const removals = new Set(
+    validateRefSet(
+      input.removeClaimIds,
+      "removeClaimIds",
+      256,
+    ),
+  );
+
+  const retained = state.correctionClaimRefs.filter(
+    (ref) =>
+      ref !== input.claimId &&
+      !removals.has(ref),
+  );
+  const nextRefs = [
+    ...retained.slice(-127),
+    input.claimId,
+  ];
+
+  if (
+    nextRefs.length ===
+      state.correctionClaimRefs.length &&
+    nextRefs.every(
+      (ref, index) =>
+        ref === state.correctionClaimRefs[index],
+    )
+  ) {
+    return structuredClone(state);
+  }
+
+  const next = structuredClone(state);
+  next.correctionClaimRefs = nextRefs;
+  next.stateVersion += 1;
+  next.updatedAt = input.now;
+  validateState(next);
+  return next;
+}
+
 export function linkConfirmedCorrectionClaim(
   state: ConversationContextState,
   input: {
