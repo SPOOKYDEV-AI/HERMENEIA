@@ -23,6 +23,7 @@ interface ContextStateRow extends Record<string, unknown> {
   terminology_claim_refs: unknown;
   lexical_claim_refs: unknown;
   correction_claim_refs: unknown;
+  style_claim_refs: unknown;
   entity_handles: unknown;
   unresolved_reference_handles: unknown;
   style_state: unknown;
@@ -107,6 +108,7 @@ export class PostgresConversationContextStateRepository {
          terminology_claim_refs,
          lexical_claim_refs,
          correction_claim_refs,
+         style_claim_refs,
          entity_handles,
          unresolved_reference_handles,
          style_state,
@@ -122,8 +124,8 @@ export class PostgresConversationContextStateRepository {
        ) VALUES (
          $1,$2,$3,$4,$5,
          $6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,
-         $11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb,
-         $15,$16,$17,$18,$19,$20,$21,$22
+         $11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,
+         $16,$17,$18,$19,$20,$21,$22,$23
        )
        ON CONFLICT (tenant_id, conversation_id)
        DO NOTHING`,
@@ -212,6 +214,7 @@ export function toEngineContextState(
     terminologyClaimRefs: [...value.terminologyClaimRefs],
     lexicalClaimRefs: [...value.lexicalClaimRefs],
     correctionClaimRefs: [...value.correctionClaimRefs],
+    styleClaimRefs: [...value.styleClaimRefs],
     updatedAt: value.updatedAt,
   };
 }
@@ -259,6 +262,10 @@ function stateFromRow(
       row.correction_claim_refs,
       "correction_claim_refs",
     ),
+    styleClaimRefs: requireStringArray(
+      row.style_claim_refs,
+      "style_claim_refs",
+    ),
     entityHandles: requireStringArray(
       row.entity_handles,
       "entity_handles",
@@ -297,6 +304,7 @@ function stateParams(
     JSON.stringify(state.terminologyClaimRefs),
     JSON.stringify(state.lexicalClaimRefs),
     JSON.stringify(state.correctionClaimRefs),
+    JSON.stringify(state.styleClaimRefs),
     JSON.stringify(state.entityHandles),
     JSON.stringify(state.unresolvedReferenceHandles),
     JSON.stringify(state.styleState),
