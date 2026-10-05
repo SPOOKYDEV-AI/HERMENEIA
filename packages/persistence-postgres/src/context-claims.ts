@@ -17,7 +17,8 @@ interface ContextClaimRow extends Record<string, unknown> {
   authority_class:
     | "POLICY"
     | "APPROVED_GLOSSARY"
-    | "CONFIRMED_CORRECTION";
+    | "CONFIRMED_CORRECTION"
+    | "EXPLICIT_PREFERENCE";
   retention_class:
     | "CORRECTIVE_DURABLE"
     | "POLICY_REFERENCE";
@@ -197,6 +198,15 @@ export class PostgresContextClaimRepository {
               AND retention_class = 'POLICY_REFERENCE'
               AND modality = 'ASSERTION'
               AND trigger_kind = 'TENANT_POLICY_CHANGE'
+            )
+            OR (
+              authority_class = 'EXPLICIT_PREFERENCE'
+              AND retention_class = 'POLICY_REFERENCE'
+              AND modality = 'ASSERTION'
+              AND trigger_kind = 'EXPLICIT_UI_CORRECTION'
+              AND subject_user_id IS NOT NULL
+              AND scope_kind = 'CONVERSATION'
+              AND scope_conversation_id = $3
             )
           )
         ORDER BY claim_id, claim_version DESC`,
