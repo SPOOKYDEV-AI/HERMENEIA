@@ -258,45 +258,45 @@ If an edit/delete supersedes a source revision while a provider call is already 
 
 ## 12. Current verification gates
 
-Verified in the local sandbox for this slice:
+The canonical `Persistent Core Qualification` workflow now executes the critical persistence/runtime gates against disposable PostgreSQL 16.
 
-- strict TypeScript typecheck on the canonical persistent path;
-- TypeScript build;
-- persistent Send behaviour;
-- repository SQL construction and transaction semantics;
-- command/idempotency conflicts;
-- multi-device delivery;
-- transient-pressure degradation;
-- transaction and COMMIT rollback cleanup;
-- HMAC fingerprint generation and verification;
-- HMAC key-rotation retry compatibility;
-- HTTP Send, command recovery, edit/delete and sync/ACK routing to persistent services;
-- tenant-isolated sync state and out-of-order ACK protection;
-- persistent mutation rollback, stale-revision rejection and command replay;
-- static SQL migration contract through migrations 0001..0011;
-- provider late-response fencing after concurrent edit/delete;
-- pure persistent HTTP composition including translation source recovery;
-- no durable plaintext token/column in the SQL contract.
+Verified at branch commit `900c34a7`:
 
-Latest focused regression gates after mutation/provider hardening:
+- full rollback chain 0011→0001 and forward migration chain 0001→0011: **PASS**;
+- PostgreSQL schema/SQL smoke contract: **PASS**;
+- committed npm lockfile + `npm ci` reproducibility gate: **PASS**;
+- strict TypeScript build/typecheck: **PASS**;
+- Node regression suite: **255/255 PASS**;
+- persistent HTTP runtime against real PostgreSQL: **PASS**;
+- `/healthz`, `/readyz` and a real pool query: **PASS**;
+- real child-process startup followed by SIGTERM and clean exit code 0: **PASS**;
+- HPKE P-256 invalid/off-curve public material rejected before device persistence: **PASS**;
+- PostgreSQL translation publication E2E: **PASS**.
 
-- persistent messaging + repository mutation focus: **13/13 PASS**;
-- stale provider completion focus: **1/1 PASS**;
-- strict worker typecheck/build after explicit transaction result typing: **PASS**;
-- exact remote migration invariant scan 0001..0011: **PASS**;
-- Python migration scripts compile: **PASS**;
-- live PostgreSQL runner: **SKIP** in the current sandbox because `psql` and the test DB URL are absent.
-
-The live PostgreSQL smoke test is intentionally separate.
-
-It requires:
+The PostgreSQL translation E2E exercises the real repository/runtime boundaries:
 
 ```text
-psql
-HERMENEIA_TEST_DATABASE_URL
+Send
+  → translation.request
+  → fanout
+  → translation.execute
+  → deterministic provider adapter
+  → HPKE TRANSLATION envelope
+  → recipient sync
+  → recipient HPKE decrypt
+  → ACK
+  → protected payload purge
 ```
 
-Until that gate passes, this slice must not be described as live-PostgreSQL validated.
+That E2E exposed and caused fixes for three production-only persistence defects that mocked SQL tests had not caught:
+
+1. nullable `jsonb_build_object` parameters lacked explicit PostgreSQL types and failed with `42P18`;
+2. translation publish used illegal `SELECT DISTINCT ... FOR SHARE` SQL and failed with `0A000`;
+3. PostgreSQL `encode(bytea,'base64')` inserted line breaks in long ciphertexts, violating the canonical base64 protocol boundary.
+
+Regression coverage now locks all three fixes.
+
+This evidence qualifies the internal PostgreSQL publication path. It does **not** replace independent cryptographic review, a live external-provider call, browser/native interoperability validation or target-deployment crash/restart testing.
 
 ## 13. Runtime composition status
 
@@ -317,7 +317,9 @@ Qualified by the `Persistent Core Qualification` workflow:
 - rollback 0011→0001, migrations 0001→0011 and SQL smoke tests pass through `scripts/postgres_integration.py`;
 - the committed npm lockfile is installed with `npm ci` without mutation;
 - the persistent HTTP process starts against the migrated database, passes `/healthz` and `/readyz`, executes a real pool query and closes idempotently;
-- the HPKE device-material boundary cryptographically deserializes P-256 public points before persistence and rejects syntax-valid off-curve material.
+- a real Linux child process reaches readiness, handles SIGTERM and exits cleanly with code 0;
+- the HPKE device-material boundary cryptographically deserializes P-256 public points before persistence and rejects syntax-valid off-curve material;
+- a real PostgreSQL Send→translation→HPKE→sync/decrypt→ACK/purge E2E passes with a deterministic provider adapter.
 
 Still required before a production claim:
 

@@ -20,9 +20,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
-    outputs:
-      lockfile_missing: ${{ steps.lock_state.outputs.missing }}
-
     services:
       postgres:
         image: postgres:16-alpine
@@ -69,33 +66,17 @@ jobs:
           fi
           psql --version
 
-      - name: Detect npm lockfile state
-        id: lock_state
+      - name: Require committed npm lockfile
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -f package-lock.json ]]; then
-            echo "missing=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "missing=true" >> "$GITHUB_OUTPUT"
-          fi
+          test -f package-lock.json
 
       - name: Install exact dependency graph
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -f package-lock.json ]]; then
-            npm ci --ignore-scripts --no-audit --no-fund
-          else
-            npm install --ignore-scripts --no-audit --no-fund
-          fi
+        run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Assert committed npm lockfile is stable
-        if: steps.lock_state.outputs.missing == 'false'
-        shell: bash
-        run: |
-          set -euo pipefail
-          git diff --exit-code -- package-lock.json
+        run: git diff --exit-code -- package-lock.json
 
       - name: Generate ephemeral source fingerprint key
         shell: bash
@@ -111,45 +92,3 @@ jobs:
 
       - name: Persistent process + pg runtime gate
         run: python scripts/local_ci.py --stage runtime
-
-      - name: Upload generated npm lockfile
-        if: steps.lock_state.outputs.missing == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: npm-lockfile
-          path: package-lock.json
-          if-no-files-found: error
-          retention-days: 1
-
-  commit-lockfile:
-    name: Commit generated npm lockfile
-    needs: qualification
-    if: >-
-      needs.qualification.outputs.lockfile_missing == 'true' &&
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/feat/persistent-send-service-v1'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout qualified commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Download generated lockfile
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: npm-lockfile
-          path: .
-
-      - name: Commit reproducible dependency lock
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f package-lock.json
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package-lock.json
-          git diff --cached --exit-code >/dev/null && exit 0
-          git commit -m "chore: add npm dependency lockfile"
-          git push origin "HEAD:${GITHUB_REF_NAME}"

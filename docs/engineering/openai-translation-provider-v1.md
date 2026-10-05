@@ -68,7 +68,9 @@ The durable provider ledger stores provider/model/region, status, token counts, 
 
 ## 7. Qualification
 
-Default CI uses deterministic HTTP mocks and covers:
+Default CI uses deterministic HTTP mocks for provider-specific HTTP behaviour and a real PostgreSQL end-to-end publication smoke for the provider-neutral worker path.
+
+The HTTP contract tests cover:
 
 - stateless `store:false` request shape;
 - strict Structured Output schema;
@@ -80,7 +82,9 @@ Default CI uses deterministic HTTP mocks and covers:
 - refusal handling;
 - durable worker propagation of `Retry-After`.
 
-A real API request is intentionally not executed on every push. Use the manual workflow:
+The PostgreSQL E2E additionally proves that a successful provider result travels through the real durable path to a decryptable HPKE TRANSLATION envelope, recipient sync and ACK-triggered ciphertext purge.
+
+A real external API request is intentionally not executed on every push. Use the manual workflow:
 
 ```text
 OpenAI Translation Provider Live Qualification

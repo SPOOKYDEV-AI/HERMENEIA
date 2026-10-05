@@ -98,7 +98,7 @@ The Context Engine is the main research and engineering differentiator. Messagin
 
 ## Repository status
 
-**Persistent Core V1 execution is active: Send, command recovery, edit/delete, tenant-scoped sync/ACK, session/device trust, translation outbox/recovery/worker orchestration and a fail-closed persistent API process are implemented behind PostgreSQL ports. Live PostgreSQL migration/runtime qualification and a reproducible npm dependency lock are now enforced in CI. The built-in RFC 9180 HPKE P-256 envelope path also rejects invalid public points before device persistence. Independent cryptographic/platform review, live external-provider qualification with controlled credentials, and target-deployment failure recovery remain open production gates.**
+**Persistent Core V1 execution is active and qualified against disposable PostgreSQL 16: Send, command recovery, edit/delete, tenant-scoped sync/ACK, session/device trust, translation outbox/recovery/worker orchestration, HPKE publication, recipient decrypt and ACK/payload purge now execute end-to-end in CI. The suite currently passes 255/255 Node regressions plus migration, runtime and real SIGTERM gates. Independent cryptographic/platform review, live external-provider qualification with controlled credentials, and target-deployment crash/restart recovery remain open production gates.**
 
 The repository now contains executable messaging and translation control-plane code as well as the architecture/research contracts. The next major implementation focus is the context engine and its measurable T0/T1/T2 behaviour, after the remaining persistence/security production gates are closed.
 
