@@ -53,6 +53,13 @@ export interface DerivedContextCandidateSource {
   ): Promise<ContextCandidate[]>;
 }
 
+export interface ControlPlaneContextCandidateSource {
+  load(
+    input: TranslationContextRequest,
+    frame: ContextPlanningFrame,
+  ): Promise<ContextCandidate[]>;
+}
+
 export interface TranslationContextPlannerConfig {
   recentMessageLimit: number;
   budget: Omit<ContextBudget, "currentMessageTokens">;
@@ -79,6 +86,7 @@ export interface TranslationContextPlannerDependencies {
   transientSources: TransientSourceStore;
   stateSource?: ConversationContextStateSource;
   derivedCandidates?: DerivedContextCandidateSource;
+  controlPlaneCandidates?: ControlPlaneContextCandidateSource;
   config?: Omit<
     Partial<TranslationContextPlannerConfig>,
     "budget"
@@ -163,7 +171,7 @@ export class TranslationContextPlanner
       (value): value is ContextCandidate => value !== null,
     );
 
-    const derivedCandidates =
+    const stateDerivedCandidates =
       state && this.deps.derivedCandidates
         ? await this.safeLoadDerivedCandidates(
             input,
@@ -171,6 +179,19 @@ export class TranslationContextPlanner
             frame,
           )
         : [];
+
+    const controlPlaneCandidates =
+      this.deps.controlPlaneCandidates
+        ? await this.safeLoadControlPlaneCandidates(
+            input,
+            frame,
+          )
+        : [];
+
+    const derivedCandidates = [
+      ...stateDerivedCandidates,
+      ...controlPlaneCandidates,
+    ];
 
     const candidates = [
       ...immediateCandidates,
@@ -184,12 +205,12 @@ export class TranslationContextPlanner
         : this.config.fallbackCurrentMessageTokens,
     );
 
-    // A compatible ConversationState is necessary for T2, but not
-    // sufficient. Until a state/recovery/correction adapter materialises at
-    // least one derived candidate, selecting T2 would only relabel the same
-    // recent-message window and overstate adaptive-context behaviour.
+    // T2 requires material derived/control-plane evidence, but a
+    // ConversationState is not required for independently authoritative
+    // tenant policy/glossary evidence. State-derived adapters still run only
+    // with a compatible causal state.
     const strategy =
-      state !== null && derivedCandidates.length > 0
+      derivedCandidates.length > 0
         ? "T2_ADAPTIVE_V1"
         : immediateCandidates.length > 0
           ? "T1"
@@ -231,6 +252,30 @@ export class TranslationContextPlanner
       // Adaptive enrichment is optional to the critical path. A failed
       // adapter degrades to exact transient T1/T0 context rather than
       // blocking translation or fabricating derived evidence.
+      return [];
+    }
+  }
+
+  private async safeLoadControlPlaneCandidates(
+    input: TranslationContextRequest,
+    frame: ContextPlanningFrame,
+  ): Promise<ContextCandidate[]> {
+    try {
+      const candidates =
+        await this.deps.controlPlaneCandidates!.load(
+          input,
+          structuredClone(frame),
+        );
+      return Array.isArray(candidates)
+        ? candidates.map((candidate) =>
+            structuredClone(candidate),
+          )
+        : [];
+    } catch {
+      // Control-plane enrichment is optional to the critical path. If the
+      // complete bounded policy view cannot be established, translation
+      // degrades to state-derived/T1/T0 context rather than applying a
+      // partial or fabricated policy set.
       return [];
     }
   }
