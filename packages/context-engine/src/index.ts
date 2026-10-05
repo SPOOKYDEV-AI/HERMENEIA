@@ -37,6 +37,8 @@ export interface ConversationContextState {
   policyVersion: number;
   activeEpisodeId: UUID | null;
   activeEpisodeVersion: number | null;
+  activeEpisodeContinuityConfidence?: number | null;
+  activeEpisodeSourceRevisionRefs?: string[];
   terminologyClaimRefs?: UUID[];
   lexicalClaimRefs?: UUID[];
   correctionClaimRefs?: UUID[];
