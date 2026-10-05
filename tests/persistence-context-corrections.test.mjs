@@ -72,6 +72,7 @@ test("PostgreSQL correction authority requires active conversation, membership a
         membership_epoch: 4,
         erasure_epoch: 5,
         policy_version: 6,
+        next_op_seq: 9,
       }],
       rowCount: 1,
     }]);
@@ -90,6 +91,7 @@ test("PostgreSQL correction authority requires active conversation, membership a
     membershipEpoch: 4,
     erasureEpoch: 5,
     policyVersion: 6,
+    nextOperationSequence: 9,
   });
 
   const query = connection.queries[1];
@@ -108,6 +110,10 @@ test("PostgreSQL correction authority requires active conversation, membership a
   assert.match(
     query.text,
     /c\.status = 'ACTIVE'/,
+  );
+  assert.match(
+    query.text,
+    /c\.next_op_seq/,
   );
   assert.deepEqual(query.params, [
     "tenant-1",
