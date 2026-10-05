@@ -274,6 +274,60 @@ paths:
           $ref: '#/components/responses/Conflict'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /v1/tenant/context-policies:
+    post:
+      tags: [Translation]
+      operationId: upsertTenantContextPolicy
+      description: >
+        Create or replace a tenant-wide approved glossary/policy claim.
+        Tenant identity is derived from the authenticated actor; ADMIN or OWNER authority is required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantContextPolicyUpsertRequest'
+      responses:
+        '201':
+          description: Tenant context policy claim created and tenant policy frontier advanced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantContextPolicyUpsertResult'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/tenant/context-policies/{claim_id}/revoke:
+    post:
+      tags: [Translation]
+      operationId: revokeTenantContextPolicy
+      description: >
+        Revoke an active tenant-wide approved glossary/policy claim without deleting audit history.
+        Tenant identity is derived from the authenticated actor; ADMIN or OWNER authority is required.
+      parameters:
+        - name: claim_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantContextPolicyRevokeRequest'
+      responses:
+        '200':
+          description: Tenant context policy claim revoked and tenant policy frontier advanced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantContextPolicyRevokeResult'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /v1/translations/{translation_id}/source:
     post:
       tags: [Translation]
@@ -812,6 +866,1209 @@ components:
         status:
           type: string
           enum: [REVOKED]
+    TenantContextPolicyTermMeaning:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - kind
+        - surface_form
+        - meaning
+      properties:
+        schema_version:
+          type: integer
+          const: 1
+        kind:
+          type: string
+          const: TERM_MEANING
+        surface_form:
+          type: string
+          minLength: 1
+          maxLength: 128
+        meaning:
+          type: string
+          minLength: 1
+          maxLength: 512
+        source_language_tag:
+          type: string
+          minLength: 1
+          maxLength: 35
+          pattern: '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - command_id
+        - message_id
+        - source_revision
+        - source_ref
+        - source
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        message_id:
+          $ref: '#/components/schemas/Uuid'
+        source_revision:
+          type: integer
+          minimum: 1
+        source_ref:
+          type: string
+          minLength: 16
+          maxLength: 256
+          description: Opaque server-issued source fingerprint reference echoed from translation.source_required. Clients do not compute it.
+        source:
+          $ref: '#/components/schemas/SourceContent'
+    TranslationRecoveryResult:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, translation_id, status]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        translation_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [PENDING, SOURCE_REQUIRED, READY, FAILED, SUPERSEDED]
+    LanguagePreferenceRequest:
+      type: object
+      additionalProperties: false
+      required: [target_language]
+      properties:
+        target_language:
+          $ref: '#/components/schemas/LanguageTag'
+        target_locale:
+          $ref: '#/components/schemas/LanguageTag'
+        preferred_register:
+          type: string
+          enum: [NEUTRAL, FORMAL, INFORMAL]
+    RegisterDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, command_id, device_id, public_material_ref]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        device_id:
+          $ref: '#/components/schemas/Uuid'
+        public_material_ref:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        platform:
+          type: string
+          enum: [WEB, ANDROID, IOS, DESKTOP, OTHER]
+    RotateDeviceMaterialRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - command_id
+        - expected_credential_version
+        - public_material_ref
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        expected_credential_version:
+          type: integer
+          minimum: 1
+        public_material_ref:
+          type: string
+          minLength: 1
+          maxLength: 4096
+    RevokeDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, command_id]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+    DeviceResult:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - status
+        - credential_version
+        - platform
+        - registered_at
+        - revoked_at
+        - last_seen_at
+      properties:
+        device_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [ACTIVE, REVOKED, LOST]
+        credential_version:
+          type: integer
+          minimum: 1
+        platform:
+          type: string
+          enum: [WEB, ANDROID, IOS, DESKTOP, OTHER]
+        registered_at:
+          $ref: '#/components/schemas/Timestamp'
+        revoked_at:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        last_seen_at:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    TranslationStatus:
+      type: string
+      enum: [NOT_REQUESTED, PENDING, READY, FAILED, SOURCE_REQUIRED, EXPIRED, SUPERSEDED]
+    ServerEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - event_id
+        - cursor
+        - type
+        - server_time
+        - payload
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        event_id:
+          $ref: '#/components/schemas/Uuid'
+        cursor:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          enum:
+            - message.accepted
+            - message.available
+            - message.edited
+            - message.deleted
+            - translation.pending
+            - translation.ready
+            - translation.failed
+            - translation.source_required
+            - translation.expired
+            - delivery.expired
+            - membership.changed
+            - preferences.changed
+            - device.revoked
+            - sync.reset_required
+        server_time:
+          $ref: '#/components/schemas/Timestamp'
+        tenant_id:
+          $ref: '#/components/schemas/Uuid'
+        conversation_id:
+          anyOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        payload:
+          type: object
+          additionalProperties: true
+    SyncResponse:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, events, next_cursor]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        events:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/ServerEvent'
+        next_cursor:
+          type: string
+    SyncResetRequired:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, code, new_cursor, events]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        code:
+          type: string
+          const: SYNC_RESET_REQUIRED
+        new_cursor:
+          type: string
+        events:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/ServerEvent'
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable]
+      properties:
+        code:
+          type: string
+          enum:
+            - IDEMPOTENCY_CONFLICT
+            - REVISION_CONFLICT
+            - NOT_AUTHORIZED
+            - DEVICE_REVOKED
+            - DEVICE_SERVICE_UNAVAILABLE
+            - RECIPIENT_UNAVAILABLE
+            - SOURCE_REQUIRED
+            - SOURCE_BUFFER_UNAVAILABLE
+            - SOURCE_EXPIRED
+            - SOURCE_REVISION_MISMATCH
+            - SYNC_CURSOR_EXPIRED
+            - SYNC_RESET_REQUIRED
+            - POLICY_REJECTED
+            - QUOTA_EXCEEDED
+            - PROVIDER_UNAVAILABLE
+            - DELIVERY_EXPIRED
+            - INVALID_COMMAND
+            - PAYLOAD_TOO_LARGE
+            - NOT_FOUND
+            - INTERNAL_ERROR
+        message:
+          type: string
+          maxLength: 1024
+        retryable:
+          type: boolean
+        retry_after_ms:
+          type: integer
+          minimum: 0
+        details:
+          type: object
+          additionalProperties: true
+          maxProperties: 16
+
+        target_language_tag:
+          type: string
+          minLength: 1
+          maxLength: 35
+          pattern: '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - command_id
+        - message_id
+        - source_revision
+        - source_ref
+        - source
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        message_id:
+          $ref: '#/components/schemas/Uuid'
+        source_revision:
+          type: integer
+          minimum: 1
+        source_ref:
+          type: string
+          minLength: 16
+          maxLength: 256
+          description: Opaque server-issued source fingerprint reference echoed from translation.source_required. Clients do not compute it.
+        source:
+          $ref: '#/components/schemas/SourceContent'
+    TranslationRecoveryResult:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, translation_id, status]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        translation_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [PENDING, SOURCE_REQUIRED, READY, FAILED, SUPERSEDED]
+    LanguagePreferenceRequest:
+      type: object
+      additionalProperties: false
+      required: [target_language]
+      properties:
+        target_language:
+          $ref: '#/components/schemas/LanguageTag'
+        target_locale:
+          $ref: '#/components/schemas/LanguageTag'
+        preferred_register:
+          type: string
+          enum: [NEUTRAL, FORMAL, INFORMAL]
+    RegisterDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, command_id, device_id, public_material_ref]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        device_id:
+          $ref: '#/components/schemas/Uuid'
+        public_material_ref:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        platform:
+          type: string
+          enum: [WEB, ANDROID, IOS, DESKTOP, OTHER]
+    RotateDeviceMaterialRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - command_id
+        - expected_credential_version
+        - public_material_ref
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        expected_credential_version:
+          type: integer
+          minimum: 1
+        public_material_ref:
+          type: string
+          minLength: 1
+          maxLength: 4096
+    RevokeDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, command_id]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+    DeviceResult:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - status
+        - credential_version
+        - platform
+        - registered_at
+        - revoked_at
+        - last_seen_at
+      properties:
+        device_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [ACTIVE, REVOKED, LOST]
+        credential_version:
+          type: integer
+          minimum: 1
+        platform:
+          type: string
+          enum: [WEB, ANDROID, IOS, DESKTOP, OTHER]
+        registered_at:
+          $ref: '#/components/schemas/Timestamp'
+        revoked_at:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        last_seen_at:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    TranslationStatus:
+      type: string
+      enum: [NOT_REQUESTED, PENDING, READY, FAILED, SOURCE_REQUIRED, EXPIRED, SUPERSEDED]
+    ServerEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - event_id
+        - cursor
+        - type
+        - server_time
+        - payload
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        event_id:
+          $ref: '#/components/schemas/Uuid'
+        cursor:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          enum:
+            - message.accepted
+            - message.available
+            - message.edited
+            - message.deleted
+            - translation.pending
+            - translation.ready
+            - translation.failed
+            - translation.source_required
+            - translation.expired
+            - delivery.expired
+            - membership.changed
+            - preferences.changed
+            - device.revoked
+            - sync.reset_required
+        server_time:
+          $ref: '#/components/schemas/Timestamp'
+        tenant_id:
+          $ref: '#/components/schemas/Uuid'
+        conversation_id:
+          anyOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        payload:
+          type: object
+          additionalProperties: true
+    SyncResponse:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, events, next_cursor]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        events:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/ServerEvent'
+        next_cursor:
+          type: string
+    SyncResetRequired:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, code, new_cursor, events]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        code:
+          type: string
+          const: SYNC_RESET_REQUIRED
+        new_cursor:
+          type: string
+        events:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/ServerEvent'
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable]
+      properties:
+        code:
+          type: string
+          enum:
+            - IDEMPOTENCY_CONFLICT
+            - REVISION_CONFLICT
+            - NOT_AUTHORIZED
+            - DEVICE_REVOKED
+            - DEVICE_SERVICE_UNAVAILABLE
+            - RECIPIENT_UNAVAILABLE
+            - SOURCE_REQUIRED
+            - SOURCE_BUFFER_UNAVAILABLE
+            - SOURCE_EXPIRED
+            - SOURCE_REVISION_MISMATCH
+            - SYNC_CURSOR_EXPIRED
+            - SYNC_RESET_REQUIRED
+            - POLICY_REJECTED
+            - QUOTA_EXCEEDED
+            - PROVIDER_UNAVAILABLE
+            - DELIVERY_EXPIRED
+            - INVALID_COMMAND
+            - PAYLOAD_TOO_LARGE
+            - NOT_FOUND
+            - INTERNAL_ERROR
+        message:
+          type: string
+          maxLength: 1024
+        retryable:
+          type: boolean
+        retry_after_ms:
+          type: integer
+          minimum: 0
+        details:
+          type: object
+          additionalProperties: true
+          maxProperties: 16
+
+    TenantContextPolicyPreferredRendering:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - kind
+        - source_form
+        - target_form
+        - target_language_tag
+      properties:
+        schema_version:
+          type: integer
+          const: 1
+        kind:
+          type: string
+          const: PREFERRED_RENDERING
+        source_form:
+          type: string
+          minLength: 1
+          maxLength: 128
+        target_form:
+          type: string
+          minLength: 1
+          maxLength: 256
+        source_language_tag:
+          type: string
+          minLength: 1
+          maxLength: 35
+          pattern: '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - command_id
+        - message_id
+        - source_revision
+        - source_ref
+        - source
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        message_id:
+          $ref: '#/components/schemas/Uuid'
+        source_revision:
+          type: integer
+          minimum: 1
+        source_ref:
+          type: string
+          minLength: 16
+          maxLength: 256
+          description: Opaque server-issued source fingerprint reference echoed from translation.source_required. Clients do not compute it.
+        source:
+          $ref: '#/components/schemas/SourceContent'
+    TranslationRecoveryResult:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, translation_id, status]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        translation_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [PENDING, SOURCE_REQUIRED, READY, FAILED, SUPERSEDED]
+    LanguagePreferenceRequest:
+      type: object
+      additionalProperties: false
+      required: [target_language]
+      properties:
+        target_language:
+          $ref: '#/components/schemas/LanguageTag'
+        target_locale:
+          $ref: '#/components/schemas/LanguageTag'
+        preferred_register:
+          type: string
+          enum: [NEUTRAL, FORMAL, INFORMAL]
+    RegisterDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, command_id, device_id, public_material_ref]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        device_id:
+          $ref: '#/components/schemas/Uuid'
+        public_material_ref:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        platform:
+          type: string
+          enum: [WEB, ANDROID, IOS, DESKTOP, OTHER]
+    RotateDeviceMaterialRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - command_id
+        - expected_credential_version
+        - public_material_ref
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        expected_credential_version:
+          type: integer
+          minimum: 1
+        public_material_ref:
+          type: string
+          minLength: 1
+          maxLength: 4096
+    RevokeDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, command_id]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+    DeviceResult:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - status
+        - credential_version
+        - platform
+        - registered_at
+        - revoked_at
+        - last_seen_at
+      properties:
+        device_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [ACTIVE, REVOKED, LOST]
+        credential_version:
+          type: integer
+          minimum: 1
+        platform:
+          type: string
+          enum: [WEB, ANDROID, IOS, DESKTOP, OTHER]
+        registered_at:
+          $ref: '#/components/schemas/Timestamp'
+        revoked_at:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        last_seen_at:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    TranslationStatus:
+      type: string
+      enum: [NOT_REQUESTED, PENDING, READY, FAILED, SOURCE_REQUIRED, EXPIRED, SUPERSEDED]
+    ServerEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - event_id
+        - cursor
+        - type
+        - server_time
+        - payload
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        event_id:
+          $ref: '#/components/schemas/Uuid'
+        cursor:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          enum:
+            - message.accepted
+            - message.available
+            - message.edited
+            - message.deleted
+            - translation.pending
+            - translation.ready
+            - translation.failed
+            - translation.source_required
+            - translation.expired
+            - delivery.expired
+            - membership.changed
+            - preferences.changed
+            - device.revoked
+            - sync.reset_required
+        server_time:
+          $ref: '#/components/schemas/Timestamp'
+        tenant_id:
+          $ref: '#/components/schemas/Uuid'
+        conversation_id:
+          anyOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        payload:
+          type: object
+          additionalProperties: true
+    SyncResponse:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, events, next_cursor]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        events:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/ServerEvent'
+        next_cursor:
+          type: string
+    SyncResetRequired:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, code, new_cursor, events]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        code:
+          type: string
+          const: SYNC_RESET_REQUIRED
+        new_cursor:
+          type: string
+        events:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/ServerEvent'
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable]
+      properties:
+        code:
+          type: string
+          enum:
+            - IDEMPOTENCY_CONFLICT
+            - REVISION_CONFLICT
+            - NOT_AUTHORIZED
+            - DEVICE_REVOKED
+            - DEVICE_SERVICE_UNAVAILABLE
+            - RECIPIENT_UNAVAILABLE
+            - SOURCE_REQUIRED
+            - SOURCE_BUFFER_UNAVAILABLE
+            - SOURCE_EXPIRED
+            - SOURCE_REVISION_MISMATCH
+            - SYNC_CURSOR_EXPIRED
+            - SYNC_RESET_REQUIRED
+            - POLICY_REJECTED
+            - QUOTA_EXCEEDED
+            - PROVIDER_UNAVAILABLE
+            - DELIVERY_EXPIRED
+            - INVALID_COMMAND
+            - PAYLOAD_TOO_LARGE
+            - NOT_FOUND
+            - INTERNAL_ERROR
+        message:
+          type: string
+          maxLength: 1024
+        retryable:
+          type: boolean
+        retry_after_ms:
+          type: integer
+          minimum: 0
+        details:
+          type: object
+          additionalProperties: true
+          maxProperties: 16
+
+        target_language_tag:
+          type: string
+          minLength: 1
+          maxLength: 35
+          pattern: '^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - command_id
+        - message_id
+        - source_revision
+        - source_ref
+        - source
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        message_id:
+          $ref: '#/components/schemas/Uuid'
+        source_revision:
+          type: integer
+          minimum: 1
+        source_ref:
+          type: string
+          minLength: 16
+          maxLength: 256
+          description: Opaque server-issued source fingerprint reference echoed from translation.source_required. Clients do not compute it.
+        source:
+          $ref: '#/components/schemas/SourceContent'
+    TranslationRecoveryResult:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, translation_id, status]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        translation_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [PENDING, SOURCE_REQUIRED, READY, FAILED, SUPERSEDED]
+    LanguagePreferenceRequest:
+      type: object
+      additionalProperties: false
+      required: [target_language]
+      properties:
+        target_language:
+          $ref: '#/components/schemas/LanguageTag'
+        target_locale:
+          $ref: '#/components/schemas/LanguageTag'
+        preferred_register:
+          type: string
+          enum: [NEUTRAL, FORMAL, INFORMAL]
+    RegisterDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, command_id, device_id, public_material_ref]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        device_id:
+          $ref: '#/components/schemas/Uuid'
+        public_material_ref:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        platform:
+          type: string
+          enum: [WEB, ANDROID, IOS, DESKTOP, OTHER]
+    RotateDeviceMaterialRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - command_id
+        - expected_credential_version
+        - public_material_ref
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        expected_credential_version:
+          type: integer
+          minimum: 1
+        public_material_ref:
+          type: string
+          minLength: 1
+          maxLength: 4096
+    RevokeDeviceRequest:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, command_id]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+    DeviceResult:
+      type: object
+      additionalProperties: false
+      required:
+        - device_id
+        - status
+        - credential_version
+        - platform
+        - registered_at
+        - revoked_at
+        - last_seen_at
+      properties:
+        device_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [ACTIVE, REVOKED, LOST]
+        credential_version:
+          type: integer
+          minimum: 1
+        platform:
+          type: string
+          enum: [WEB, ANDROID, IOS, DESKTOP, OTHER]
+        registered_at:
+          $ref: '#/components/schemas/Timestamp'
+        revoked_at:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        last_seen_at:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+    TranslationStatus:
+      type: string
+      enum: [NOT_REQUESTED, PENDING, READY, FAILED, SOURCE_REQUIRED, EXPIRED, SUPERSEDED]
+    ServerEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - event_id
+        - cursor
+        - type
+        - server_time
+        - payload
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        event_id:
+          $ref: '#/components/schemas/Uuid'
+        cursor:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          enum:
+            - message.accepted
+            - message.available
+            - message.edited
+            - message.deleted
+            - translation.pending
+            - translation.ready
+            - translation.failed
+            - translation.source_required
+            - translation.expired
+            - delivery.expired
+            - membership.changed
+            - preferences.changed
+            - device.revoked
+            - sync.reset_required
+        server_time:
+          $ref: '#/components/schemas/Timestamp'
+        tenant_id:
+          $ref: '#/components/schemas/Uuid'
+        conversation_id:
+          anyOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        payload:
+          type: object
+          additionalProperties: true
+    SyncResponse:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, events, next_cursor]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        events:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/ServerEvent'
+        next_cursor:
+          type: string
+    SyncResetRequired:
+      type: object
+      additionalProperties: false
+      required: [protocol_version, code, new_cursor, events]
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        code:
+          type: string
+          const: SYNC_RESET_REQUIRED
+        new_cursor:
+          type: string
+        events:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/ServerEvent'
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable]
+      properties:
+        code:
+          type: string
+          enum:
+            - IDEMPOTENCY_CONFLICT
+            - REVISION_CONFLICT
+            - NOT_AUTHORIZED
+            - DEVICE_REVOKED
+            - DEVICE_SERVICE_UNAVAILABLE
+            - RECIPIENT_UNAVAILABLE
+            - SOURCE_REQUIRED
+            - SOURCE_BUFFER_UNAVAILABLE
+            - SOURCE_EXPIRED
+            - SOURCE_REVISION_MISMATCH
+            - SYNC_CURSOR_EXPIRED
+            - SYNC_RESET_REQUIRED
+            - POLICY_REJECTED
+            - QUOTA_EXCEEDED
+            - PROVIDER_UNAVAILABLE
+            - DELIVERY_EXPIRED
+            - INVALID_COMMAND
+            - PAYLOAD_TOO_LARGE
+            - NOT_FOUND
+            - INTERNAL_ERROR
+        message:
+          type: string
+          maxLength: 1024
+        retryable:
+          type: boolean
+        retry_after_ms:
+          type: integer
+          minimum: 0
+        details:
+          type: object
+          additionalProperties: true
+          maxProperties: 16
+
+    TenantContextPolicyProposition:
+      oneOf:
+        - $ref: '#/components/schemas/TenantContextPolicyTermMeaning'
+        - $ref: '#/components/schemas/TenantContextPolicyPreferredRendering'
+    TenantContextPolicyUpsertRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - command_id
+        - kind
+        - proposition
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+        kind:
+          type: string
+          enum: [GLOSSARY, POLICY]
+        proposition:
+          $ref: '#/components/schemas/TenantContextPolicyProposition'
+    TenantContextPolicySupersededClaim:
+      type: object
+      additionalProperties: false
+      required:
+        - claim_id
+        - claim_version
+      properties:
+        claim_id:
+          $ref: '#/components/schemas/Uuid'
+        claim_version:
+          type: integer
+          minimum: 1
+    TenantContextPolicyUpsertResult:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - claim_id
+        - claim_version
+        - status
+        - kind
+        - tenant_policy_version
+        - superseded_claims
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        claim_id:
+          $ref: '#/components/schemas/Uuid'
+        claim_version:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          const: ACTIVE
+        kind:
+          type: string
+          enum: [GLOSSARY, POLICY]
+        tenant_policy_version:
+          type: integer
+          minimum: 1
+        superseded_claims:
+          type: array
+          items:
+            $ref: '#/components/schemas/TenantContextPolicySupersededClaim'
+    TenantContextPolicyRevokeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - command_id
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        command_id:
+          $ref: '#/components/schemas/Uuid'
+    TenantContextPolicyRevokeResult:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - claim_id
+        - claim_version
+        - status
+        - tenant_policy_version
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        claim_id:
+          $ref: '#/components/schemas/Uuid'
+        claim_version:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          const: REVOKED
+        tenant_policy_version:
+          type: integer
+          minimum: 1
     SourceResupplyRequest:
       type: object
       additionalProperties: false
