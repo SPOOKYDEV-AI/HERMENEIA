@@ -7,7 +7,6 @@ on:
       - feat/persistent-send-service-v1
       - feat/context-engine-runtime-v1
       - feat/conversation-state-v1
-      - restack/conversation-state-v1-20261005
   workflow_dispatch:
 
 permissions:

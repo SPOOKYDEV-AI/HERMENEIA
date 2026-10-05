@@ -1,6 +1,6 @@
 # Context Integrity, Provenance and Memory Safety — V1
 
-**Status:** Design baseline with executable T0/T1 integrity fences  
+**Status:** Design baseline with executable T0/T1 integrity fences and durable ConversationState schema/reducer baseline  
 **Scope:** Context Engine, Memory, Translation traceability  
 **Primary goal:** ensure that HERMENEIA can be wrong safely
 
@@ -391,7 +391,9 @@ Conversation text may create hypotheses, never privileged configuration.
 
 ## 21. Dependency invalidation
 
-The current persistent T0/T1 implementation uses a conservative conversation-wide epoch fence before the future fine-grained dependency index exists. `lockCurrentTranslationForPublish()` locks the authoritative conversation and rejects a ContextSnapshot whose `erasure_epoch` is stale. The same check runs on worker preflight and again at final publication, so a stale snapshot cannot produce a deliverable translation.
+Migration 0013 establishes bounded durable ConversationState, correction, provenance and sanitised checkpoint structures. The reducer rejects stale state versions/epochs and refuses out-of-order publication across causal gaps. Database constraints additionally reject transcript-like forbidden keys in structured state/checkpoints, tenant-crossing subject references, invalid conversation claim scope and corrective durable claims without an authorised trigger.
+
+The current persistent T0/T1 implementation still uses a conservative conversation-wide epoch fence before the future fine-grained dependency index is wired into runtime. `lockCurrentTranslationForPublish()` locks the authoritative conversation and rejects a ContextSnapshot whose `erasure_epoch` is stale. The same check runs on worker preflight and again at final publication, so a stale snapshot cannot produce a deliverable translation.
 
 This does not make an already-started external provider request reversible: if a mutation commits while provider I/O is already in flight, final publication is still rejected, but data already sent to that configured processor cannot be unsent. Provider trust/processing policy therefore remains a separate boundary.
 
