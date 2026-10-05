@@ -77,6 +77,7 @@ export interface ConversationContextState {
   terminologyClaimRefs: UUID[];
   lexicalClaimRefs: UUID[];
   correctionClaimRefs: UUID[];
+  styleClaimRefs: UUID[];
   entityHandles: string[];
   unresolvedReferenceHandles: string[];
   styleState: ConversationStyleState;
@@ -89,6 +90,7 @@ export interface ContextStatePatch {
   terminologyClaimRefs?: UUID[];
   lexicalClaimRefs?: UUID[];
   correctionClaimRefs?: UUID[];
+  styleClaimRefs?: UUID[];
   entityHandles?: string[];
   unresolvedReferenceHandles?: string[];
   styleState?: ConversationStyleState;
@@ -178,6 +180,7 @@ export function createInitialContextState(input: {
     terminologyClaimRefs: [],
     lexicalClaimRefs: [],
     correctionClaimRefs: [],
+    styleClaimRefs: [],
     entityHandles: [],
     unresolvedReferenceHandles: [],
     styleState: {},
@@ -294,6 +297,79 @@ export function linkConfirmedCorrectionClaim(
   return next;
 }
 
+export function unlinkStylePreferenceClaim(
+  state: ConversationContextState,
+  input: {
+    claimId: UUID;
+    now: string;
+  },
+): ConversationContextState {
+  validateState(state);
+  requireOpaqueIdentifier(input.claimId, "claimId");
+  requireTimestamp(input.now, "now");
+
+  if (!state.styleClaimRefs.includes(input.claimId)) {
+    return structuredClone(state);
+  }
+
+  const next = structuredClone(state);
+  next.styleClaimRefs =
+    next.styleClaimRefs.filter(
+      (ref) => ref !== input.claimId,
+    );
+  next.stateVersion += 1;
+  next.updatedAt = input.now;
+  validateState(next);
+  return next;
+}
+
+export function replaceStylePreferenceClaim(
+  state: ConversationContextState,
+  input: {
+    claimId: UUID;
+    removeClaimIds: UUID[];
+    now: string;
+  },
+): ConversationContextState {
+  validateState(state);
+  requireOpaqueIdentifier(input.claimId, "claimId");
+  requireTimestamp(input.now, "now");
+
+  const removals = new Set(
+    validateRefSet(
+      input.removeClaimIds,
+      "removeClaimIds",
+      256,
+    ),
+  );
+  const retained = state.styleClaimRefs.filter(
+    (ref) =>
+      ref !== input.claimId &&
+      !removals.has(ref),
+  );
+  const nextRefs = [
+    ...retained.slice(-127),
+    input.claimId,
+  ];
+
+  if (
+    nextRefs.length === state.styleClaimRefs.length &&
+    nextRefs.every(
+      (ref, index) =>
+        ref === state.styleClaimRefs[index],
+    )
+  ) {
+    return structuredClone(state);
+  }
+
+  const next = structuredClone(state);
+  next.styleClaimRefs = nextRefs;
+  next.stateVersion += 1;
+  next.updatedAt = input.now;
+  validateState(next);
+  return next;
+}
+
 export function rebaseContextStateAuthority(
   state: ConversationContextState,
   input: {
@@ -353,6 +429,7 @@ export function rebaseContextStateAuthority(
   next.terminologyClaimRefs = [];
   next.lexicalClaimRefs = [];
   next.correctionClaimRefs = [];
+  next.styleClaimRefs = [];
   next.entityHandles = [];
   next.unresolvedReferenceHandles = [];
   next.styleState = {};
@@ -572,6 +649,13 @@ function applySafePatch(
       128,
     );
   }
+  if (patch.styleClaimRefs) {
+    state.styleClaimRefs = validateRefSet(
+      patch.styleClaimRefs,
+      "styleClaimRefs",
+      128,
+    );
+  }
   if (patch.entityHandles) {
     state.entityHandles = validateHandleSet(
       patch.entityHandles,
@@ -610,6 +694,9 @@ function applySafePatch(
       (ref) => !removals.has(ref),
     );
     state.correctionClaimRefs = state.correctionClaimRefs.filter(
+      (ref) => !removals.has(ref),
+    );
+    state.styleClaimRefs = state.styleClaimRefs.filter(
       (ref) => !removals.has(ref),
     );
   }
@@ -851,6 +938,11 @@ function validateState(state: ConversationContextState): void {
   validateRefSet(
     state.correctionClaimRefs,
     "correctionClaimRefs",
+    128,
+  );
+  validateRefSet(
+    state.styleClaimRefs,
+    "styleClaimRefs",
     128,
   );
   validateHandleSet(state.entityHandles, "entityHandles", 128);
