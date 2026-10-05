@@ -23,7 +23,8 @@ export type ContextPrivacyScope =
   | "CHECKPOINT"
   | "CORRECTION"
   | "POLICY"
-  | "STYLE";
+  | "STYLE"
+  | "EPISODE";
 
 export type CorrectionTrigger =
   | "EXPLICIT_UI"
@@ -39,6 +40,11 @@ export interface ConversationContextState {
   policyVersion: number;
   activeEpisodeId: UUID | null;
   activeEpisodeVersion: number | null;
+  activeEpisodeContinuityConfidence?: number | null;
+  activeEpisodeStartOperationSequence?: number | null;
+  activeEpisodeLastOperationSequence?: number | null;
+  activeEpisodeStartedAt?: string | null;
+  activeEpisodeLastActivityAt?: string | null;
   terminologyClaimRefs?: UUID[];
   lexicalClaimRefs?: UUID[];
   correctionClaimRefs?: UUID[];
