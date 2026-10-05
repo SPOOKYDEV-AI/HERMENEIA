@@ -1772,7 +1772,8 @@ try {
   await withConnection(async (db) => {
     const snapshots = await db.query(
       `SELECT policy_version,
-              selected_claim_refs
+               tenant_policy_version,
+               selected_claim_refs
          FROM context_snapshots
         WHERE tenant_id = $1
           AND message_id = $2
@@ -1788,6 +1789,12 @@ try {
       Number(snapshots.rows[0].policy_version),
       1,
     );
+    assert.equal(
+      Number(
+        snapshots.rows[0].tenant_policy_version,
+      ),
+      1,
+    );
     assert.ok(
       snapshots.rows[0].selected_claim_refs.includes(
         `${ids.tenantPolicyClaimId}:1`,
@@ -1795,17 +1802,31 @@ try {
     );
 
     const bumped = await db.query(
-      `UPDATE conversations
+      `UPDATE tenants
           SET policy_version = policy_version + 1
         WHERE tenant_id = $1
-          AND conversation_id = $2
       RETURNING policy_version`,
-      [ids.tenantId, ids.conversationId],
+      [ids.tenantId],
     );
     assert.equal(bumped.rowCount, 1);
     assert.equal(
       Number(bumped.rows[0].policy_version),
       2,
+    );
+
+    const conversationPolicy = await db.query(
+      `SELECT policy_version
+         FROM conversations
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(conversationPolicy.rowCount, 1);
+    assert.equal(
+      Number(
+        conversationPolicy.rows[0].policy_version,
+      ),
+      1,
     );
   });
 
@@ -1965,7 +1986,8 @@ try {
     "revocation=claim-revoked " +
     "post-revoke=correction-absent " +
     "tenant-policy=unreferenced-overlay " +
-    "policy_version=stale-context-superseded " +
+    "conversation_policy_version=stable " +
+    "tenant_policy_version=stale-context-superseded " +
     "t2=confirmed-correction-context " +
     "hpke=original+translation sync=2 ack=purged " +
     "erasure_epoch=stale-context-superseded\n",
