@@ -1593,7 +1593,11 @@ export class PostgresMessagingRepository {
               ) AS source_revision,
               CASE
                 WHEN de.status = 'PENDING'
-                THEN encode(de.protected_payload,'base64')
+                THEN replace(
+                  encode(de.protected_payload,'base64'),
+                  E'\\n',
+                  ''
+                )
                 ELSE NULL
               END AS protected_payload_b64,
               CASE
