@@ -16,6 +16,7 @@ import {
   storedClaimProposition,
 } from "../../context-claim-candidates/src/index.js";
 import {
+  createDegradedContextStateFromFloor,
   createInitialContextState,
   linkConfirmedCorrectionClaim,
   rebaseContextStateAuthority,
@@ -28,6 +29,7 @@ export interface CorrectionAuthority {
   membershipEpoch: number;
   erasureEpoch: number;
   policyVersion: number;
+  nextOperationSequence: number;
 }
 
 export interface ContextCorrectionTransactions<Tx> {
@@ -482,17 +484,36 @@ export class ContextCorrectionService<Tx> {
     );
 
     if (!existing) {
-      let created = createInitialContextState({
-        tenantId: actor.tenantId,
-        conversationId,
-        membershipEpoch:
-          authority.membershipEpoch,
-        erasureEpoch: authority.erasureEpoch,
-        policyVersion: authority.policyVersion,
-        strategyVersion:
-          this.strategyVersion,
-        now,
-      });
+      let created =
+        authority.nextOperationSequence <= 1
+          ? createInitialContextState({
+              tenantId: actor.tenantId,
+              conversationId,
+              membershipEpoch:
+                authority.membershipEpoch,
+              erasureEpoch:
+                authority.erasureEpoch,
+              policyVersion:
+                authority.policyVersion,
+              strategyVersion:
+                this.strategyVersion,
+              now,
+            })
+          : createDegradedContextStateFromFloor({
+              tenantId: actor.tenantId,
+              conversationId,
+              causalFloorOpSeq:
+                authority.nextOperationSequence - 1,
+              membershipEpoch:
+                authority.membershipEpoch,
+              erasureEpoch:
+                authority.erasureEpoch,
+              policyVersion:
+                authority.policyVersion,
+              strategyVersion:
+                this.strategyVersion,
+              now,
+            });
       created = linkConfirmedCorrectionClaim(
         created,
         { claimId, now },
@@ -615,6 +636,16 @@ function validateCommand(
     throw new DomainError(
       "INVALID_COMMAND",
       "Invalid target_translation_id",
+    );
+  }
+  if (
+    command.requested_scope === "MESSAGE" &&
+    !hasMessage &&
+    !command.target_translation_id
+  ) {
+    throw new DomainError(
+      "INVALID_COMMAND",
+      "MESSAGE correction requires a message or translation target",
     );
   }
 
