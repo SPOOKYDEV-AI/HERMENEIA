@@ -748,6 +748,11 @@ components:
           type: object
           additionalProperties: true
           maxProperties: 16
+          description: >-
+            Structured correction payload. For kind=TONE, schema_version=1 and
+            kind=TONE are required and preferred_register must be one of
+            NEUTRAL, FORMAL, INFORMAL, or DEFAULT. DEFAULT removes the actor's
+            explicit conversation style profile rather than persisting a style.
     CorrectionResult:
       type: object
       additionalProperties: false
