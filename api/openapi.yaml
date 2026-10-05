@@ -203,7 +203,11 @@ paths:
               $ref: '#/components/schemas/CorrectionRequest'
       responses:
         '202':
-          description: Correction candidate recorded; authorisation/scope applied by server.
+          description: Correction recorded; shared-scope promotion is applied only when authorised and semantically supported.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CorrectionResult'
         '409':
           $ref: '#/components/responses/Conflict'
         '403':
@@ -612,6 +616,43 @@ components:
           type: object
           additionalProperties: true
           maxProperties: 16
+    CorrectionResult:
+      type: object
+      additionalProperties: false
+      required:
+        - protocol_version
+        - repair_event_id
+        - status
+        - requested_scope
+        - applied_scope
+        - claim_id
+        - claim_version
+      properties:
+        protocol_version:
+          type: integer
+          const: 1
+        repair_event_id:
+          $ref: '#/components/schemas/Uuid'
+        status:
+          type: string
+          enum: [RECORDED, NEEDS_CONFIRMATION, APPLIED]
+        requested_scope:
+          type: string
+          enum: [MESSAGE, CONVERSATION, TENANT]
+        applied_scope:
+          anyOf:
+            - type: string
+              enum: [CONVERSATION, TENANT]
+            - type: 'null'
+        claim_id:
+          anyOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        claim_version:
+          anyOf:
+            - type: integer
+              minimum: 1
+            - type: 'null'
     SourceResupplyRequest:
       type: object
       additionalProperties: false
