@@ -13,6 +13,7 @@ on:
       - feat/translation-feedback-v1
       - feat/speaker-scoped-corrections-v1
       - feat/correction-supersession-v1
+      - feat/context-claim-admissibility-v1
   workflow_dispatch:
 
 permissions:
