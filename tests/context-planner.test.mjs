@@ -290,6 +290,53 @@ test("derived-candidate failure degrades to T1 without blocking translation", as
   );
 });
 
+test("planner excludes the current operation from historical processing gaps", async () => {
+  const { planner, transientSources } = fixture({
+    state: {
+      conversationId: "conversation-1",
+      contextVersion: 5,
+      processedPrefixOperationSequence: 6,
+      processingGapOperationSequences: [7, 8],
+      erasureEpoch: 2,
+      activeEpisodeId: null,
+      activeEpisodeVersion: null,
+      updatedAt: "2026-10-04T19:59:59.000Z",
+    },
+  });
+
+  put(transientSources, "message-7", 1, "recent seven");
+
+  const result = await planner.load(request());
+
+  assert.deepEqual(
+    result.state.processingGapOperationSequences,
+    [7],
+  );
+  assert.equal(result.strategy, "T1");
+});
+
+test("planner discards state that has already processed the current operation", async () => {
+  const { planner, transientSources } = fixture({
+    state: {
+      conversationId: "conversation-1",
+      contextVersion: 6,
+      processedPrefixOperationSequence: 8,
+      processingGapOperationSequences: [],
+      erasureEpoch: 2,
+      activeEpisodeId: "episode-future",
+      activeEpisodeVersion: 1,
+      updatedAt: "2026-10-04T20:00:01.000Z",
+    },
+  });
+
+  put(transientSources, "message-7", 1, "recent seven");
+
+  const result = await planner.load(request());
+
+  assert.equal(result.state, null);
+  assert.equal(result.strategy, "T1");
+});
+
 test("planner rejects stale derived state by degrading to T1 instead of fabricating compatibility", async () => {
   const { planner, transientSources } = fixture({
     state: {
