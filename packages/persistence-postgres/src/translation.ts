@@ -111,25 +111,32 @@ export class PostgresTranslationRepository {
     }>(
       `SELECT cm.user_id,
               COALESCE(
-                NULLIF(trim(cm.target_locale_override), ''),
-                NULLIF(trim(cm.target_language_tag), '')
-              ) AS target_language_tag,
-              cm.membership_version
-         FROM message_metadata mm
-         JOIN conversation_members cm
+                 NULLIF(trim(cm.target_locale_override), ''),
+                 NULLIF(trim(cm.target_language_tag), ''),
+                 NULLIF(trim(ulp.target_locale_override), ''),
+                 NULLIF(trim(ulp.target_language_tag), '')
+               ) AS target_language_tag,
+               cm.membership_version
+          FROM message_metadata mm
+          JOIN conversation_members cm
            ON cm.tenant_id = mm.tenant_id
           AND cm.conversation_id = mm.conversation_id
           AND cm.status = 'ACTIVE'
           AND cm.user_id <> mm.author_user_id
+          LEFT JOIN user_language_preferences ulp
+            ON ulp.tenant_id = cm.tenant_id
+           AND ulp.user_id = cm.user_id
         WHERE mm.tenant_id = $1
           AND mm.message_id = $2
           AND mm.current_revision = $3
           AND mm.status = 'ACTIVE'
           AND COALESCE(
-                NULLIF(trim(cm.target_locale_override), ''),
-                NULLIF(trim(cm.target_language_tag), '')
-              ) IS NOT NULL
-        ORDER BY cm.user_id`,
+                 NULLIF(trim(cm.target_locale_override), ''),
+                 NULLIF(trim(cm.target_language_tag), ''),
+                 NULLIF(trim(ulp.target_locale_override), ''),
+                 NULLIF(trim(ulp.target_language_tag), '')
+               ) IS NOT NULL
+         ORDER BY cm.user_id`,
       [
         input.tenantId,
         input.sourceMessageId,
@@ -330,13 +337,23 @@ export class PostgresTranslationRepository {
           AND cm.user_id = te.recipient_user_id
           AND cm.status = 'ACTIVE'
           AND cm.membership_version = te.target_profile_version
-          AND COALESCE(
-                NULLIF(trim(cm.target_locale_override), ''),
-                NULLIF(trim(cm.target_language_tag), '')
-              ) = te.target_language_tag
-        WHERE te.tenant_id = $1
-          AND te.translation_id = $2
-          AND te.status = 'PENDING'
+          LEFT JOIN user_language_preferences ulp
+            ON ulp.tenant_id = cm.tenant_id
+           AND ulp.user_id = cm.user_id
+         WHERE te.tenant_id = JOIN conversation_members cm
+           ON cm.tenant_id = te.tenant_id
+          AND cm.conversation_id = te.conversation_id
+          AND cm.user_id = te.recipient_user_id
+          AND cm.status = 'ACTIVE'
+          AND cm.membership_version = te.target_profile_version
+           AND te.translation_id = $2
+           AND te.status = 'PENDING'
+           AND COALESCE(
+                 NULLIF(trim(cm.target_locale_override), ''),
+                 NULLIF(trim(cm.target_language_tag), ''),
+                 NULLIF(trim(ulp.target_locale_override), ''),
+                 NULLIF(trim(ulp.target_language_tag), '')
+               ) = te.target_language_tag
           AND (
             te.context_snapshot_id IS NULL
             OR EXISTS (
@@ -448,11 +465,16 @@ export class PostgresTranslationRepository {
       `SELECT cm.status,
               cm.membership_version,
               COALESCE(
-                NULLIF(trim(cm.target_locale_override), ''),
-                NULLIF(trim(cm.target_language_tag), '')
-              ) AS target_language_tag
-         FROM conversation_members cm
-        WHERE cm.tenant_id = $1
+                 NULLIF(trim(cm.target_locale_override), ''),
+                 NULLIF(trim(cm.target_language_tag), ''),
+                 NULLIF(trim(ulp.target_locale_override), ''),
+                 NULLIF(trim(ulp.target_language_tag), '')
+               ) AS target_language_tag
+          FROM conversation_members cm
+          LEFT JOIN user_language_preferences ulp
+            ON ulp.tenant_id = cm.tenant_id
+           AND ulp.user_id = cm.user_id
+         WHERE cm.tenant_id = $1
           AND cm.conversation_id = $2
           AND cm.user_id = $3
         FOR SHARE`,
