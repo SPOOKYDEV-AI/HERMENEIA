@@ -253,6 +253,7 @@ CREATE TABLE context_claims (
     OR (
       modality = 'CORRECTION'
       AND authority_class = 'CONFIRMED_CORRECTION'
+      AND trigger_kind IS NOT NULL
       AND trigger_kind IN (
         'EXPLICIT_UI_CORRECTION',
         'EXPLICIT_TEXTUAL_CORRECTION',
