@@ -6,6 +6,7 @@ on:
       - main
       - feat/persistent-send-service-v1
       - feat/context-engine-runtime-v1
+      - feat/conversation-state-v1
   workflow_dispatch:
 
 permissions:

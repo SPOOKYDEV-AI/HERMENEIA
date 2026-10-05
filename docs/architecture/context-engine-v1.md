@@ -1,6 +1,6 @@
 # HERMENEIA Context Engine V1
 
-**Status:** Executable T0/T1 runtime baseline; T2 derived-state pipeline incomplete  
+**Status:** Executable T0/T1 runtime plus durable ConversationState schema/reducer baseline; T2 runtime/enrichment pipeline incomplete  
 **Version:** 1  
 **Primary goals:** translation quality, low latency, temporal correctness, reproducibility
 
@@ -28,7 +28,7 @@ The current V1 runtime implements and tests:
 - stale ContextSnapshots being rejected when their epoch no longer matches the authoritative conversation epoch;
 - a real PostgreSQL E2E proving stale contextual work is superseded before another provider call and cannot publish a TRANSLATION envelope.
 
-The persistent runtime does **not** yet make T2 production-complete. The engine contains adaptive T2 selection semantics and causal/future-leakage tests, but persistent derived `ConversationContextState`, enrichment workers, episode/memory state and their dependency index remain future implementation work.
+The persistent runtime does **not** yet make T2 production-complete. The engine contains adaptive T2 selection semantics and causal/future-leakage tests. Migration 0013 now adds a bounded durable ConversationState/claim/provenance/checkpoint schema, and `packages/context-state` provides a deterministic causal reducer with strict ordered publication, stale-version/epoch rejection, degraded recovery floors and authorised correction decisions. Persistent repositories, operation registration from messaging, enrichment workers, episode/memory derivation and Context Engine candidate wiring remain future implementation work.
 
 ## 2. Design principle: understand progressively
 

@@ -23,6 +23,7 @@ SOURCE_REQUIRED_EVENT_MIGRATION = ROOT / "db/migrations/0009_translation_source_
 DEVICE_TRUST_MIGRATION = ROOT / "db/migrations/0010_device_trust_lifecycle.sql"
 TENANT_LOCAL_SEQUENCE_MIGRATION = ROOT / "db/migrations/0011_tenant_local_inbox_sequence.sql"
 CONTEXT_SNAPSHOT_MIGRATION = ROOT / "db/migrations/0012_context_snapshots.sql"
+CONTEXT_STATE_MIGRATION = ROOT / "db/migrations/0013_context_state.sql"
 
 REQUIRED_TABLES = {
     "users",
@@ -87,6 +88,9 @@ def main() -> int:
         encoding="utf-8"
     )
     context_snapshot_sql = CONTEXT_SNAPSHOT_MIGRATION.read_text(
+        encoding="utf-8"
+    )
+    context_state_sql = CONTEXT_STATE_MIGRATION.read_text(
         encoding="utf-8"
     )
     upper = sql.upper()
@@ -367,6 +371,59 @@ def main() -> int:
         if forbidden in context_snapshot_lower:
             fail(
                 f"context snapshot migration contains forbidden plaintext token: {forbidden}"
+            )
+
+
+    context_state_required = [
+        "CREATE FUNCTION hermeneia_context_jsonb_has_forbidden_key",
+        "CREATE TABLE conversation_context_states",
+        "CREATE TABLE translation_repair_events",
+        "CREATE TABLE context_claims",
+        "CREATE TABLE provenance_edges",
+        "CREATE TABLE recovery_checkpoints",
+        "causal_floor_sequence bigint NOT NULL DEFAULT 0",
+        "processed_prefix_sequence bigint NOT NULL DEFAULT 0",
+        "processed_prefix_sequence >= causal_floor_sequence",
+        "recovery_mode text NOT NULL DEFAULT 'FULL'",
+        "'DEGRADED_BASELINE'",
+        "pending_operations jsonb NOT NULL DEFAULT '[]'::jsonb",
+        "membership_epoch bigint NOT NULL CHECK (membership_epoch >= 0)",
+        "erasure_epoch bigint NOT NULL CHECK (erasure_epoch >= 0)",
+        "retention_class <> 'CORRECTIVE_DURABLE'",
+        "'EXPLICIT_TEXTUAL_CORRECTION'",
+        "trigger_kind IS NOT NULL",
+        "'APPROVED_GLOSSARY_CHANGE'",
+        "'TENANT_POLICY_CHANGE'",
+        "recovery_checkpoints_one_active_idx",
+        "REFERENCES translation_executions(tenant_id, translation_id)",
+        "REFERENCES message_metadata(tenant_id, conversation_id, message_id)",
+        "REFERENCES tenant_memberships(tenant_id, user_id)",
+        "conversation_id IS NOT NULL",
+        "NOT hermeneia_context_jsonb_has_forbidden_key",
+    ]
+    for snippet in context_state_required:
+        if snippet not in context_state_sql:
+            fail(f"context state migration missing invariant: {snippet}")
+
+    if not context_state_sql.lstrip().startswith("BEGIN;"):
+        fail("context state migration must begin with BEGIN")
+    if not context_state_sql.rstrip().endswith("COMMIT;"):
+        fail("context state migration must end with COMMIT")
+
+    context_lower = context_state_sql.lower()
+    for forbidden_column in (
+        " raw_text text",
+        " message_text text",
+        " source_text text",
+        " translated_text text",
+        " transcript text",
+        " conversation_history",
+        " raw_history",
+    ):
+        if forbidden_column in context_lower:
+            fail(
+                "context state migration contains forbidden durable transcript "
+                f"column/token: {forbidden_column.strip()}"
             )
 
     command_lower = command_sql.lower()

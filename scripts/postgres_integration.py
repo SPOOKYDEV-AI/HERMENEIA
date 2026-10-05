@@ -73,9 +73,11 @@ def main() -> int:
         ROOT / "db/migrations/0010_device_trust_lifecycle.sql",
         ROOT / "db/migrations/0011_tenant_local_inbox_sequence.sql",
         ROOT / "db/migrations/0012_context_snapshots.sql",
+        ROOT / "db/migrations/0013_context_state.sql",
     ]
 
     rollbacks = [
+        ROOT / "db/migrations/0013_context_state.down.sql",
         ROOT / "db/migrations/0012_context_snapshots.down.sql",
         ROOT / "db/migrations/0011_tenant_local_inbox_sequence.down.sql",
         ROOT / "db/migrations/0010_device_trust_lifecycle.down.sql",
@@ -97,6 +99,7 @@ def main() -> int:
         ROOT / "db/tests/0010_device_trust_smoke.sql",
         ROOT / "db/tests/0011_tenant_local_inbox_sequence_smoke.sql",
         ROOT / "db/tests/0012_context_snapshots_smoke.sql",
+        ROOT / "db/tests/0013_context_state_smoke.sql",
     ]
 
     # This runner targets a dedicated disposable integration database.
