@@ -79,6 +79,7 @@ function snapshot() {
     processedPrefixOperationSequence: 7,
     processingGapOperationSequences: [],
     erasureEpoch: 2,
+    policyVersion: 4,
     tokenEstimate: 18,
     recoveryMode: "FAST",
     createdAt: "2026-10-04T20:00:00.000Z",
@@ -173,6 +174,7 @@ test("PostgreSQL context snapshot lookup reconstructs typed metadata", async () 
         processed_prefix_sequence: 7,
         processing_gap_refs: [5, 6],
         erasure_epoch: 2,
+        policy_version: 4,
         token_estimate: 18,
         recovery_mode: "PARTIAL",
         created_at: "2026-10-04 20:00:00+00",
@@ -219,6 +221,7 @@ test("PostgreSQL context snapshot lookup reconstructs typed metadata", async () 
     processedPrefixOperationSequence: 7,
     processingGapOperationSequences: [5, 6],
     erasureEpoch: 2,
+    policyVersion: 4,
     tokenEstimate: 18,
     recoveryMode: "PARTIAL",
     createdAt: "2026-10-04 20:00:00+00",
@@ -296,6 +299,7 @@ test("PostgreSQL context planner loads current sequence/erasure epoch and recent
         author_user_id: "user-a",
         declared_source_language: "fr-FR",
         erasure_epoch: 3,
+        policy_version: 6,
       }],
       rowCount: 1,
     },
@@ -348,6 +352,7 @@ test("PostgreSQL context planner loads current sequence/erasure epoch and recent
     currentSourceAuthorUserId: "user-a",
     currentSourceLanguageTag: "fr-FR",
     erasureEpoch: 3,
+    policyVersion: 6,
     recentMessages: [
       {
         messageId: "message-7",
@@ -374,6 +379,7 @@ test("PostgreSQL context planner loads current sequence/erasure epoch and recent
     /mr\.declared_source_language/,
   );
   assert.match(currentQuery.text, /c\.erasure_epoch/);
+  assert.match(currentQuery.text, /c\.policy_version/);
   assert.match(currentQuery.text, /mr\.op_seq/);
   assert.match(currentQuery.text, /JOIN message_revisions mr/);
   assert.match(currentQuery.text, /mm\.current_revision = \$4/);
