@@ -181,6 +181,69 @@ export class PostgresConversationContextStateRepository {
     return result.rowCount === 1;
   }
 
+  async loadEpisodeSourceRefs(
+    tx: SqlExecutor,
+    input: {
+      tenantId: UUID;
+      conversationId: UUID;
+      startOperationSequence: number;
+      throughOperationSequence: number;
+      limit?: number;
+    },
+  ): Promise<Array<{
+    messageId: UUID;
+    sourceRevision: number;
+    operationSequence: number;
+  }>> {
+    const limit = input.limit ?? 8;
+    if (
+      !Number.isSafeInteger(input.startOperationSequence) ||
+      input.startOperationSequence < 1 ||
+      !Number.isSafeInteger(input.throughOperationSequence) ||
+      input.throughOperationSequence < input.startOperationSequence ||
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 8
+    ) {
+      throw new TypeError(
+        "Episode source range and limit must be bounded positive integers",
+      );
+    }
+
+    const result = await tx.query<{
+      message_id: UUID;
+      revision: number;
+      op_seq: number;
+    }>(
+      `SELECT message_id,
+              revision,
+              op_seq
+         FROM message_revisions
+        WHERE tenant_id = $1
+          AND conversation_id = $2
+          AND mutation_type = 'CREATED'
+          AND op_seq >= $3
+          AND op_seq <= $4
+        ORDER BY op_seq DESC
+        LIMIT $5`,
+      [
+        input.tenantId,
+        input.conversationId,
+        input.startOperationSequence,
+        input.throughOperationSequence,
+        limit,
+      ],
+    );
+
+    return result.rows
+      .map((row) => ({
+        messageId: row.message_id,
+        sourceRevision: Number(row.revision),
+        operationSequence: Number(row.op_seq),
+      }))
+      .reverse();
+  }
+
   async loadEngineState(
     tx: SqlExecutor,
     input: {
