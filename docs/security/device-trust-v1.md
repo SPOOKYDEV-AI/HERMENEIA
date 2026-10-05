@@ -1,6 +1,6 @@
 # Device Trust and Delivery Envelope Security — V1
 
-**Status:** Executable device lifecycle; envelope cryptography still pending dedicated review
+**Status:** Executable device lifecycle and built-in RFC 9180 HPKE P-256 envelope implementation; independent cryptographic/platform review still required
 **Scope:** device identity, authenticated enrollment, delivery-material rotation, revocation, delivery-envelope trust boundary
 
 ## 1. Security statement
@@ -9,11 +9,11 @@ HERMENEIA V1 is not claimed to be end-to-end encrypted.
 
 The trusted Core may process plaintext transiently for translation/context. Durable relay storage must nevertheless avoid plaintext message bodies.
 
-The executable device lifecycle implemented here does **not** define a custom cryptographic protocol. It manages the identity/version/lifecycle of the public material consumed by a separately reviewed envelope-protection implementation.
+The executable device lifecycle does not invent cryptographic primitives. The built-in delivery envelope uses RFC 9180 HPKE with DHKEM(P-256, HKDF-SHA256), HKDF-SHA256 and AES-128-GCM. HERMENEIA adds versioned envelope framing and authenticated application binding; that integration still requires independent review before a production cryptography claim.
 
 ## 2. Device identity
 
-Each registered device has a stable `device_id`, one owning `user_id`, lifecycle status `ACTIVE | REVOKED | LOST`, server-owned monotone `credential_version`, opaque `public_material_ref`, platform metadata, `revocation_epoch`, and lifecycle timestamps.
+Each registered device has a stable `device_id`, one owning `user_id`, lifecycle status `ACTIVE | REVOKED | LOST`, server-owned monotone `credential_version`, HPKE P-256 public material encoded as `hpke-p256-v1:<base64url uncompressed point>`, platform metadata, `revocation_epoch`, and lifecycle timestamps. Enrollment and rotation cryptographically deserialize the submitted public point before any persistence transaction begins; syntax-valid off-curve points are rejected.
 
 Private key/credential material remains client-side or in platform-secure storage according to the future reviewed cryptographic implementation.
 
@@ -101,9 +101,11 @@ Device enrollment/rotation/revocation protects **which device/version may receiv
 
 ## 12. Cryptography still requiring dedicated review
 
-Before production envelope protection is claimed, a dedicated security review must choose reviewed libraries/standards, public-material format and proof/binding, private-key generation/storage, replay protection, device-to-device enrollment UX/proof, recovery/backup/transfer policy, metadata exposure, and rotation/re-key behaviour for existing envelopes.
+The current implementation fixes the internal baseline to RFC 9180 HPKE using DHKEM(P-256, HKDF-SHA256), HKDF-SHA256 and AES-128-GCM, with credential-versioned public material and authenticated application binding.
 
-No custom cryptographic protocol is authorised by this document.
+Before production envelope protection is claimed, independent review must still validate the HERMENEIA framing/AAD integration, browser/native interoperability, private-key generation and secure storage, proof-of-possession/enrollment UX, replay assumptions, recovery/backup/transfer policy, metadata exposure and rotation/re-key behaviour for existing envelopes.
+
+Passing internal tests is evidence of implementation consistency, not a substitute for external cryptographic review.
 
 ## 13. PostgreSQL/runtime implementation
 
@@ -115,4 +117,4 @@ The persistent runtime exposes one `PersistentDeviceService` backed by `Postgres
 
 The device-service sandbox gate covers enrollment with server-owned version 1, same/new command retry, device-id rebind conflict, self-only monotone rotation, old-envelope purge, lost-response rotation recovery, stale rotation conflict, session revocation, pending-envelope purge, inventory without public material, and revoked actor rejection.
 
-Live PostgreSQL execution remains a separate gate and must not be claimed unless the disposable PostgreSQL integration runner actually executes migration 0010 and its smoke test.
+The disposable PostgreSQL 16 qualification workflow now executes the full migration chain through 0011, SQL smoke tests, Node regression suite and persistent-process runtime smoke. The remaining security gate is independent cryptographic/platform validation, not database execution.

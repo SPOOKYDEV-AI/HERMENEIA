@@ -1,6 +1,6 @@
 # Persistent Messaging Execution — V1
 
-**Status:** Implemented execution slice; live PostgreSQL gate still required  
+**Status:** Implemented execution slice; live PostgreSQL/runtime CI gate qualified  
 **Scope:** durable Send, command recovery, edit/delete revisions, tenant-scoped sync/ACK, transient source handling and translation dispatch reference
 
 ## 1. Goal
@@ -309,14 +309,20 @@ The repository now contains:
 
 The persistent server uses the built-in HPKE P-256 envelope implementation by default. A local security module may override that boundary explicitly, but there is no plaintext or TEST_ONLY production fallback. External cryptographic review and platform interoperability validation remain required before a production cryptography claim.
 
-`apps/api/start-persistent-server.mjs` is the executable process entrypoint. It requires a local `HERMENEIA_SECURITY_MODULE`, starts the persistent HTTP server, supports an embedded/external translation worker mode, and performs idempotent graceful shutdown.
+`apps/api/start-persistent-server.mjs` is the executable process entrypoint. It uses the built-in HPKE P-256 envelope implementation by default, accepts an explicit local `HERMENEIA_SECURITY_MODULE` override when configured, starts the persistent HTTP server, supports an embedded/external translation worker mode, and performs idempotent graceful shutdown.
+
+Qualified by the `Persistent Core Qualification` workflow:
+
+- the actual external `pg` dependency runs against disposable PostgreSQL 16;
+- rollback 0011→0001, migrations 0001→0011 and SQL smoke tests pass through `scripts/postgres_integration.py`;
+- the committed npm lockfile is installed with `npm ci` without mutation;
+- the persistent HTTP process starts against the migrated database, passes `/healthz` and `/readyz`, executes a real pool query and closes idempotently;
+- the HPKE device-material boundary cryptographically deserializes P-256 public points before persistence and rejects syntax-valid off-curve material.
 
 Still required before a production claim:
 
-- execute the actual external `pg` dependency against a live PostgreSQL instance;
-- apply rollback 0011→0001, migrations 0001→0011 and smoke tests through `scripts/postgres_integration.py`;
-- complete the dedicated envelope cryptography review and provide that implementation;
+- complete independent cryptographic review plus browser/native interoperability and private-key storage validation;
 - validate the full translation provider/publication path against a real provider adapter;
-- run the persistent process entrypoint under its target deployment/runtime and verify graceful SIGTERM/SIGINT shutdown.
+- run the persistent process under its actual deployment target and verify signal handling, crash/failure recovery and operational observability.
 
 Do not silently fall back to the in-memory Core in a production profile.
