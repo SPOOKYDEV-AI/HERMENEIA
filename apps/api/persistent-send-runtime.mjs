@@ -29,6 +29,9 @@ import {
   PostgresUserLanguagePreferenceRepository,
 } from "../../.build/packages/persistence-postgres/src/user-language-preferences.js";
 import {
+  PostgresRecoveryCheckpointRepository,
+} from "../../.build/packages/persistence-postgres/src/recovery-checkpoints.js";
+import {
   SqlTransactionManager,
 } from "../../.build/packages/persistence/src/index.js";
 import {
@@ -343,6 +346,10 @@ export async function createPersistentSendRuntime({
       new PostgresUserLanguagePreferenceRepository(
         transactions,
       );
+    const recoveryCheckpointRepository =
+      new PostgresRecoveryCheckpointRepository(
+        transactions,
+      );
     const contextStateStrategyVersion =
       "context-state-v1";
 
@@ -353,6 +360,8 @@ export async function createPersistentSendRuntime({
     const contextOperationRecorder =
       createPostgresContextOperationRecorder({
         repository: contextStateRepository,
+        recoveryCheckpoints:
+          recoveryCheckpointRepository,
         strategyVersion: contextStateStrategyVersion,
       });
 
@@ -404,6 +413,8 @@ export async function createPersistentSendRuntime({
         outboxService,
         clock,
         transientSources,
+        recoveryCheckpoints:
+          recoveryCheckpointRepository,
       });
 
     const correctionService =
@@ -530,6 +541,8 @@ export async function createPersistentSendRuntime({
                  AS has_context_snapshots,
                to_regclass('public.conversation_context_states') IS NOT NULL
                  AS has_context_state,
+               to_regclass('public.recovery_checkpoints') IS NOT NULL
+                  AS has_recovery_checkpoints,
                EXISTS (
                  SELECT 1
                    FROM information_schema.columns
@@ -567,6 +580,7 @@ export async function createPersistentSendRuntime({
             row?.has_provider_executions &&
             row?.has_context_snapshots &&
             row?.has_context_state &&
+             row?.has_recovery_checkpoints &&
             row?.has_command_fingerprint &&
             row?.has_source_required_constraint &&
             row?.has_device_platform &&
@@ -621,6 +635,7 @@ export async function createPersistentSendRuntime({
       tenantContextPolicyRepository,
       translationFeedbackRepository,
       userLanguagePreferenceRepository,
+      recoveryCheckpointRepository,
       sessionRepository,
       transientSources,
       sqlPool,

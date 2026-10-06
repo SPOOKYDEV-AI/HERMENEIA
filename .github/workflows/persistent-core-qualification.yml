@@ -24,6 +24,7 @@ on:
       - feat/active-episode-v1
       - feat/semantic-episode-enrichment-v1
       - feat/user-language-preferences-v2
+      - feat/recovery-checkpoint-runtime-v1
   workflow_dispatch:
 
 permissions:

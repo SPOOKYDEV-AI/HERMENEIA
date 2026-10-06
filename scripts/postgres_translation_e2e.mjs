@@ -113,6 +113,8 @@ const ids = {
   staleContextClientMessageId: randomUUID(),
   staleLanguageCommandId: randomUUID(),
   staleLanguageClientMessageId: randomUUID(),
+  recoveryCommandId: randomUUID(),
+  recoveryClientMessageId: randomUUID(),
 };
 
 const senderKeys = await generateHpkeP256DeviceKeyPair();
@@ -510,6 +512,14 @@ async function cleanup() {
       );
       await db.query(
         "DELETE FROM context_claims WHERE tenant_id = $1",
+        tenant,
+      );
+      await db.query(
+        "DELETE FROM recovery_checkpoints WHERE tenant_id = $1",
+        tenant,
+      );
+      await db.query(
+        "DELETE FROM recovery_checkpoints WHERE tenant_id = $1",
         tenant,
       );
       await db.query(
@@ -3208,6 +3218,221 @@ try {
     );
   });
 
+  // Bring ContextState to the exact causal frontier after the language-profile
+  // invalidation scenario. Every successful reduce best-effort captures a
+  // sanitized checkpoint outside the primary reducer transaction.
+  for (let attempts = 0; attempts < 16; attempts += 1) {
+    const prefix = await withConnection(async (db) => {
+      const result = await db.query(
+        `SELECT processed_prefix_sequence
+           FROM conversation_context_states
+          WHERE tenant_id = $1
+            AND conversation_id = $2`,
+        [ids.tenantId, ids.conversationId],
+      );
+      assert.equal(result.rowCount, 1);
+      return Number(
+        result.rows[0].processed_prefix_sequence,
+      );
+    });
+
+    if (
+      prefix >=
+      Number(staleLanguageAccepted.op_seq)
+    ) {
+      break;
+    }
+
+    const reduced =
+      await runtime.contextStateWorker.runOnce();
+    assert.ok(
+      reduced === "REDUCED" ||
+        reduced === "ALREADY_REDUCED",
+      `unexpected recovery-seed reduce result: ${reduced}`,
+    );
+  }
+
+  let recoveryCheckpoint;
+  await withConnection(async (db) => {
+    const state = await db.query(
+      `SELECT state_version,
+              processed_prefix_sequence,
+              active_episode_state,
+              correction_claim_refs,
+              style_state,
+              entity_handles,
+              pragmatic_state
+         FROM conversation_context_states
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(state.rowCount, 1);
+    assert.equal(
+      Number(
+        state.rows[0].processed_prefix_sequence,
+      ),
+      Number(staleLanguageAccepted.op_seq),
+    );
+
+    const checkpoints = await db.query(
+      `SELECT checkpoint_version,
+              processed_prefix_sequence,
+              payload,
+              status
+         FROM recovery_checkpoints
+        WHERE tenant_id = $1
+          AND conversation_id = $2
+          AND status = 'ACTIVE'`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(checkpoints.rowCount, 1);
+    assert.equal(
+      Number(
+        checkpoints.rows[0]
+          .processed_prefix_sequence,
+      ),
+      Number(staleLanguageAccepted.op_seq),
+    );
+
+    recoveryCheckpoint =
+      structuredClone(
+        checkpoints.rows[0],
+      );
+
+    const payloadText =
+      JSON.stringify(
+        recoveryCheckpoint.payload,
+      );
+    assert.equal(
+      payloadText.includes(
+        "Le profil de langue change.",
+      ),
+      false,
+    );
+    assert.equal(
+      "style_state" in
+        recoveryCheckpoint.payload,
+      false,
+    );
+    assert.equal(
+      "entity_handles" in
+        recoveryCheckpoint.payload,
+      false,
+    );
+    assert.equal(
+      "pragmatic_state" in
+        recoveryCheckpoint.payload,
+      false,
+    );
+
+    const deleted = await db.query(
+      `DELETE FROM conversation_context_states
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(deleted.rowCount, 1);
+  });
+
+  runtimeNow = "2026-10-05T09:21:13.000Z";
+
+  const recoveryAccepted =
+    await runtime.sendService.sendMessage(
+      sender,
+      {
+        protocol_version: 1,
+        command_id:
+          ids.recoveryCommandId,
+        client_message_id:
+          ids.recoveryClientMessageId,
+        conversation_id: ids.conversationId,
+        source: {
+          text: "On reprend ici.",
+          language_hint: "fr-FR",
+        },
+        client_authored_at: NOW,
+      },
+    );
+
+  assert.equal(
+    recoveryAccepted.status,
+    "ACCEPTED",
+  );
+
+  await withConnection(async (db) => {
+    const restored = await db.query(
+      `SELECT state_version,
+              causal_floor_sequence,
+              processed_prefix_sequence,
+              pending_operations,
+              active_episode_state,
+              correction_claim_refs,
+              style_state,
+              entity_handles,
+              pragmatic_state,
+              recovery_mode,
+              status
+         FROM conversation_context_states
+        WHERE tenant_id = $1
+          AND conversation_id = $2`,
+      [ids.tenantId, ids.conversationId],
+    );
+    assert.equal(restored.rowCount, 1);
+    assert.equal(
+      restored.rows[0].recovery_mode,
+      "FULL",
+    );
+    assert.equal(
+      restored.rows[0].status,
+      "ACTIVE",
+    );
+    assert.equal(
+      Number(
+        restored.rows[0]
+          .processed_prefix_sequence,
+      ),
+      Number(
+        recoveryCheckpoint
+          .processed_prefix_sequence,
+      ),
+    );
+    assert.equal(
+      Number(
+        restored.rows[0]
+          .causal_floor_sequence,
+      ),
+      Number(
+        recoveryCheckpoint
+          .processed_prefix_sequence,
+      ),
+    );
+    assert.equal(
+      restored.rows[0]
+        .pending_operations.length,
+      1,
+    );
+    assert.equal(
+      Number(
+        restored.rows[0]
+          .pending_operations[0].op_seq,
+      ),
+      Number(recoveryAccepted.op_seq),
+    );
+    assert.deepEqual(
+      restored.rows[0].style_state,
+      {},
+    );
+    assert.deepEqual(
+      restored.rows[0].entity_handles,
+      [],
+    );
+    assert.deepEqual(
+      restored.rows[0].pragmatic_state,
+      {},
+    );
+  });
+
   process.stdout.write(
     "POSTGRES_TRANSLATION_E2E=PASS " +
     "send=accepted fanout=done execute=done " +
@@ -3230,6 +3455,7 @@ try {
     "tenant_policy_version=stale-context-superseded " +
     "user-language=default-fallback " +
     "target-profile=language-change-superseded " +
+    "recovery-checkpoint=state-restored " +
     "t2=confirmed-correction-context " +
     "hpke=original+translation sync=2 ack=purged " +
     "erasure_epoch=stale-context-superseded\n",
