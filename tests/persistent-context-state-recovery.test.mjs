@@ -54,10 +54,11 @@ function checkpoint(overrides = {}) {
   };
 }
 
-function fixture({
-  restoredCheckpoint =
-    checkpoint(),
-} = {}) {
+function fixture(options) {
+  const restoredCheckpoint =
+    options === undefined
+      ? checkpoint()
+      : options.restoredCheckpoint;
   let state;
   const restoreCalls = [];
 
