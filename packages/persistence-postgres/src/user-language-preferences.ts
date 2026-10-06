@@ -38,7 +38,8 @@ export class PostgresUserLanguagePreferenceRepository {
         WHERE tm.tenant_id = $1
           AND tm.user_id = $2
           AND tm.status = 'ACTIVE'
-        FOR SHARE OF tm, d`,
+        FOR UPDATE OF tm
+        FOR SHARE OF d`,
       [
         actor.tenantId,
         actor.userId,
