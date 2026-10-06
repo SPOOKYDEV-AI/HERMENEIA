@@ -68,7 +68,8 @@ test("language preference authority serializes user updates while protecting dev
   const query = connection.queries[1];
   assert.match(query.text, /tm\.status = 'ACTIVE'/);
   assert.match(query.text, /d\.status = 'ACTIVE'/);
-  assert.match(query.text, /FOR UPDATE OF tm/);\n  assert.match(query.text, /FOR SHARE OF d/);
+  assert.match(query.text, /FOR UPDATE OF tm/);
+  assert.match(query.text, /FOR SHARE OF d/);
 });
 
 test("language preference row contains no durable style/register field", async () => {
