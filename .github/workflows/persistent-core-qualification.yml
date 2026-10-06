@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+      - integration/v0.2
+      - hardening/migration-catalog-v1
       - feat/persistent-send-service-v1
       - feat/context-engine-runtime-v1
       - feat/conversation-state-v1
