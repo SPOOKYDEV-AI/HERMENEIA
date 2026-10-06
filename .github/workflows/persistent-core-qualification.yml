@@ -27,6 +27,11 @@ on:
       - feat/semantic-episode-enrichment-v1
       - feat/user-language-preferences-v2
       - feat/recovery-checkpoint-runtime-v1
+      - hardening/pr-merge-qualification-v1
+  pull_request:
+    branches:
+      - main
+      - integration/v0.2
   workflow_dispatch:
 
 permissions:
