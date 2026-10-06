@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
 MIGRATIONS_DIR = ROOT / "db/migrations"
 SMOKE_TESTS_DIR = ROOT / "db/tests"
 
@@ -91,6 +92,86 @@ def discover_migration_catalog() -> tuple[list[Path], list[Path]]:
         raise RuntimeError(
             f"Rollback migration has no matching forward migration: {orphaned}"
         )
+
+    migrations = [item[2] for item in forwards]
+    rollbacks = list(reversed(rollback_paths))
+    print(
+        "POSTGRES_MIGRATION_CATALOG=PASS "
+        f"count={len(migrations)} "
+        f"latest={migrations[-1].name}",
+        flush=True,
+    )
+    return migrations, rollbacks
+
+
+def discover_smoke_tests() -> list[Path]:
+    tests = sorted(SMOKE_TESTS_DIR.glob("*.sql"))
+    if not tests:
+        raise RuntimeError("No PostgreSQL smoke tests discovered")
+
+    unexpected = [
+        path.name
+        for path in tests
+        if not SMOKE_TEST_RE.fullmatch(path.name)
+    ]
+    if unexpected:
+        raise RuntimeError(
+            "Unexpected PostgreSQL smoke-test filename(s): "
+            + ", ".join(unexpected)
+        )
+
+    return tests
+
+
+
+def run_sql(psql: str, url: str, sql: Path) -> None:
+    print("+ psql", sql.relative_to(ROOT), flush=True)
+    subprocess.run(
+        [psql, url, "-v", "ON_ERROR_STOP=1", "-f", str(sql)],
+        cwd=ROOT,
+        check=True,
+    )
+
+
+def schema_exists(psql: str, url: str) -> bool:
+    result = subprocess.run(
+        [
+            psql,
+            url,
+            "-X",
+            "-q",
+            "-t",
+            "-A",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            "SELECT CASE WHEN to_regclass('public.message_metadata') IS NULL "
+            "THEN '0' ELSE '1' END;",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    value = result.stdout.strip()
+    if value not in {"0", "1"}:
+        raise RuntimeError(
+            f"Unexpected PostgreSQL schema probe result: {value!r}"
+        )
+    return value == "1"
+
+
+def main() -> int:
+    url = os.getenv("HERMENEIA_TEST_DATABASE_URL")
+    psql = shutil.which("psql")
+
+    if not url or not psql:
+        print(
+            "POSTGRES_INTEGRATION=SKIP "
+            f"psql={'yes' if psql else 'no'} "
+            f"url={'yes' if url else 'no'}"
+        )
+        return 0
 
     migrations, rollbacks = discover_migration_catalog()
     smoke_tests = discover_smoke_tests()
