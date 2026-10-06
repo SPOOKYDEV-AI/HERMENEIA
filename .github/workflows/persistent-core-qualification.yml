@@ -23,6 +23,7 @@ on:
       - feat/conversation-style-profile-v1
       - feat/active-episode-v1
       - feat/semantic-episode-enrichment-v1
+      - feat/user-language-preferences-v2
   workflow_dispatch:
 
 permissions:

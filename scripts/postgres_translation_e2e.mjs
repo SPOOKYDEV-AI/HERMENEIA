@@ -111,6 +111,8 @@ const ids = {
   stalePolicyClientMessageId: randomUUID(),
   staleContextCommandId: randomUUID(),
   staleContextClientMessageId: randomUUID(),
+  staleLanguageCommandId: randomUUID(),
+  staleLanguageClientMessageId: randomUUID(),
 };
 
 const senderKeys = await generateHpkeP256DeviceKeyPair();
@@ -430,12 +432,28 @@ async function seed() {
            membership_version
          ) VALUES
            ($1,$2,$3,'MEMBER','ACTIVE','fr-FR',NULL,1),
-           ($1,$2,$4,'MEMBER','ACTIVE','es-CO',NULL,1)`,
+           ($1,$2,$4,'MEMBER','ACTIVE',NULL,NULL,1)`,
         [
           ids.tenantId,
           ids.conversationId,
           ids.senderUserId,
           ids.recipientUserId,
+        ],
+      );
+
+      await db.query(
+        `INSERT INTO user_language_preferences(
+           tenant_id,
+           user_id,
+           target_language_tag,
+           target_locale_override,
+           preference_version,
+           updated_at
+         ) VALUES ($1,$2,'es','es-CO',1,$3)`,
+        [
+          ids.tenantId,
+          ids.recipientUserId,
+          NOW,
         ],
       );
 
@@ -547,6 +565,10 @@ async function cleanup() {
           ids.recipientUserId,
           ids.tenantAdminUserId,
         ],
+      );
+      await db.query(
+        "DELETE FROM user_language_preferences WHERE tenant_id = $1",
+        tenant,
       );
       await db.query(
         "DELETE FROM tenant_memberships WHERE tenant_id = $1",
@@ -3015,6 +3037,177 @@ try {
     assert.equal(Number(translated.rows[0].count), 0);
   });
 
+  runtimeNow = "2026-10-05T09:21:12.000Z";
+
+  const staleLanguageAccepted =
+    await runtime.sendService.sendMessage(
+      sender,
+      {
+        protocol_version: 1,
+        command_id: ids.staleLanguageCommandId,
+        client_message_id:
+          ids.staleLanguageClientMessageId,
+        conversation_id: ids.conversationId,
+        source: {
+          text: "Le profil de langue change.",
+          language_hint: "fr-FR",
+        },
+        client_authored_at: NOW,
+      },
+    );
+
+  assert.equal(
+    staleLanguageAccepted.status,
+    "ACCEPTED",
+  );
+  assert.equal(
+    await runtime.translationWorker.runFanoutOnce(),
+    "FANOUT_DONE",
+  );
+
+  await withConnection(async (db) => {
+    const execution = await db.query(
+      `SELECT status,
+              target_language_tag,
+              target_profile_version
+         FROM translation_executions
+        WHERE tenant_id = $1
+          AND source_message_id = $2
+          AND recipient_user_id = $3`,
+      [
+        ids.tenantId,
+        staleLanguageAccepted.message_id,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(execution.rowCount, 1);
+    assert.equal(execution.rows[0].status, "PENDING");
+    assert.equal(
+      execution.rows[0].target_language_tag,
+      TARGET_LANGUAGE,
+    );
+    assert.equal(
+      Number(
+        execution.rows[0].target_profile_version,
+      ),
+      1,
+    );
+
+    const membership = await db.query(
+      `SELECT target_language_tag,
+              target_locale_override,
+              membership_version
+         FROM conversation_members
+        WHERE tenant_id = $1
+          AND conversation_id = $2
+          AND user_id = $3`,
+      [
+        ids.tenantId,
+        ids.conversationId,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(membership.rowCount, 1);
+    assert.equal(
+      membership.rows[0].target_language_tag,
+      null,
+    );
+    assert.equal(
+      membership.rows[0].target_locale_override,
+      null,
+    );
+    assert.equal(
+      Number(membership.rows[0].membership_version),
+      1,
+    );
+  });
+
+  runtimeNow = "2026-10-05T09:21:12.100Z";
+
+  const preferenceUpdate =
+    await runtime.userLanguagePreferenceService.update(
+      recipient,
+      {
+        target_language: "es",
+        target_locale: "es-MX",
+      },
+    );
+
+  assert.deepEqual(preferenceUpdate, {
+    changed: true,
+    preference_version: 2,
+    target_profile_updates: 1,
+  });
+
+  await withConnection(async (db) => {
+    const preference = await db.query(
+      `SELECT target_language_tag,
+              target_locale_override,
+              preference_version
+         FROM user_language_preferences
+        WHERE tenant_id = $1
+          AND user_id = $2`,
+      [ids.tenantId, ids.recipientUserId],
+    );
+    assert.equal(preference.rowCount, 1);
+    assert.equal(
+      preference.rows[0].target_language_tag,
+      "es",
+    );
+    assert.equal(
+      preference.rows[0].target_locale_override,
+      "es-MX",
+    );
+    assert.equal(
+      Number(preference.rows[0].preference_version),
+      2,
+    );
+
+    const membership = await db.query(
+      `SELECT membership_version
+         FROM conversation_members
+        WHERE tenant_id = $1
+          AND conversation_id = $2
+          AND user_id = $3`,
+      [
+        ids.tenantId,
+        ids.conversationId,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(membership.rowCount, 1);
+    assert.equal(
+      Number(membership.rows[0].membership_version),
+      2,
+    );
+  });
+
+  assert.equal(
+    await runtime.translationWorker.runExecuteOnce(),
+    "SUPERSEDED",
+  );
+  assert.equal(providerCalls, 15);
+
+  await withConnection(async (db) => {
+    const execution = await db.query(
+      `SELECT status
+         FROM translation_executions
+        WHERE tenant_id = $1
+          AND source_message_id = $2
+          AND recipient_user_id = $3`,
+      [
+        ids.tenantId,
+        staleLanguageAccepted.message_id,
+        ids.recipientUserId,
+      ],
+    );
+    assert.equal(execution.rowCount, 1);
+    assert.equal(
+      execution.rows[0].status,
+      "SUPERSEDED",
+    );
+  });
+
   process.stdout.write(
     "POSTGRES_TRANSLATION_E2E=PASS " +
     "send=accepted fanout=done execute=done " +
@@ -3035,6 +3228,8 @@ try {
     "episode-semantic=continued-across-temporal-gap " +
     "conversation_policy_version=stable " +
     "tenant_policy_version=stale-context-superseded " +
+    "user-language=default-fallback " +
+    "target-profile=language-change-superseded " +
     "t2=confirmed-correction-context " +
     "hpke=original+translation sync=2 ack=purged " +
     "erasure_epoch=stale-context-superseded\n",

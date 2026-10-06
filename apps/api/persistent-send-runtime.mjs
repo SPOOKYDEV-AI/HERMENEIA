@@ -26,6 +26,9 @@ import {
   PostgresTranslationFeedbackRepository,
 } from "../../.build/packages/persistence-postgres/src/translation-feedback.js";
 import {
+  PostgresUserLanguagePreferenceRepository,
+} from "../../.build/packages/persistence-postgres/src/user-language-preferences.js";
+import {
   SqlTransactionManager,
 } from "../../.build/packages/persistence/src/index.js";
 import {
@@ -67,6 +70,9 @@ import {
 import {
   createPostgresTranslationFeedbackService,
 } from "../../.build/packages/runtime/src/persistent-translation-feedback.js";
+import {
+  createPostgresUserLanguagePreferenceService,
+} from "../../.build/packages/runtime/src/persistent-user-language-preferences.js";
 import {
   InMemoryTransientSourceStore,
 } from "../../.build/packages/transient-source/src/index.js";
@@ -333,6 +339,10 @@ export async function createPersistentSendRuntime({
       new PostgresTranslationFeedbackRepository(
         transactions,
       );
+    const userLanguagePreferenceRepository =
+      new PostgresUserLanguagePreferenceRepository(
+        transactions,
+      );
     const contextStateStrategyVersion =
       "context-state-v1";
 
@@ -426,6 +436,12 @@ export async function createPersistentSendRuntime({
         clock,
         noteFingerprinter: fingerprinter,
       });
+
+    const userLanguagePreferenceService =
+      createPostgresUserLanguagePreferenceService(
+        transactions,
+        clock,
+      );
 
     const translationService =
       createPostgresTranslationExecutionService({
@@ -589,6 +605,7 @@ export async function createPersistentSendRuntime({
       correctionService,
       tenantPolicyService,
       translationFeedbackService,
+      userLanguagePreferenceService,
       contextStateWorker,
       contextRuntime,
       readinessService,
@@ -603,6 +620,7 @@ export async function createPersistentSendRuntime({
       contextCorrectionRepository,
       tenantContextPolicyRepository,
       translationFeedbackRepository,
+      userLanguagePreferenceRepository,
       sessionRepository,
       transientSources,
       sqlPool,

@@ -1092,9 +1092,6 @@ components:
           $ref: '#/components/schemas/LanguageTag'
         target_locale:
           $ref: '#/components/schemas/LanguageTag'
-        preferred_register:
-          type: string
-          enum: [NEUTRAL, FORMAL, INFORMAL]
     RegisterDeviceRequest:
       type: object
       additionalProperties: false

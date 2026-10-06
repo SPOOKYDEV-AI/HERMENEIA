@@ -188,6 +188,7 @@ export function createHermeneiaHttpServer({
   correctionService = null,
   tenantPolicyService = null,
   translationFeedbackService = null,
+  userLanguagePreferenceService = null,
   deviceService = null,
   readinessService = null,
 }) {
@@ -220,6 +221,15 @@ export function createHermeneiaHttpServer({
       "translationRecoveryService.resupplySource and retryTranslation are required",
     );
   }
+  if (
+    userLanguagePreferenceService !== null &&
+    typeof userLanguagePreferenceService.update !== "function"
+  ) {
+    throw new TypeError(
+      "userLanguagePreferenceService.update is required",
+    );
+  }
+
   if (
     correctionService !== null &&
     typeof correctionService.createCorrection !== "function"
@@ -560,6 +570,47 @@ export function createHermeneiaHttpServer({
         });
 
         return json(res, 200, result);
+      }
+
+      if (
+        req.method === "PUT" &&
+        requestUrl.pathname ===
+          "/v1/me/language-preferences"
+      ) {
+        if (!userLanguagePreferenceService) {
+          throw new HttpError(
+            503,
+            "INTERNAL_ERROR",
+            "Language preference service unavailable",
+            true,
+          );
+        }
+
+        const body = await readJson(req);
+        if (
+          typeof body.target_language !== "string" ||
+          (
+            body.target_locale !== undefined &&
+            body.target_locale !== null &&
+            typeof body.target_locale !== "string"
+          )
+        ) {
+          throw new HttpError(
+            400,
+            "INVALID_COMMAND",
+            "Invalid language preference payload",
+          );
+        }
+
+        await userLanguagePreferenceService.update(
+          actor,
+          {
+            target_language: body.target_language,
+            target_locale:
+              body.target_locale ?? null,
+          },
+        );
+        return noContent(res);
       }
 
       if (
