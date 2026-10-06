@@ -52,7 +52,7 @@ const actor = {
   deviceId: "device-1",
 };
 
-test("language preference authority requires active tenant membership and actor device", async () => {
+test("language preference authority serializes user updates while protecting device state", async () => {
   const { repository, connection } =
     repositoryWith([{
       rows: [{ "?column?": 1 }],
@@ -68,7 +68,7 @@ test("language preference authority requires active tenant membership and actor 
   const query = connection.queries[1];
   assert.match(query.text, /tm\.status = 'ACTIVE'/);
   assert.match(query.text, /d\.status = 'ACTIVE'/);
-  assert.match(query.text, /FOR SHARE OF tm, d/);
+  assert.match(query.text, /FOR UPDATE OF tm/);\n  assert.match(query.text, /FOR SHARE OF d/);
 });
 
 test("language preference row contains no durable style/register field", async () => {
