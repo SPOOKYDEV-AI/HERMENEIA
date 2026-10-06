@@ -21,7 +21,7 @@ export type RecoveryCheckpointCaptureResult =
   | "STALE"
   | "ALREADY_CAPTURED";
 
-interface RecoveryCheckpointRow {
+interface RecoveryCheckpointRow extends Record<string, unknown> {
   tenant_id: UUID;
   conversation_id: UUID;
   checkpoint_version: number;
