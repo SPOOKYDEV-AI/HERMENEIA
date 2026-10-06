@@ -3070,6 +3070,29 @@ try {
     staleLanguageAccepted.status,
     "ACCEPTED",
   );
+
+  const staleLanguageOpSeq =
+    await withConnection(async (db) => {
+      const revision = await db.query(
+        `SELECT op_seq
+           FROM message_revisions
+          WHERE tenant_id = $1
+            AND message_id = $2
+            AND revision = $3`,
+        [
+          ids.tenantId,
+          staleLanguageAccepted.message_id,
+          staleLanguageAccepted.source_revision,
+        ],
+      );
+      assert.equal(revision.rowCount, 1);
+      return Number(revision.rows[0].op_seq);
+    });
+  assert.ok(
+    Number.isInteger(staleLanguageOpSeq) &&
+      staleLanguageOpSeq >= 1,
+  );
+
   assert.equal(
     await runtime.translationWorker.runFanoutOnce(),
     "FANOUT_DONE",
@@ -3238,7 +3261,7 @@ try {
 
     if (
       prefix >=
-      Number(staleLanguageAccepted.op_seq)
+      staleLanguageOpSeq
     ) {
       break;
     }
@@ -3272,7 +3295,7 @@ try {
       Number(
         state.rows[0].processed_prefix_sequence,
       ),
-      Number(staleLanguageAccepted.op_seq),
+      staleLanguageOpSeq,
     );
 
     const checkpoints = await db.query(
@@ -3292,7 +3315,7 @@ try {
         checkpoints.rows[0]
           .processed_prefix_sequence,
       ),
-      Number(staleLanguageAccepted.op_seq),
+      staleLanguageOpSeq,
     );
 
     recoveryCheckpoint =
